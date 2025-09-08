@@ -1,11 +1,12 @@
-# Railway Deployment Configuration
-# This file tells Railway how to deploy your FastAPI app
+# Alternative Railway Configuration (Simpler)
+# Use this version if the main railway.toml doesn't work
 
 [build]
 builder = "NIXPACKS"
 
 [deploy]
-startCommand = "cd src && python3 app.py"
+# Simple approach - just run the app.py directly
+startCommand = "python3 src/app.py"
 healthcheckPath = "/health"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
@@ -13,6 +14,5 @@ restartPolicyMaxRetries = 10
 
 [env]
 # Railway will automatically set PORT
-# Add your environment variables in Railway dashboard
 DEBUG = "False"
 CORS_ORIGIN = "*"
