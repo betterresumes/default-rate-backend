@@ -1,18 +1,12 @@
-# Alternative Railway Configuration (Shell Script)
-# Use this version if the main railway.toml doesn't work
-
 [build]
-builder = "NIXPACKS"
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
 
 [deploy]
-# Use shell script approach
-startCommand = "./start.sh"
+startCommand = "python3 src/app.py"
 healthcheckPath = "/health"
 healthcheckTimeout = 300
-restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 10
+restartPolicyType = "always"
 
-[env]
-# Railway will automatically set PORT
-DEBUG = "False"
-CORS_ORIGIN = "*"
+[environments.production]
+variables = { DEBUG = "False", CORS_ORIGIN = "*", PYTHONUNBUFFERED = "1" }

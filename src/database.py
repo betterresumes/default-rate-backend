@@ -92,8 +92,12 @@ class DefaultRatePrediction(Base):
 
 # Database setup
 def get_database_url():
-    # For PostgreSQL (Neon) - Update this with your actual database URL
-    return os.getenv("DATABASE_URL", "postgresql://neondb_owner:npg_2ZLE4VuBytOa@ep-crimson-cell-adrxvu8a-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require")
+    # Railway will provide DATABASE_URL automatically
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        # Fallback for local development
+        database_url = "postgresql://neondb_owner:npg_2ZLE4VuBytOa@ep-crimson-cell-adrxvu8a-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require"
+    return database_url
 
 # Create engine once at module level with connection pooling
 engine = create_engine(

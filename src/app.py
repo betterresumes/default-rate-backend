@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
+from contextlib import asynccontextmanager
 import os
 import uvicorn
 from dotenv import load_dotenv
@@ -15,43 +16,8 @@ from database import create_tables
 # Import routers
 from routers import companies, predictions
 
-# Create FastAPI app with performance optimizations
-app = FastAPI(
-    title="Financial Default Risk Prediction API",
-    description="FastAPI server for predicting corporate default risk using machine learning",
-    version="1.0.0",
-    docs_url="/docs" if os.getenv("DEBUG", "False").lower() == "true" else None,
-    redoc_url="/redoc" if os.getenv("DEBUG", "False").lower() == "true" else None
-)
-
-# Add gzip compression middleware for better performance
-app.add_middleware(GZipMiddleware, minimum_size=1000)
-
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[os.getenv("CORS_ORIGIN", "http://localhost:3000")],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Include routers
-app.include_router(
-    companies.router,
-    prefix="/api/companies",
-    tags=["companies"]
-)
-
-app.include_router(
-    predictions.router,
-    prefix="/api/predictions",
-    tags=["predictions"]
-)
-
-
-@app.on_event("startup")
-async def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     """Initialize database tables and pre-load ML models on startup"""
     print("🚀 Starting FastAPI server...")
     print("📊 Initializing database...")
@@ -81,6 +47,46 @@ async def startup_event():
         print("✅ ML models pre-loaded successfully")
     except Exception as e:
         print(f"⚠️ ML model pre-loading warning: {e}")
+    
+    yield
+    
+    # Cleanup code (if needed)
+    print("🛑 Shutting down FastAPI server...")
+
+# Create FastAPI app with performance optimizations
+app = FastAPI(
+    title="Financial Default Risk Prediction API",
+    description="FastAPI server for predicting corporate default risk using machine learning",
+    version="1.0.0",
+    docs_url="/docs" if os.getenv("DEBUG", "False").lower() == "true" else None,
+    redoc_url="/redoc" if os.getenv("DEBUG", "False").lower() == "true" else None,
+    lifespan=lifespan
+)
+
+# Add gzip compression middleware for better performance
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[os.getenv("CORS_ORIGIN", "http://localhost:3000")],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include routers
+app.include_router(
+    companies.router,
+    prefix="/api/companies",
+    tags=["companies"]
+)
+
+app.include_router(
+    predictions.router,
+    prefix="/api/predictions",
+    tags=["predictions"]
+)
 
 
 @app.get("/")
@@ -131,5 +137,6 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=port,
         reload=debug,
-        log_level="info" if not debug else "debug"
+        log_level="info" if not debug else "debug",
+        access_log=True
     )
