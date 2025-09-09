@@ -95,6 +95,7 @@ async def predict_default_rate(
         return {
             "success": True,
             "message": "New prediction generated",
+            "id": company.id,
             "company": {
                 "symbol": company.symbol,
                 "name": company.name,
