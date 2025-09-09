@@ -10,17 +10,6 @@ import os
 
 Base = declarative_base()
 
-class Sector(Base):
-    __tablename__ = "sectors"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, index=True, nullable=False)
-    slug = Column(String, unique=True, index=True, nullable=False)
-    description = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=func.now())
-    
-    # Relationships
-    companies = relationship("Company", back_populates="sector")
 
 class Company(Base):
     __tablename__ = "companies"
@@ -32,11 +21,8 @@ class Company(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
-    # Foreign Keys
-    sector_id = Column(Integer, ForeignKey("sectors.id"), nullable=True)
-    
-    # Relationships
-    sector = relationship("Sector", back_populates="companies")
+    # Direct sector field instead of foreign key
+    sector = Column(String, nullable=True)
     ratios = relationship("FinancialRatio", back_populates="company", cascade="all, delete-orphan")
     predictions = relationship("DefaultRatePrediction", back_populates="company", cascade="all, delete-orphan")
 

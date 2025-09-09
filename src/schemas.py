@@ -4,23 +4,6 @@ from datetime import datetime
 from decimal import Decimal
 
 
-class SectorBase(BaseModel):
-    name: str
-    slug: str
-    description: Optional[str] = None
-
-
-class SectorCreate(BaseModel):
-    name: str = Field(..., min_length=1, max_length=100)
-    description: Optional[str] = Field(None, max_length=500)
-
-
-class Sector(SectorBase):
-    id: int
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 class FinancialRatioBase(BaseModel):
@@ -75,18 +58,17 @@ class CompanyBase(BaseModel):
     symbol: str = Field(..., min_length=1, max_length=10)
     name: str = Field(..., min_length=1, max_length=200)
     market_cap: Optional[float] = None
-    sector_id: Optional[int] = None
+    sector: Optional[str] = None
 
 
 class CompanyCreate(CompanyBase):
-    sector: Optional[str] = None  # Sector name, will be resolved to sector_id
+    pass
 
 
 class Company(CompanyBase):
     id: int
     created_at: datetime
     updated_at: datetime
-    sector: Optional[Sector] = None
     ratios: List[FinancialRatio] = []
     predictions: List[DefaultRatePrediction] = []
 

@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import and_, or_, desc
-from .database import Company, Sector, FinancialRatio, DefaultRatePrediction
-from .schemas import CompanyCreate, SectorCreate, PredictionRequest
+from .database import Company, FinancialRatio, DefaultRatePrediction
+from .schemas import CompanyCreate, PredictionRequest
 from typing import Optional, List
 from datetime import datetime, timedelta
 
@@ -25,14 +25,13 @@ class CompanyService:
 
         # Use eager loading to avoid N+1 queries
         query = self.db.query(Company).options(
-            joinedload(Company.sector),
             selectinload(Company.ratios),
             selectinload(Company.predictions)
         )
 
         # Apply filters
         if sector:
-            query = query.join(Sector).filter(Sector.slug == sector)
+            query = query.filter(Company.sector.ilike(f"%{sector}%"))
 
         if search:
             search_filter = or_(
@@ -55,64 +54,7 @@ class CompanyService:
         # Get total count (use a separate simpler query for count to avoid loading relationships)
         count_query = self.db.query(Company)
         if sector:
-            count_query = count_query.join(Sector).filter(Sector.slug == sector)
-        if search:
-            search_filter = or_(
-                Company.name.ilike(f"%{search}%"),
-                Company.symbol.ilike(f"%{search}%")
-            )
-            count_query = count_query.filter(search_filter)
-        total = count_query.count()
-
-        # Apply pagination
-        companies = query.offset(skip).limit(take).all()
-
-        return {
-            "companies": companies,
-            "pagination": {
-                "page": page,
-                "limit": take,
-                "total": total,
-                "pages": (total + take - 1) // take,
-                "has_next": skip + take < total,
-                "has_prev": page > 1
-            }
-        }
-        """Get paginated list of companies with minimal data (no ratios/predictions)"""
-        skip = (page - 1) * limit
-        take = min(limit, 100)  # Max 100 per page
-
-        # Only load sector relationship, skip ratios and predictions
-        query = self.db.query(Company).options(
-            joinedload(Company.sector)
-        )
-
-        # Apply filters
-        if sector:
-            query = query.join(Sector).filter(Sector.slug == sector)
-
-        if search:
-            search_filter = or_(
-                Company.name.ilike(f"%{search}%"),
-                Company.symbol.ilike(f"%{search}%")
-            )
-            query = query.filter(search_filter)
-
-        # Apply sorting
-        valid_sort_fields = ["name", "symbol", "market_cap", "created_at"]
-        if sort_by in valid_sort_fields:
-            sort_column = getattr(Company, sort_by)
-            if sort_order == "desc":
-                query = query.order_by(desc(sort_column))
-            else:
-                query = query.order_by(sort_column)
-        else:
-            query = query.order_by(Company.name)
-
-        # Get total count (use a separate simpler query for count)
-        count_query = self.db.query(Company)
-        if sector:
-            count_query = count_query.join(Sector).filter(Sector.slug == sector)
+            count_query = count_query.filter(Company.sector.ilike(f"%{sector}%"))
         if search:
             search_filter = or_(
                 Company.name.ilike(f"%{search}%"),
@@ -139,44 +81,22 @@ class CompanyService:
     def get_company_by_id(self, company_id: int):
         """Get company by ID with related data"""
         return self.db.query(Company).options(
-            joinedload(Company.sector),
             selectinload(Company.ratios),
             selectinload(Company.predictions)
         ).filter(Company.id == company_id).first()
 
     def get_company_by_symbol(self, symbol: str):
         """Get company by symbol (lightweight for predictions)"""
-        return self.db.query(Company).options(
-            joinedload(Company.sector)
-        ).filter(Company.symbol == symbol.upper()).first()
+        return self.db.query(Company).filter(Company.symbol == symbol.upper()).first()
 
     def create_company(self, company_data: CompanyCreate):
         """Create a new company"""
-        # Handle sector
-        sector_id = None
-        if company_data.sector:
-            sector = self.db.query(Sector).filter(
-                Sector.name.ilike(f"%{company_data.sector}%")
-            ).first()
-            
-            if not sector:
-                # Create new sector
-                sector_slug = company_data.sector.lower().replace(" ", "-")
-                sector = Sector(
-                    name=company_data.sector,
-                    slug=sector_slug
-                )
-                self.db.add(sector)
-                self.db.flush()  # Get the ID
-            
-            sector_id = sector.id
-
         # Create company
         company = Company(
             symbol=company_data.symbol.upper(),
             name=company_data.name,
             market_cap=company_data.market_cap,
-            sector_id=sector_id
+            sector=company_data.sector
         )
         
         self.db.add(company)
@@ -186,40 +106,6 @@ class CompanyService:
         return company
 
 
-class SectorService:
-    def __init__(self, db: Session):
-        self.db = db
-
-    def get_sectors(self):
-        """Get all sectors with company count"""
-        return self.db.query(Sector).options(
-            selectinload(Sector.companies)
-        ).order_by(Sector.name).all()
-
-    def create_sector(self, sector_data: SectorCreate):
-        """Create a new sector"""
-        # Generate slug
-        slug = sector_data.name.lower().replace(" ", "-").replace("_", "-")
-        
-        # Check if sector already exists
-        existing = self.db.query(Sector).filter(
-            or_(Sector.name.ilike(sector_data.name), Sector.slug == slug)
-        ).first()
-        
-        if existing:
-            raise ValueError("Sector with this name already exists")
-
-        sector = Sector(
-            name=sector_data.name.strip(),
-            slug=slug,
-            description=sector_data.description.strip() if sector_data.description else None
-        )
-        
-        self.db.add(sector)
-        self.db.commit()
-        self.db.refresh(sector)
-        
-        return sector
 
 
 class PredictionService:

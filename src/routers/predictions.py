@@ -34,7 +34,7 @@ async def predict_default_rate(
 
         if not company:
             # Create new company
-            from schemas import CompanyCreate
+            from ..schemas import CompanyCreate
             company_data = CompanyCreate(
                 symbol=request.stock_symbol,
                 name=request.company_name,
@@ -53,7 +53,7 @@ async def predict_default_rate(
                 "company": {
                     "symbol": company.symbol,
                     "name": company.name,
-                    "sector": company.sector.name if company.sector else None
+                    "sector": company.sector
                 },
                 "prediction": {
                     "risk_level": recent_prediction.risk_level,
@@ -97,7 +97,7 @@ async def predict_default_rate(
             "company": {
                 "symbol": company.symbol,
                 "name": company.name,
-                "sector": company.sector.name if company.sector else None
+                "sector": company.sector
             },
             "prediction": {
                 "risk_level": prediction_result["risk_level"],

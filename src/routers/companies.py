@@ -2,10 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..schemas import (
-    Company, CompanyCreate, Sector, SectorCreate, 
+    Company, CompanyCreate, 
     PaginatedResponse, ErrorResponse
 )
-from ..services import CompanyService, SectorService
+from ..services import CompanyService
 from typing import Optional
 from datetime import datetime
 
@@ -19,55 +19,6 @@ def serialize_datetime(dt):
     if isinstance(dt, datetime):
         return dt.isoformat()
     return dt
-
-
-@router.get("/sectors", response_model=PaginatedResponse)
-async def get_sectors(db: Session = Depends(get_db)):
-    """Get all sectors with company count"""
-    try:
-        service = SectorService(db)
-        sectors = service.get_sectors()
-        
-        return PaginatedResponse(
-            success=True,
-            data={"sectors": [
-                {
-                    "id": sector.id,
-                    "name": sector.name,
-                    "slug": sector.slug,
-                    "description": sector.description,
-                    "created_at": serialize_datetime(sector.created_at),
-                    "company_count": len(sector.companies)
-                } for sector in sectors
-            ]}
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch sectors: {str(e)}")
-
-
-@router.post("/sectors", response_model=dict)
-async def add_sector(sector_data: SectorCreate, db: Session = Depends(get_db)):
-    """Create a new sector"""
-    try:
-        service = SectorService(db)
-        sector = service.create_sector(sector_data)
-        
-        return {
-            "success": True,
-            "message": "Sector created successfully",
-            "data": {
-                "id": sector.id,
-                "name": sector.name,
-                "slug": sector.slug,
-                "description": sector.description,
-                "created_at": serialize_datetime(sector.created_at),
-                "company_count": 0
-            }
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create sector: {str(e)}")
 
 
 @router.get("/", response_model=PaginatedResponse)
@@ -122,11 +73,7 @@ async def get_companies(
                 "market_cap": float(company.market_cap) if company.market_cap else None,
                 "created_at": serialize_datetime(company.created_at),
                 "updated_at": serialize_datetime(company.updated_at),
-                "sector": {
-                    "id": company.sector.id,
-                    "name": company.sector.name,
-                    "slug": company.sector.slug
-                } if company.sector else None,
+                "sector": company.sector,
                 "recent_ratios": recent_ratios,
                 "recent_predictions": recent_predictions
             }
@@ -159,12 +106,7 @@ async def get_company_by_id(company_id: int, db: Session = Depends(get_db)):
                 "market_cap": float(company.market_cap) if company.market_cap else None,
                 "created_at": serialize_datetime(company.created_at),
                 "updated_at": serialize_datetime(company.updated_at),
-                "sector": {
-                    "id": company.sector.id,
-                    "name": company.sector.name,
-                    "slug": company.sector.slug,
-                    "description": company.sector.description
-                } if company.sector else None,
+                "sector": company.sector,
                 "ratios": [
                     {
                         "id": ratio.id,
