@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from database import get_db
-from schemas import PredictionRequest, PredictionResponse
-from services import CompanyService, PredictionService
-from ml_service import ml_service
+from ..database import get_db
+from ..schemas import PredictionRequest, PredictionResponse
+from ..services import CompanyService, PredictionService
+from ..ml_service import ml_service
 from typing import Dict
 from datetime import datetime
 

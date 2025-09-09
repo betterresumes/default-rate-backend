@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import and_, or_, desc
-from database import Company, Sector, FinancialRatio, DefaultRatePrediction
-from schemas import CompanyCreate, SectorCreate, PredictionRequest
+from .database import Company, Sector, FinancialRatio, DefaultRatePrediction
+from .schemas import CompanyCreate, SectorCreate, PredictionRequest
 from typing import Optional, List
 from datetime import datetime, timedelta
 

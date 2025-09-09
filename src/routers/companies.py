@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from database import get_db
-from schemas import (
+from ..database import get_db
+from ..schemas import (
     Company, CompanyCreate, Sector, SectorCreate, 
     PaginatedResponse, ErrorResponse
 )
-from services import CompanyService, SectorService
+from ..services import CompanyService, SectorService
 from typing import Optional
 from datetime import datetime
 

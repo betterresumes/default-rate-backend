@@ -11,10 +11,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import database setup
-from database import create_tables
+from .database import create_tables
 
 # Import routers
-from routers import companies, predictions
+from .routers import companies, predictions
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
