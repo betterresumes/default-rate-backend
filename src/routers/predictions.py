@@ -56,6 +56,22 @@ async def predict_default_rate(
         recent_prediction = prediction_service.get_recent_prediction(company.id, 24)
         
         if recent_prediction:
+            # For cached predictions, still run through ML service to get enhanced features
+            ratios = {
+                "debt_to_equity_ratio": request.debt_to_equity_ratio,
+                "current_ratio": request.current_ratio,
+                "quick_ratio": request.quick_ratio,
+                "return_on_equity": request.return_on_equity,
+                "return_on_assets": request.return_on_assets,
+                "profit_margin": request.profit_margin,
+                "interest_coverage": request.interest_coverage,
+                "fixed_asset_turnover": request.fixed_asset_turnover,
+                "total_debt_ebitda": request.total_debt_ebitda
+            }
+            
+            # Get enhanced features from ML service
+            prediction_result = ml_service.predict_default_probability(ratios)
+            
             return {
                 "success": True,
                 "message": "Using cached prediction",
@@ -69,7 +85,13 @@ async def predict_default_rate(
                     "risk_level": recent_prediction.risk_level,
                     "confidence": float(recent_prediction.confidence),
                     "probability": float(recent_prediction.probability) if recent_prediction.probability else None,
-                    "predicted_at": serialize_datetime(recent_prediction.predicted_at)
+                    "predicted_at": serialize_datetime(recent_prediction.predicted_at),
+                    "model_features": prediction_result.get("model_features", {}),
+                    "raw_inputs": prediction_result.get("raw_inputs", {}),
+                    "historical_benchmarks": prediction_result.get("historical_benchmarks", {}),
+                    "model_info": {
+                        "model_type": "Logistic Regression"
+                    }
                 }
             }
 
@@ -116,6 +138,8 @@ async def predict_default_rate(
                 "probability": prediction_result["probability"],
                 "predicted_at": serialize_datetime(saved_prediction.predicted_at),
                 "model_features": prediction_result.get("model_features", {}),
+                "raw_inputs": prediction_result.get("raw_inputs", {}),
+                "historical_benchmarks": prediction_result.get("historical_benchmarks", {}),
                 "model_info": {
                     "model_type": "Logistic Regression"
                 }

@@ -115,7 +115,7 @@ class BulkPredictionItem(BaseModel):
     sector: Optional[str] = None
     market_cap: Optional[float] = None
     prediction: dict
-    status: str  # "success" or "error"
+    status: str 
     error_message: Optional[str] = None
 
 
@@ -144,7 +144,7 @@ class JobStatusResponse(BaseModel):
     """Schema for job status response"""
     success: bool
     job_id: str
-    status: str  # PENDING, PROGRESS, SUCCESS, FAILURE
+    status: str 
     message: str
     progress: Optional[dict] = None
     result: Optional[dict] = None

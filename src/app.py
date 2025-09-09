@@ -7,13 +7,10 @@ import os
 import uvicorn
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
-# Import database setup
 from .database import create_tables
 
-# Import routers
 from .routers import companies, predictions
 
 @asynccontextmanager
@@ -27,11 +24,9 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"❌ Database initialization error: {e}")
     
-    # Pre-load ML models to avoid cold start delays
     print("🤖 Pre-loading ML models...")
     try:
-        from ml_service import ml_service
-        # This ensures models are loaded into memory at startup
+        from .ml_service import ml_service
         test_ratios = {
             "debt_to_equity_ratio": 0.5,
             "current_ratio": 2.0,
@@ -50,10 +45,8 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    # Cleanup code (if needed)
     print("🛑 Shutting down FastAPI server...")
 
-# Create FastAPI app with performance optimizations
 app = FastAPI(
     title="Financial Default Risk Prediction API",
     description="FastAPI server for predicting corporate default risk using machine learning",
@@ -63,10 +56,8 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Add gzip compression middleware for better performance
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[os.getenv("CORS_ORIGIN", "http://localhost:3000")],
@@ -75,7 +66,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
 app.include_router(
     companies.router,
     prefix="/api/companies",

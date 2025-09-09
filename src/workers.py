@@ -15,7 +15,7 @@ def process_bulk_predictions(file_path: str) -> dict:
     processed = 0
     succeeded = 0
     failed = 0
-    errors = []  # Track errors for debugging
+    errors = []  
     try:
         df = pd.read_excel(file_path)
         required_cols = {"stock_symbol", "company_name"}
@@ -65,13 +65,13 @@ def process_bulk_predictions(file_path: str) -> dict:
                 db.rollback()
                 failed += 1
                 errors.append(f"Row {processed}: {str(e)}")
-                print(f"Error processing row {processed}: {e}")  # Debug logging
+                print(f"Error processing row {processed}: {e}")  
 
         return {
             "processed": processed, 
             "succeeded": succeeded, 
             "failed": failed,
-            "errors": errors[:5]  # Return first 5 errors for debugging
+            "errors": errors[:5] 
         }
     finally:
         try:

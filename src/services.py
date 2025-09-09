@@ -5,7 +5,6 @@ from .schemas import CompanyCreate, PredictionRequest
 from typing import Optional, List
 from datetime import datetime, timedelta
 
-
 class CompanyService:
     def __init__(self, db: Session):
         self.db = db
@@ -21,15 +20,13 @@ class CompanyService:
     ):
         """Get paginated list of companies with filtering and sorting"""
         skip = (page - 1) * limit
-        take = min(limit, 100)  # Max 100 per page
+        take = min(limit, 100) 
 
-        # Use eager loading to avoid N+1 queries
         query = self.db.query(Company).options(
             selectinload(Company.ratios),
             selectinload(Company.predictions)
         )
 
-        # Apply filters
         if sector:
             query = query.filter(Company.sector.ilike(f"%{sector}%"))
 
@@ -40,7 +37,6 @@ class CompanyService:
             )
             query = query.filter(search_filter)
 
-        # Apply sorting
         valid_sort_fields = ["name", "symbol", "market_cap", "created_at"]
         if sort_by in valid_sort_fields:
             sort_column = getattr(Company, sort_by)
@@ -51,7 +47,6 @@ class CompanyService:
         else:
             query = query.order_by(Company.name)
 
-        # Get total count (use a separate simpler query for count to avoid loading relationships)
         count_query = self.db.query(Company)
         if sector:
             count_query = count_query.filter(Company.sector.ilike(f"%{sector}%"))
@@ -63,7 +58,6 @@ class CompanyService:
             count_query = count_query.filter(search_filter)
         total = count_query.count()
 
-        # Apply pagination
         companies = query.offset(skip).limit(take).all()
 
         return {
@@ -91,7 +85,6 @@ class CompanyService:
 
     def create_company(self, company_data: CompanyCreate):
         """Create a new company"""
-        # Create company
         company = Company(
             symbol=company_data.symbol.upper(),
             name=company_data.name,
@@ -104,8 +97,6 @@ class CompanyService:
         self.db.refresh(company)
         
         return company
-
-
 
 
 class PredictionService:
@@ -140,7 +131,7 @@ class PredictionService:
         )
         
         self.db.add(prediction)
-        self.db.flush()  # Get ID without full commit
+        self.db.flush()
         return prediction
 
     def save_financial_ratios(self, company_id: int, ratios: dict):
@@ -150,20 +141,18 @@ class PredictionService:
         ).first()
 
         if existing_ratio:
-            # Update existing ratios
             for key, value in ratios.items():
                 if value is not None and hasattr(existing_ratio, key):
                     setattr(existing_ratio, key, value)
             existing_ratio.updated_at = datetime.utcnow()
             return existing_ratio
         else:
-            # Create new ratios record
             financial_ratio = FinancialRatio(
                 company_id=company_id,
                 **{k: v for k, v in ratios.items() if v is not None}
             )
             self.db.add(financial_ratio)
-            self.db.flush()  # Get ID without full commit
+            self.db.flush() 
             return financial_ratio
 
     def commit_transaction(self):

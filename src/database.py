@@ -10,7 +10,6 @@ import os
 
 Base = declarative_base()
 
-
 class Company(Base):
     __tablename__ = "companies"
     
@@ -21,7 +20,6 @@ class Company(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
-    # Direct sector field instead of foreign key
     sector = Column(String, nullable=True)
     ratios = relationship("FinancialRatio", back_populates="company", cascade="all, delete-orphan")
     predictions = relationship("DefaultRatePrediction", back_populates="company", cascade="all, delete-orphan")
@@ -45,7 +43,6 @@ class FinancialRatio(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
-    # Relationships
     company = relationship("Company", back_populates="ratios")
 
 class DefaultRatePrediction(Base):
@@ -58,7 +55,6 @@ class DefaultRatePrediction(Base):
     confidence = Column(Numeric(precision=5, scale=4), nullable=False)
     probability = Column(Numeric(precision=5, scale=4), nullable=True)
     
-    # Store the ratios used for this prediction
     debt_to_equity_ratio = Column(Numeric(precision=10, scale=4), nullable=True)
     current_ratio = Column(Numeric(precision=10, scale=4), nullable=True)
     quick_ratio = Column(Numeric(precision=10, scale=4), nullable=True)
@@ -73,29 +69,21 @@ class DefaultRatePrediction(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
-    # Relationships
     company = relationship("Company", back_populates="predictions")
 
-# Database setup
 def get_database_url():
-    # Railway will provide DATABASE_URL automatically
     database_url = os.getenv("DATABASE_URL")
-    if not database_url:
-        # Fallback for local development
-        database_url = "postgresql://neondb_owner:npg_2ZLE4VuBytOa@ep-crimson-cell-adrxvu8a-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require"
     return database_url
 
-# Create engine once at module level with connection pooling
 engine = create_engine(
     get_database_url(),
     pool_size=10,
     max_overflow=20,
     pool_pre_ping=True,
     pool_recycle=300,
-    echo=False  # Set to True for SQL debugging
+    echo=False  
 )
 
-# Create SessionLocal factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def create_database_engine():
@@ -107,7 +95,6 @@ def get_session_local():
 def create_tables():
     Base.metadata.create_all(bind=engine)
 
-# Dependency to get DB session
 def get_db():
     db = SessionLocal()
     try:
