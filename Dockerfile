@@ -34,4 +34,4 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
 
 # Run the application
 WORKDIR /app
-CMD ["python3", "src/app.py"]
+CMD ["python3", "-m", "src.app"]

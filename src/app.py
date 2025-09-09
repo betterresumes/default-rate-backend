@@ -133,7 +133,7 @@ if __name__ == "__main__":
     print(f"📚 API docs: http://localhost:{port}/docs")
     
     uvicorn.run(
-        "app:app",
+        "src.app:app",
         host="0.0.0.0",
         port=port,
         reload=debug,

@@ -3,7 +3,7 @@ builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "python3 src/app.py"
+startCommand = "python3 -m src.app"
 healthcheckPath = "/health"
 healthcheckTimeout = 300
 restartPolicyType = "always"
