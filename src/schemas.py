@@ -109,3 +109,25 @@ class ErrorResponse(BaseModel):
     success: bool = False
     error: str
     details: Optional[str] = None
+
+
+class BulkPredictionItem(BaseModel):
+    """Schema for individual company prediction result in bulk upload"""
+    stock_symbol: str
+    company_name: str
+    sector: Optional[str] = None
+    market_cap: Optional[float] = None
+    prediction: dict
+    status: str  # "success" or "error"
+    error_message: Optional[str] = None
+
+
+class BulkPredictionResponse(BaseModel):
+    """Schema for bulk upload response"""
+    success: bool
+    message: str
+    total_companies: int
+    successful_predictions: int
+    failed_predictions: int
+    results: List[BulkPredictionItem]
+    processing_time: float
