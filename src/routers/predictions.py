@@ -51,6 +51,7 @@ async def predict_default_rate(
                 "success": True,
                 "message": "Using cached prediction",
                 "company": {
+                    "id": company.id,
                     "symbol": company.symbol,
                     "name": company.name,
                     "sector": company.sector
