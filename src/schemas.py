@@ -3,9 +3,6 @@ from typing import Optional, List
 from datetime import datetime
 from decimal import Decimal
 
-
-
-
 class FinancialRatioBase(BaseModel):
     debt_to_equity_ratio: Optional[float] = None
     current_ratio: Optional[float] = None
@@ -131,3 +128,26 @@ class BulkPredictionResponse(BaseModel):
     failed_predictions: int
     results: List[BulkPredictionItem]
     processing_time: float
+
+
+class BulkJobResponse(BaseModel):
+    """Schema for bulk job submission response"""
+    success: bool
+    message: str
+    job_id: str
+    status: str
+    filename: str
+    estimated_processing_time: Optional[str] = None
+
+
+class JobStatusResponse(BaseModel):
+    """Schema for job status response"""
+    success: bool
+    job_id: str
+    status: str  # PENDING, PROGRESS, SUCCESS, FAILURE
+    message: str
+    progress: Optional[dict] = None
+    result: Optional[dict] = None
+    error: Optional[str] = None
+    created_at: Optional[float] = None
+    completed_at: Optional[float] = None

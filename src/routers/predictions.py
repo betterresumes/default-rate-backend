@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from ..database import get_db
-from ..schemas import PredictionRequest, PredictionResponse, BulkPredictionResponse, BulkPredictionItem
+from ..schemas import (
+    PredictionRequest, PredictionResponse, BulkPredictionResponse, 
+    BulkPredictionItem, BulkJobResponse, JobStatusResponse
+)
 from ..services import CompanyService, PredictionService
 from ..ml_service import ml_service
 from typing import Dict, List
@@ -9,6 +12,9 @@ from datetime import datetime
 import pandas as pd
 import io
 import time
+import os
+import uuid
+from pathlib import Path
 
 router = APIRouter()
 
@@ -301,6 +307,243 @@ async def bulk_predict_from_excel(
             status_code=500,
             detail={
                 "error": "Bulk prediction failed",
+                "details": str(e)
+            }
+        )
+
+
+@router.post("/bulk-predict-async", response_model=BulkJobResponse)
+async def bulk_predict_async(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Submit a bulk prediction job that runs in the background.
+    Returns a job ID that can be used to check status and retrieve results.
+    
+    This endpoint is recommended for large Excel files (>100 companies) to avoid timeouts.
+    """
+    # Validate file type
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(
+            status_code=400,
+            detail="File must be an Excel file (.xlsx or .xls)"
+        )
+    
+    try:
+        # Create upload directory if it doesn't exist
+        upload_dir = Path("/tmp/bulk_uploads")
+        upload_dir.mkdir(exist_ok=True)
+        
+        # Generate unique filename
+        job_id = str(uuid.uuid4())
+        file_extension = Path(file.filename).suffix
+        temp_filename = f"{job_id}{file_extension}"
+        temp_file_path = upload_dir / temp_filename
+        
+        # Save uploaded file
+        contents = await file.read()
+        with open(temp_file_path, "wb") as f:
+            f.write(contents)
+        
+        # Quick validation of file content
+        try:
+            df = pd.read_excel(temp_file_path)
+            company_count = len(df)
+            
+            # Validate required columns
+            required_columns = [
+                'stock_symbol', 'company_name', 'debt_to_equity_ratio', 
+                'current_ratio', 'quick_ratio', 'return_on_equity', 
+                'return_on_assets', 'profit_margin', 'interest_coverage', 
+                'fixed_asset_turnover', 'total_debt_ebitda'
+            ]
+            
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            if missing_columns:
+                # Cleanup file before raising error
+                os.remove(temp_file_path)
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Missing required columns: {', '.join(missing_columns)}"
+                )
+                
+        except pd.errors.EmptyDataError:
+            os.remove(temp_file_path)
+            raise HTTPException(
+                status_code=400,
+                detail="Excel file is empty or contains no data"
+            )
+        except Exception as e:
+            os.remove(temp_file_path)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid Excel file: {str(e)}"
+            )
+        
+        # Submit background task
+        from ..tasks import process_bulk_excel_task
+        task = process_bulk_excel_task.delay(str(temp_file_path), file.filename)
+        
+        # Estimate processing time (roughly 1-2 seconds per company)
+        estimated_time = f"{company_count * 1.5:.0f}-{company_count * 3:.0f} seconds"
+        if company_count > 100:
+            estimated_time = f"{company_count * 1.5 / 60:.1f}-{company_count * 3 / 60:.1f} minutes"
+        
+        return BulkJobResponse(
+            success=True,
+            message=f"Bulk prediction job submitted successfully. Processing {company_count} companies.",
+            job_id=task.id,
+            status="PENDING",
+            filename=file.filename,
+            estimated_processing_time=estimated_time
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Cleanup file if it exists
+        if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+        
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "Failed to submit bulk prediction job",
+                "details": str(e)
+            }
+        )
+
+
+@router.get("/job-status/{job_id}", response_model=JobStatusResponse)
+async def get_job_status(job_id: str):
+    """
+    Check the status of a bulk prediction job.
+    
+    Status values:
+    - PENDING: Job is waiting to be processed
+    - PROGRESS: Job is currently being processed
+    - SUCCESS: Job completed successfully
+    - FAILURE: Job failed
+    """
+    try:
+        from ..celery_app import celery_app
+        
+        # Get task result
+        task_result = celery_app.AsyncResult(job_id)
+        
+        if task_result.state == "PENDING":
+            return JobStatusResponse(
+                success=True,
+                job_id=job_id,
+                status="PENDING",
+                message="Job is waiting to be processed...",
+                progress=None,
+                result=None
+            )
+        
+        elif task_result.state == "PROGRESS":
+            progress_info = task_result.info or {}
+            return JobStatusResponse(
+                success=True,
+                job_id=job_id,
+                status="PROGRESS",
+                message=progress_info.get("status", "Processing..."),
+                progress={
+                    "current": progress_info.get("current", 0),
+                    "total": progress_info.get("total", 0),
+                    "filename": progress_info.get("filename", ""),
+                    "successful": progress_info.get("successful", 0),
+                    "failed": progress_info.get("failed", 0)
+                },
+                result=None
+            )
+        
+        elif task_result.state == "SUCCESS":
+            result_data = task_result.result
+            return JobStatusResponse(
+                success=True,
+                job_id=job_id,
+                status="SUCCESS",
+                message="Job completed successfully",
+                progress=None,
+                result=result_data,
+                completed_at=result_data.get("completed_at")
+            )
+        
+        elif task_result.state == "FAILURE":
+            error_info = task_result.info or {}
+            return JobStatusResponse(
+                success=False,
+                job_id=job_id,
+                status="FAILURE",
+                message="Job failed",
+                progress=None,
+                result=None,
+                error=error_info.get("error", str(task_result.info))
+            )
+        
+        else:
+            return JobStatusResponse(
+                success=True,
+                job_id=job_id,
+                status=task_result.state,
+                message=f"Job status: {task_result.state}",
+                progress=None,
+                result=None
+            )
+            
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "Failed to get job status",
+                "details": str(e)
+            }
+        )
+
+
+@router.get("/job-result/{job_id}")
+async def get_job_result(job_id: str):
+    """
+    Get the complete result of a completed bulk prediction job.
+    Only returns results for successfully completed jobs.
+    """
+    try:
+        from ..celery_app import celery_app
+        
+        task_result = celery_app.AsyncResult(job_id)
+        
+        if task_result.state == "SUCCESS":
+            return task_result.result
+        elif task_result.state == "PENDING":
+            raise HTTPException(
+                status_code=202,
+                detail="Job is still pending. Please check job status."
+            )
+        elif task_result.state == "PROGRESS":
+            raise HTTPException(
+                status_code=202,
+                detail="Job is still in progress. Please check job status."
+            )
+        elif task_result.state == "FAILURE":
+            raise HTTPException(
+                status_code=400,
+                detail="Job failed. Check job status for error details."
+            )
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail="Job not found or in unknown state"
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "Failed to get job result",
                 "details": str(e)
             }
         )
