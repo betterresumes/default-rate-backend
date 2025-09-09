@@ -3,7 +3,7 @@ builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "python3 -m src.app"
+startCommand = "chmod +x start_railway.sh && ./start_railway.sh"
 healthcheckPath = "/health"
 healthcheckTimeout = 300
 restartPolicyType = "always"
