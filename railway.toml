@@ -1,12 +1,33 @@
+# Main API Service
 [build]
 builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "chmod +x start_railway.sh && ./start_railway.sh"
+startCommand = "./scripts/start-railway.sh"
 healthcheckPath = "/health"
 healthcheckTimeout = 300
 restartPolicyType = "always"
 
 [environments.production]
-variables = { DEBUG = "False", CORS_ORIGIN = "*", PYTHONUNBUFFERED = "1" }
+variables = { 
+  DEBUG = "False", 
+  CORS_ORIGIN = "*", 
+  PYTHONUNBUFFERED = "1",
+  PYTHONPATH = "/app"
+}
+
+# Worker Service Configuration
+# This will need to be deployed as a separate service
+[services.worker]
+build.builder = "dockerfile"
+build.dockerfilePath = "Dockerfile"
+deploy.startCommand = "./scripts/start-worker.sh"
+deploy.restartPolicyType = "always"
+
+[services.worker.environments.production]
+variables = { 
+  DEBUG = "False", 
+  PYTHONUNBUFFERED = "1",
+  PYTHONPATH = "/app"
+}
