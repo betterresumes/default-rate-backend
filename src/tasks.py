@@ -2,6 +2,8 @@ import os
 import pandas as pd
 import time
 import traceback
+import io
+import base64
 from typing import Dict, Any
 from celery import current_task
 from .celery_app import celery_app
@@ -52,12 +54,12 @@ def send_password_reset_email_task(email: str, username: str, otp: str) -> bool:
 
 
 @celery_app.task(bind=True, name="src.tasks.process_bulk_excel_task")
-def process_bulk_excel_task(self, file_path: str, original_filename: str) -> Dict[str, Any]:
+def process_bulk_excel_task(self, file_content_b64: str, original_filename: str) -> Dict[str, Any]:
     """
     Background task to process Excel file with multiple companies for bulk predictions.
     
     Args:
-        file_path: Path to the uploaded Excel file
+        file_content_b64: Base64 encoded content of the uploaded Excel file
         original_filename: Original name of the uploaded file
         
     Returns:
@@ -85,7 +87,9 @@ def process_bulk_excel_task(self, file_path: str, original_filename: str) -> Dic
     total_companies = 0
     
     try:
-        df = pd.read_excel(file_path)
+        # Decode the base64 file content and read Excel
+        file_content = base64.b64decode(file_content_b64)
+        df = pd.read_excel(io.BytesIO(file_content))
         total_companies = len(df)
         
         required_columns = [
@@ -249,28 +253,3 @@ def process_bulk_excel_task(self, file_path: str, original_filename: str) -> Dic
             db.close()
         except Exception:
             pass
-            
-        try:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-                print(f"Cleaned up file: {file_path}")
-        except Exception as e:
-            print(f"Failed to cleanup file {file_path}: {e}")
-
-
-@celery_app.task(name="src.tasks.cleanup_old_files")
-def cleanup_old_files():
-    """Periodic task to cleanup old uploaded files (if any remain)"""
-    upload_dir = "/tmp/bulk_uploads"
-    if os.path.exists(upload_dir):
-        try:
-            for filename in os.listdir(upload_dir):
-                file_path = os.path.join(upload_dir, filename)
-                if os.path.isfile(file_path):
-                    if time.time() - os.path.getctime(file_path) > 3600:
-                        os.remove(file_path)
-                        print(f"Cleaned up old file: {file_path}")
-        except Exception as e:
-            print(f"Error during cleanup: {e}")
-    
-    return {"status": "cleanup_completed"}
