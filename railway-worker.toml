@@ -1,0 +1,17 @@
+# Railway Service Configuration for Celery Worker
+# Create a separate Railway service with this configuration
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "./scripts/start-worker.sh"
+restartPolicyType = "always"
+
+[environments.production]
+variables = { 
+  DEBUG = "False", 
+  PYTHONUNBUFFERED = "1",
+  PYTHONPATH = "/app"
+}
