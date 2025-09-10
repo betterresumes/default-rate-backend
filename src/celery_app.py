@@ -37,7 +37,9 @@ celery_app.conf.update(
     task_default_queue="bulk_predictions",
     task_routes={
         "src.tasks.process_bulk_excel_task": {"queue": "bulk_predictions"},
-    }
+    },
+    broker_connection_retry_on_startup=True,
+    broker_connection_retry=True
 )
 
 celery_app.conf.beat_schedule = {}
