@@ -146,8 +146,8 @@ app = FastAPI(
     title="Financial Default Risk Prediction API",
     description="FastAPI server for predicting corporate default risk using machine learning",
     version="1.0.0",
-    docs_url="/docs" if os.getenv("DEBUG", "False").lower() in ["true", "1", "yes"] else None,
-    redoc_url="/redoc" if os.getenv("DEBUG", "False").lower() in ["true", "1", "yes"] else None,
+    docs_url="/docs",
+    redoc_url="/redoc",
     lifespan=lifespan
 )
 
