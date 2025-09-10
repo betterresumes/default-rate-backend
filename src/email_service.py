@@ -21,23 +21,26 @@ class EmailService:
         """Send an email."""
         try:
             if not self.smtp_username or not self.smtp_password:
-                logger.warning("SMTP credentials not configured. Using console fallback for development.")
-                print(f"\n🔐 EMAIL DEBUG - OTP for {to_email}:")
-                print(f"📧 Subject: {subject}")
-                if "verification" in subject.lower() or "password" in subject.lower():
-                    # Extract OTP from HTML content
-                    import re
-                    otp_match = re.search(r'<div class="otp">(\d{6})</div>', html_content)
-                    if otp_match:
-                        otp = otp_match.group(1)
-                        print(f"🔑 OTP: {otp}")
-                        print(f"⏰ Valid for 10 minutes")
-                        print("="*50)
-                
-                # Return True in development mode so the process continues
+                logger.error("SMTP credentials not configured!")
+                # In development mode, show OTP in console
                 if os.getenv("DEBUG", "false").lower() == "true":
+                    logger.warning("DEBUG MODE: Using console fallback for development.")
+                    print(f"\n🔐 EMAIL DEBUG - OTP for {to_email}:")
+                    print(f"📧 Subject: {subject}")
+                    if "verification" in subject.lower() or "password" in subject.lower():
+                        # Extract OTP from HTML content
+                        import re
+                        otp_match = re.search(r'<div class="otp">(\d{6})</div>', html_content)
+                        if otp_match:
+                            otp = otp_match.group(1)
+                            print(f"🔑 OTP: {otp}")
+                            print(f"⏰ Valid for 10 minutes")
+                            print("="*50)
                     return True
-                return False
+                else:
+                    # In production, this is a real error
+                    logger.error("Production environment requires SMTP credentials")
+                    return False
                 
             msg = MIMEMultipart('alternative')
             msg['Subject'] = subject
@@ -53,8 +56,8 @@ class EmailService:
             html_part = MIMEText(html_content, 'html')
             msg.attach(html_part)
             
-            # Send the email
-            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+            # Send the email with timeout
+            with smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=30) as server:
                 server.starttls()
                 server.login(self.smtp_username, self.smtp_password)
                 server.send_message(msg)
@@ -62,36 +65,50 @@ class EmailService:
             logger.info(f"Email sent successfully to {to_email}")
             return True
             
+        except smtplib.SMTPAuthenticationError as e:
+            logger.error(f"SMTP Authentication failed for {to_email}: {str(e)}")
+            # In development, show OTP in console as fallback
+            if os.getenv("DEBUG", "false").lower() == "true":
+                self._console_fallback(to_email, subject, html_content)
+                return True
+            return False
+            
+        except smtplib.SMTPException as e:
+            logger.error(f"SMTP error when sending email to {to_email}: {str(e)}")
+            # In development, show OTP in console as fallback
+            if os.getenv("DEBUG", "false").lower() == "true":
+                self._console_fallback(to_email, subject, html_content)
+                return True
+            return False
+            
         except Exception as e:
             logger.error(f"Failed to send email to {to_email}: {str(e)}")
-            
-            # Fallback for development: print OTP to console
-            logger.warning("Email sending failed. Printing OTP to console for development.")
-            print(f"\n🔐 EMAIL FALLBACK - OTP for {to_email}:")
-            print(f"📧 Subject: {subject}")
-            if "verification" in subject.lower() or "password" in subject.lower():
-                # Extract OTP from HTML content
-                import re
-                otp_match = re.search(r'<div class="otp">(\d{6})</div>', html_content)
-                if otp_match:
-                    otp = otp_match.group(1)
+            # In development, show OTP in console as fallback
+            if os.getenv("DEBUG", "false").lower() == "true":
+                self._console_fallback(to_email, subject, html_content)
+                return True
+            return False
+    
+    def _console_fallback(self, to_email: str, subject: str, html_content: str):
+        """Console fallback for development."""
+        print(f"\n🔐 EMAIL FALLBACK - OTP for {to_email}:")
+        print(f"📧 Subject: {subject}")
+        if "verification" in subject.lower() or "password" in subject.lower():
+            # Extract OTP from HTML content
+            import re
+            otp_match = re.search(r'<div class="otp">(\d{6})</div>', html_content)
+            if otp_match:
+                otp = otp_match.group(1)
+                print(f"🔑 OTP: {otp}")
+                print(f"⏰ Valid for 10 minutes")
+            elif "verification" in subject.lower() or "password" in subject.lower():
+                # Try to extract from text content as well
+                text_otp_match = re.search(r'OTP code: (\d{6})', html_content)
+                if text_otp_match:
+                    otp = text_otp_match.group(1)
                     print(f"🔑 OTP: {otp}")
                     print(f"⏰ Valid for 10 minutes")
-                elif "verification" in subject.lower() or "password" in subject.lower():
-                    # Try to extract from text content as well
-                    text_otp_match = re.search(r'OTP code: (\d{6})', html_content)
-                    if text_otp_match:
-                        otp = text_otp_match.group(1)
-                        print(f"🔑 OTP: {otp}")
-                        print(f"⏰ Valid for 10 minutes")
-                print("="*50)
-            
-            # Return True in development mode so the registration process continues
-            if os.getenv("DEBUG", "false").lower() == "true":
-                logger.info("DEBUG mode: treating email failure as success for development")
-                return True
-            
-            return False
+            print("="*50)
     
     def send_verification_email(self, to_email: str, username: str, otp: str) -> bool:
         """Send email verification OTP."""

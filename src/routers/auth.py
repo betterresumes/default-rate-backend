@@ -3,6 +3,7 @@ from fastapi.security import HTTPBearer
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from typing import Optional
+import os
 
 from ..database import get_db, User
 from ..schemas import (
@@ -53,11 +54,28 @@ async def register_user(
         
         otp = create_otp_token(db, user.id, "email_verification")
         
-        email_sent = email_service.send_verification_email(
-            to_email=user.email,
-            username=user.username,
-            otp=otp
-        )
+        # Try to send email immediately first (for quick response)
+        email_sent = False
+        try:
+            # Quick attempt with short timeout for immediate feedback
+            email_sent = email_service.send_verification_email(
+                to_email=user.email,
+                username=user.username,
+                otp=otp
+            )
+        except Exception as e:
+            print(f"Immediate email send failed: {str(e)}")
+            
+            # If immediate send fails, try background task (if Celery is available)
+            try:
+                from ..tasks import send_verification_email_task
+                send_verification_email_task.delay(user.email, user.username, otp)
+                email_sent = True  # Assume success for background task
+            except Exception as task_error:
+                print(f"Background email task failed: {str(task_error)}")
+                # In development mode, still allow registration to continue
+                if os.getenv("DEBUG", "false").lower() == "true":
+                    email_sent = True
         
         return AuthResponse(
             success=True,
@@ -144,11 +162,24 @@ async def resend_verification_email(
         
         otp = create_otp_token(db, user.id, "email_verification")
         
-        email_sent = email_service.send_verification_email(
-            to_email=user.email,
-            username=user.username,
-            otp=otp
-        )
+        # Try immediate send first, fallback to background task
+        email_sent = False
+        try:
+            email_sent = email_service.send_verification_email(
+                to_email=user.email,
+                username=user.username,
+                otp=otp
+            )
+        except Exception as e:
+            print(f"Immediate email send failed: {str(e)}")
+            try:
+                from ..tasks import send_verification_email_task
+                send_verification_email_task.delay(user.email, user.username, otp)
+                email_sent = True
+            except Exception as task_error:
+                print(f"Background email task failed: {str(task_error)}")
+                if os.getenv("DEBUG", "false").lower() == "true":
+                    email_sent = True
         
         return AuthResponse(
             success=True,
@@ -252,11 +283,24 @@ async def forgot_password(
         
         otp = create_otp_token(db, user.id, "password_reset")
         
-        email_sent = email_service.send_password_reset_email(
-            to_email=user.email,
-            username=user.username,
-            otp=otp
-        )
+        # Try immediate send first, fallback to background task
+        email_sent = False
+        try:
+            email_sent = email_service.send_password_reset_email(
+                to_email=user.email,
+                username=user.username,
+                otp=otp
+            )
+        except Exception as e:
+            print(f"Immediate email send failed: {str(e)}")
+            try:
+                from ..tasks import send_password_reset_email_task
+                send_password_reset_email_task.delay(user.email, user.username, otp)
+                email_sent = True
+            except Exception as task_error:
+                print(f"Background email task failed: {str(task_error)}")
+                if os.getenv("DEBUG", "false").lower() == "true":
+                    email_sent = True
         
         return AuthResponse(
             success=True,
@@ -452,3 +496,35 @@ async def get_debug_otp(email: str, db: Session = Depends(get_db)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Debug OTP failed: {str(e)}"
         )
+
+
+@router.post("/debug/test-email")
+async def test_email_service(email_data: OTPRequest):
+    """Debug endpoint to test email service (DEVELOPMENT ONLY)."""
+    if os.getenv("DEBUG", "false").lower() != "true":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Endpoint not available in production"
+        )
+    
+    try:
+        # Test email sending
+        test_otp = "123456"
+        result = email_service.send_verification_email(
+            to_email=email_data.email,
+            username="testuser",
+            otp=test_otp
+        )
+        
+        return {
+            "success": result,
+            "message": "Test email sent" if result else "Test email failed",
+            "email": email_data.email,
+            "test_otp": test_otp
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Email test failed: {str(e)}",
+            "email": email_data.email
+        }
