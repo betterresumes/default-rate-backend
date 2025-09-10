@@ -8,6 +8,47 @@ from .celery_app import celery_app
 from .database import get_session_local
 from .services import CompanyService, PredictionService
 from .ml_service import ml_service
+from .email_service import email_service
+
+
+@celery_app.task(name="src.tasks.send_verification_email_task")
+def send_verification_email_task(email: str, username: str, otp: str) -> bool:
+    """
+    Background task to send verification email.
+    
+    Args:
+        email: User's email address
+        username: User's username
+        otp: Generated OTP code
+        
+    Returns:
+        Boolean indicating success
+    """
+    try:
+        return email_service.send_verification_email(email, username, otp)
+    except Exception as e:
+        print(f"Failed to send verification email to {email}: {str(e)}")
+        return False
+
+
+@celery_app.task(name="src.tasks.send_password_reset_email_task")
+def send_password_reset_email_task(email: str, username: str, otp: str) -> bool:
+    """
+    Background task to send password reset email.
+    
+    Args:
+        email: User's email address
+        username: User's username
+        otp: Generated OTP code
+        
+    Returns:
+        Boolean indicating success
+    """
+    try:
+        return email_service.send_password_reset_email(email, username, otp)
+    except Exception as e:
+        print(f"Failed to send password reset email to {email}: {str(e)}")
+        return False
 
 
 @celery_app.task(bind=True, name="src.tasks.process_bulk_excel_task")
