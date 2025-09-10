@@ -79,12 +79,13 @@ async def register_user(
         
         return AuthResponse(
             success=True,
-            message="User registered successfully. Please check your email for verification code.",
+            message="User registered successfully. You can now login directly.", 
             data={
                 "user_id": user.id,
                 "email": user.email,
                 "username": user.username,
-                "email_sent": email_sent
+                "email_sent": email_sent,
+                "can_login_directly": True  # Indicate that login is now available
             }
         )
         
@@ -211,17 +212,17 @@ async def login_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
         
+        # Skip email verification check for now - activate user directly on login
         if not user.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User account is disabled"
-            )
+            user.is_active = True
+            db.commit()
         
-        if not user.is_verified:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Email not verified. Please verify your email first."
-            )
+        # TODO: Re-enable email verification later
+        # if not user.is_verified:
+        #     raise HTTPException(
+        #         status_code=status.HTTP_401_UNAUTHORIZED,
+        #         detail="Email not verified. Please verify your email first."
+        #     )
         
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = auth_manager.create_access_token(

@@ -95,8 +95,8 @@ def create_user(db: Session, email: str, username: str, password: str, full_name
         username=username,
         hashed_password=hashed_password,
         full_name=full_name,
-        is_active=False,  
-        is_verified=False
+        is_active=True,   # Set as active for direct login - TODO: Change back to False when implementing OTP
+        is_verified=False  # Keep as False for now, can be verified later via OTP
     )
     db.add(db_user)
     db.commit()
@@ -199,6 +199,17 @@ def get_current_active_user(current_user: User = Depends(get_current_user)) -> U
 
 def get_current_verified_user(current_user: User = Depends(get_current_active_user)) -> User:
     """Get the current verified user."""
+    # TODO: Re-enable email verification check later
+    # if not current_user.is_verified:
+    #     raise HTTPException(
+    #         status_code=status.HTTP_400_BAD_REQUEST,
+    #         detail="Email not verified"
+    #     )
+    return current_user
+
+# Alternative function for when we want to enforce verification later
+def get_current_verified_user_strict(current_user: User = Depends(get_current_active_user)) -> User:
+    """Get the current verified user (strict - requires email verification)."""
     if not current_user.is_verified:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
