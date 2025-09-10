@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
-from ..database import get_db
+from ..database import get_db, User
 from ..schemas import (
     PredictionRequest, PredictionResponse, BulkPredictionResponse, 
     BulkPredictionItem, BulkJobResponse, JobStatusResponse
 )
 from ..services import CompanyService, PredictionService
 from ..ml_service import ml_service
+from ..auth import get_current_verified_user
 from typing import Dict, List
 from datetime import datetime
 import pandas as pd
@@ -31,6 +32,7 @@ def serialize_datetime(dt):
 @router.post("/predict-default-rate", response_model=dict)
 async def predict_default_rate(
     request: PredictionRequest,
+    current_user: User = Depends(get_current_verified_user),
     db: Session = Depends(get_db)
 ):
     """Predict default rate for a company using ML model"""
@@ -50,7 +52,7 @@ async def predict_default_rate(
                 market_cap=request.market_cap,
                 sector=request.sector
             )
-            company = company_service.create_company(company_data)
+            company = company_service.create_company(company_data, created_by_id=current_user.id)
 
         # Check for recent prediction (within 24 hours)
         recent_prediction = prediction_service.get_recent_prediction(company.id, 24)
@@ -162,6 +164,7 @@ async def predict_default_rate(
 @router.post("/bulk-predict", response_model=BulkPredictionResponse)
 async def bulk_predict_from_excel(
     file: UploadFile = File(...),
+    current_user: User = Depends(get_current_verified_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -339,6 +342,7 @@ async def bulk_predict_from_excel(
 @router.post("/bulk-predict-async", response_model=BulkJobResponse)
 async def bulk_predict_async(
     file: UploadFile = File(...),
+    current_user: User = Depends(get_current_verified_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -440,7 +444,10 @@ async def bulk_predict_async(
 
 
 @router.get("/job-status/{job_id}", response_model=JobStatusResponse)
-async def get_job_status(job_id: str):
+async def get_job_status(
+    job_id: str,
+    current_user: User = Depends(get_current_verified_user)
+):
     """
     Check the status of a bulk prediction job.
     
@@ -528,7 +535,10 @@ async def get_job_status(job_id: str):
 
 
 @router.get("/job-result/{job_id}")
-async def get_job_result(job_id: str):
+async def get_job_result(
+    job_id: str,
+    current_user: User = Depends(get_current_verified_user)
+):
     """
     Get the complete result of a completed bulk prediction job.
     Only returns results for successfully completed jobs.

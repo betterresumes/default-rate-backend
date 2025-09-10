@@ -83,13 +83,14 @@ class CompanyService:
         """Get company by symbol (lightweight for predictions)"""
         return self.db.query(Company).filter(Company.symbol == symbol.upper()).first()
 
-    def create_company(self, company_data: CompanyCreate):
+    def create_company(self, company_data: CompanyCreate, created_by_id: Optional[int] = None):
         """Create a new company"""
         company = Company(
             symbol=company_data.symbol.upper(),
             name=company_data.name,
             market_cap=company_data.market_cap,
-            sector=company_data.sector
+            sector=company_data.sector,
+            created_by_id=created_by_id
         )
         
         self.db.add(company)

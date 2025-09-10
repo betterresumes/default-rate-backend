@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from ..database import get_db
+from ..database import get_db, User
 from ..schemas import (
     Company, CompanyCreate, 
     PaginatedResponse, ErrorResponse
 )
 from ..services import CompanyService
+from ..auth import get_current_verified_user
 from typing import Optional
 from datetime import datetime
 
@@ -29,6 +30,7 @@ async def get_companies(
     search: Optional[str] = Query(None),
     sort_by: str = Query("name"),
     sort_order: str = Query("asc"),
+    current_user: User = Depends(get_current_verified_user),
     db: Session = Depends(get_db)
 ):
     """Get paginated list of companies with filtering and sorting"""
@@ -88,7 +90,11 @@ async def get_companies(
         raise HTTPException(status_code=500, detail=f"Failed to fetch companies: {str(e)}")
 
 @router.get("/{company_id}", response_model=dict)
-async def get_company_by_id(company_id: int, db: Session = Depends(get_db)):
+async def get_company_by_id(
+    company_id: int, 
+    current_user: User = Depends(get_current_verified_user),
+    db: Session = Depends(get_db)
+):
     """Get company by ID with full details"""
     try:
         service = CompanyService(db)

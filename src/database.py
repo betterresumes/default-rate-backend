@@ -10,6 +10,54 @@ import os
 
 Base = declarative_base()
 
+class User(Base):
+    __tablename__ = "users"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=False)
+    username = Column(String, unique=True, index=True, nullable=False)
+    hashed_password = Column(String, nullable=False)
+    full_name = Column(String, nullable=True)
+    is_active = Column(Boolean, default=False)  
+    is_verified = Column(Boolean, default=False)
+    is_superuser = Column(Boolean, default=False)
+    role = Column(String, default="user")  
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    last_login = Column(DateTime, nullable=True)
+    
+    companies = relationship("Company", back_populates="created_by", cascade="all, delete-orphan")
+    otp_tokens = relationship("OTPToken", back_populates="user", cascade="all, delete-orphan")
+    sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
+
+class OTPToken(Base):
+    __tablename__ = "otp_tokens"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    token = Column(String, nullable=False)
+    token_type = Column(String, nullable=False)  
+    expires_at = Column(DateTime, nullable=False)
+    is_used = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=func.now())
+    
+    user = relationship("User", back_populates="otp_tokens")
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    session_token = Column(String, unique=True, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    is_active = Column(Boolean, default=True)
+    user_agent = Column(String, nullable=True)
+    ip_address = Column(String, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    last_accessed = Column(DateTime, default=func.now())
+    
+    user = relationship("User", back_populates="sessions")
+
 class Company(Base):
     __tablename__ = "companies"
     
@@ -21,8 +69,11 @@ class Company(Base):
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     sector = Column(String, nullable=True)
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
     ratios = relationship("FinancialRatio", back_populates="company", cascade="all, delete-orphan")
     predictions = relationship("DefaultRatePrediction", back_populates="company", cascade="all, delete-orphan")
+    created_by = relationship("User", back_populates="companies")
 
 class FinancialRatio(Base):
     __tablename__ = "financial_ratios"

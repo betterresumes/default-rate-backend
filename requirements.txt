@@ -3,7 +3,7 @@ uvicorn
 sqlalchemy
 psycopg2-binary
 python-dotenv
-pydantic
+pydantic[email]
 pandas
 numpy
 scikit-learn
@@ -13,3 +13,8 @@ openpyxl
 celery
 redis
 uuid
+passlib[bcrypt]
+python-jose[cryptography]
+python-multipart
+emails
+jinja2

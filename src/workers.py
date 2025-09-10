@@ -44,16 +44,23 @@ def process_bulk_predictions(file_path: str) -> dict:
                         sector=sector
                     ))
 
+                # Helper function to handle NaN values
+                def safe_get_value(row, column_name):
+                    value = row.get(column_name)
+                    if pd.isna(value):
+                        return None
+                    return value
+
                 ratios = {
-                    "debt_to_equity_ratio": row.get("debt_to_equity_ratio"),
-                    "current_ratio": row.get("current_ratio"),
-                    "quick_ratio": row.get("quick_ratio"),
-                    "return_on_equity": row.get("return_on_equity"),
-                    "return_on_assets": row.get("return_on_assets"),
-                    "profit_margin": row.get("profit_margin"),
-                    "interest_coverage": row.get("interest_coverage"),
-                    "fixed_asset_turnover": row.get("fixed_asset_turnover"),
-                    "total_debt_ebitda": row.get("total_debt_ebitda"),
+                    "debt_to_equity_ratio": safe_get_value(row, "debt_to_equity_ratio"),
+                    "current_ratio": safe_get_value(row, "current_ratio"),
+                    "quick_ratio": safe_get_value(row, "quick_ratio"),
+                    "return_on_equity": safe_get_value(row, "return_on_equity"),
+                    "return_on_assets": safe_get_value(row, "return_on_assets"),
+                    "profit_margin": safe_get_value(row, "profit_margin"),
+                    "interest_coverage": safe_get_value(row, "interest_coverage"),
+                    "fixed_asset_turnover": safe_get_value(row, "fixed_asset_turnover"),
+                    "total_debt_ebitda": safe_get_value(row, "total_debt_ebitda"),
                 }
 
                 prediction_result = ml_service.predict_default_probability(ratios)

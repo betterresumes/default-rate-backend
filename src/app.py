@@ -11,7 +11,7 @@ load_dotenv()
 
 from .database import create_tables
 
-from .routers import companies, predictions
+from .routers import companies, predictions, auth
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -67,6 +67,12 @@ app.add_middleware(
 )
 
 app.include_router(
+    auth.router,
+    prefix="/api/auth",
+    tags=["authentication"]
+)
+
+app.include_router(
     companies.router,
     prefix="/api/companies",
     tags=["companies"]
@@ -119,7 +125,6 @@ if __name__ == "__main__":
     debug = os.getenv("DEBUG", "False").lower() == "true"
     
     print(f"🚀 Starting server on port {port}")
-    print(f"📝 Debug mode: {debug}")
     print(f"📚 API docs: http://localhost:{port}/docs")
     
     uvicorn.run(
