@@ -15,6 +15,7 @@ import io
 import time
 import os
 import uuid
+import base64
 from pathlib import Path
 
 router = APIRouter()
@@ -359,24 +360,12 @@ async def bulk_predict_async(
         )
     
     try:
-        # Create upload directory if it doesn't exist
-        upload_dir = Path("/tmp/bulk_uploads")
-        upload_dir.mkdir(exist_ok=True)
-        
-        # Generate unique filename
-        job_id = str(uuid.uuid4())
-        file_extension = Path(file.filename).suffix
-        temp_filename = f"{job_id}{file_extension}"
-        temp_file_path = upload_dir / temp_filename
-        
-        # Save uploaded file
+        # Read file content
         contents = await file.read()
-        with open(temp_file_path, "wb") as f:
-            f.write(contents)
         
         # Quick validation of file content
         try:
-            df = pd.read_excel(temp_file_path)
+            df = pd.read_excel(io.BytesIO(contents))
             company_count = len(df)
             
             # Validate required columns
@@ -389,29 +378,28 @@ async def bulk_predict_async(
             
             missing_columns = [col for col in required_columns if col not in df.columns]
             if missing_columns:
-                # Cleanup file before raising error
-                os.remove(temp_file_path)
                 raise HTTPException(
                     status_code=400,
                     detail=f"Missing required columns: {', '.join(missing_columns)}"
                 )
                 
         except pd.errors.EmptyDataError:
-            os.remove(temp_file_path)
             raise HTTPException(
                 status_code=400,
                 detail="Excel file is empty or contains no data"
             )
         except Exception as e:
-            os.remove(temp_file_path)
             raise HTTPException(
                 status_code=400,
                 detail=f"Invalid Excel file: {str(e)}"
             )
         
+        # Encode file content to base64 for passing to Celery task
+        file_content_b64 = base64.b64encode(contents).decode('utf-8')
+        
         # Submit background task
         from ..tasks import process_bulk_excel_task
-        task = process_bulk_excel_task.delay(str(temp_file_path), file.filename)
+        task = process_bulk_excel_task.delay(file_content_b64, file.filename)
         
         # Estimate processing time (roughly 1-2 seconds per company)
         estimated_time = f"{company_count * 1.5:.0f}-{company_count * 3:.0f} seconds"
