@@ -21,10 +21,10 @@ class EmailService:
         """Send an email."""
         try:
             if not self.smtp_username or not self.smtp_password:
-                logger.warning("SMTP credentials not configured. Email not sent.")
+                logger.warning("SMTP credentials not configured. Using console fallback for development.")
                 print(f"\n🔐 EMAIL DEBUG - OTP for {to_email}:")
                 print(f"📧 Subject: {subject}")
-                if "verification" in subject.lower():
+                if "verification" in subject.lower() or "password" in subject.lower():
                     # Extract OTP from HTML content
                     import re
                     otp_match = re.search(r'<div class="otp">(\d{6})</div>', html_content)
@@ -33,6 +33,10 @@ class EmailService:
                         print(f"🔑 OTP: {otp}")
                         print(f"⏰ Valid for 10 minutes")
                         print("="*50)
+                
+                # Return True in development mode so the process continues
+                if os.getenv("DEBUG", "false").lower() == "true":
+                    return True
                 return False
                 
             msg = MIMEMultipart('alternative')
@@ -60,6 +64,33 @@ class EmailService:
             
         except Exception as e:
             logger.error(f"Failed to send email to {to_email}: {str(e)}")
+            
+            # Fallback for development: print OTP to console
+            logger.warning("Email sending failed. Printing OTP to console for development.")
+            print(f"\n🔐 EMAIL FALLBACK - OTP for {to_email}:")
+            print(f"📧 Subject: {subject}")
+            if "verification" in subject.lower() or "password" in subject.lower():
+                # Extract OTP from HTML content
+                import re
+                otp_match = re.search(r'<div class="otp">(\d{6})</div>', html_content)
+                if otp_match:
+                    otp = otp_match.group(1)
+                    print(f"🔑 OTP: {otp}")
+                    print(f"⏰ Valid for 10 minutes")
+                elif "verification" in subject.lower() or "password" in subject.lower():
+                    # Try to extract from text content as well
+                    text_otp_match = re.search(r'OTP code: (\d{6})', html_content)
+                    if text_otp_match:
+                        otp = text_otp_match.group(1)
+                        print(f"🔑 OTP: {otp}")
+                        print(f"⏰ Valid for 10 minutes")
+                print("="*50)
+            
+            # Return True in development mode so the registration process continues
+            if os.getenv("DEBUG", "false").lower() == "true":
+                logger.info("DEBUG mode: treating email failure as success for development")
+                return True
+            
             return False
     
     def send_verification_email(self, to_email: str, username: str, otp: str) -> bool:
