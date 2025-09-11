@@ -12,7 +12,6 @@ from datetime import datetime
 
 router = APIRouter()
 
-
 def serialize_datetime(dt):
     """Helper function to serialize datetime objects"""
     if dt is None:
@@ -40,26 +39,26 @@ async def get_companies(
         
         companies_data = []
         for company in result["companies"]:
-            # Serialize recent ratios (limit to last 3 for list view performance)
+            # Serialize recent ratios with only the 5 required fields
             recent_ratios = []
             if company.ratios:
-                for ratio in company.ratios[-3:]:  # Reduced from 5 to 3
+                for ratio in company.ratios[-3:]:
                     recent_ratios.append({
                         "id": ratio.id,
-                        "debt_to_equity_ratio": float(ratio.debt_to_equity_ratio) if ratio.debt_to_equity_ratio else None,
-                        "current_ratio": float(ratio.current_ratio) if ratio.current_ratio else None,
-                        "quick_ratio": float(ratio.quick_ratio) if ratio.quick_ratio else None,
-                        "return_on_equity": float(ratio.return_on_equity) if ratio.return_on_equity else None,
-                        "return_on_assets": float(ratio.return_on_assets) if ratio.return_on_assets else None,
-                        "profit_margin": float(ratio.profit_margin) if ratio.profit_margin else None,
-                        "interest_coverage": float(ratio.interest_coverage) if ratio.interest_coverage else None,
+                        "long_term_debt_to_total_capital": float(ratio.long_term_debt_to_total_capital),
+                        "total_debt_to_ebitda": float(ratio.total_debt_to_ebitda),
+                        "net_income_margin": float(ratio.net_income_margin),
+                        "ebit_to_interest_expense": float(ratio.ebit_to_interest_expense),
+                        "return_on_assets": float(ratio.return_on_assets),
+                        "reporting_year": ratio.reporting_year,
+                        "reporting_quarter": ratio.reporting_quarter,
                         "created_at": serialize_datetime(ratio.created_at)
                     })
             
-            # Serialize recent predictions (limit to last 3 for list view performance)
+            # Serialize recent predictions
             recent_predictions = []
             if company.predictions:
-                for pred in company.predictions[-3:]:  # Reduced from 5 to 3
+                for pred in company.predictions[-3:]:
                     recent_predictions.append({
                         "id": pred.id,
                         "risk_level": pred.risk_level,
@@ -73,9 +72,11 @@ async def get_companies(
                 "symbol": company.symbol,
                 "name": company.name,
                 "market_cap": float(company.market_cap) if company.market_cap else None,
+                "sector": company.sector,
+                "reporting_year": company.reporting_year,
+                "reporting_quarter": company.reporting_quarter,
                 "created_at": serialize_datetime(company.created_at),
                 "updated_at": serialize_datetime(company.updated_at),
-                "sector": company.sector,
                 "recent_ratios": recent_ratios,
                 "recent_predictions": recent_predictions
             }
@@ -110,19 +111,21 @@ async def get_company_by_id(
                 "symbol": company.symbol,
                 "name": company.name,
                 "market_cap": float(company.market_cap) if company.market_cap else None,
+                "sector": company.sector,
+                "reporting_year": company.reporting_year,
+                "reporting_quarter": company.reporting_quarter,
                 "created_at": serialize_datetime(company.created_at),
                 "updated_at": serialize_datetime(company.updated_at),
-                "sector": company.sector,
                 "ratios": [
                     {
                         "id": ratio.id,
-                        "debt_to_equity_ratio": float(ratio.debt_to_equity_ratio) if ratio.debt_to_equity_ratio else None,
-                        "current_ratio": float(ratio.current_ratio) if ratio.current_ratio else None,
-                        "quick_ratio": float(ratio.quick_ratio) if ratio.quick_ratio else None,
-                        "return_on_equity": float(ratio.return_on_equity) if ratio.return_on_equity else None,
-                        "return_on_assets": float(ratio.return_on_assets) if ratio.return_on_assets else None,
-                        "profit_margin": float(ratio.profit_margin) if ratio.profit_margin else None,
-                        "interest_coverage": float(ratio.interest_coverage) if ratio.interest_coverage else None,
+                        "long_term_debt_to_total_capital": float(ratio.long_term_debt_to_total_capital),
+                        "total_debt_to_ebitda": float(ratio.total_debt_to_ebitda),
+                        "net_income_margin": float(ratio.net_income_margin),
+                        "ebit_to_interest_expense": float(ratio.ebit_to_interest_expense),
+                        "return_on_assets": float(ratio.return_on_assets),
+                        "reporting_year": ratio.reporting_year,
+                        "reporting_quarter": ratio.reporting_quarter,
                         "created_at": serialize_datetime(ratio.created_at),
                         "updated_at": serialize_datetime(ratio.updated_at)
                     } for ratio in company.ratios[-10:]
@@ -133,6 +136,11 @@ async def get_company_by_id(
                         "risk_level": pred.risk_level,
                         "confidence": float(pred.confidence),
                         "probability": float(pred.probability) if pred.probability else None,
+                        "long_term_debt_to_total_capital": float(pred.long_term_debt_to_total_capital),
+                        "total_debt_to_ebitda": float(pred.total_debt_to_ebitda),
+                        "net_income_margin": float(pred.net_income_margin),
+                        "ebit_to_interest_expense": float(pred.ebit_to_interest_expense),
+                        "return_on_assets": float(pred.return_on_assets),
                         "predicted_at": serialize_datetime(pred.predicted_at),
                         "created_at": serialize_datetime(pred.created_at)
                     } for pred in company.predictions[-10:]
@@ -143,3 +151,7 @@ async def get_company_by_id(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch company: {str(e)}")
+
+# Company creation removed - companies are only created through prediction API
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create company: {str(e)}")

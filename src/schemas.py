@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field, EmailStr, validator
 from typing import Optional, List
 from datetime import datetime
 from decimal import Decimal
+from uuid import UUID
 
 class UserBase(BaseModel):
     email: EmailStr
@@ -35,7 +36,7 @@ class UserLogin(BaseModel):
     password: str
 
 class UserInDB(UserBase):
-    id: int
+    id: UUID
     is_active: bool
     is_verified: bool
     is_superuser: bool
@@ -64,7 +65,7 @@ class Token(BaseModel):
     user: UserInDB
 
 class TokenData(BaseModel):
-    user_id: Optional[int] = None
+    user_id: Optional[UUID] = None
 
 class OTPVerification(BaseModel):
     email: EmailStr
@@ -91,20 +92,19 @@ class AuthResponse(BaseModel):
     data: Optional[dict] = None
 
 class FinancialRatioBase(BaseModel):
-    debt_to_equity_ratio: Optional[float] = None
-    current_ratio: Optional[float] = None
-    quick_ratio: Optional[float] = None
-    return_on_equity: Optional[float] = None
-    return_on_assets: Optional[float] = None
-    profit_margin: Optional[float] = None
-    interest_coverage: Optional[float] = None
-    fixed_asset_turnover: Optional[float] = None
-    total_debt_ebitda: Optional[float] = None
+    # Required ratios for ML model
+    long_term_debt_to_total_capital: float = Field(..., description="Long-term debt / total capital (%)")
+    total_debt_to_ebitda: float = Field(..., description="Total debt / EBITDA")
+    net_income_margin: float = Field(..., description="Net income margin (%)")
+    ebit_to_interest_expense: float = Field(..., description="EBIT / interest expense")
+    return_on_assets: float = Field(..., description="Return on assets (%)")
 
 
 class FinancialRatio(FinancialRatioBase):
     id: int
     company_id: int
+    reporting_year: Optional[str] = Field(None, description="Reporting year (e.g., '2024')")
+    reporting_quarter: Optional[str] = Field(None, description="Reporting quarter (e.g., 'Q4')")
     created_at: datetime
     updated_at: datetime
 
@@ -116,15 +116,13 @@ class DefaultRatePredictionBase(BaseModel):
     risk_level: str
     confidence: float
     probability: Optional[float] = None
-    debt_to_equity_ratio: Optional[float] = None
-    current_ratio: Optional[float] = None
-    quick_ratio: Optional[float] = None
-    return_on_equity: Optional[float] = None
-    return_on_assets: Optional[float] = None
-    profit_margin: Optional[float] = None
-    interest_coverage: Optional[float] = None
-    fixed_asset_turnover: Optional[float] = None
-    total_debt_ebitda: Optional[float] = None
+    
+    # Required ratios for ML model
+    long_term_debt_to_total_capital: float
+    total_debt_to_ebitda: float
+    net_income_margin: float
+    ebit_to_interest_expense: float
+    return_on_assets: float
 
 
 class DefaultRatePrediction(DefaultRatePredictionBase):
@@ -141,8 +139,10 @@ class DefaultRatePrediction(DefaultRatePredictionBase):
 class CompanyBase(BaseModel):
     symbol: str = Field(..., min_length=1, max_length=10)
     name: str = Field(..., min_length=1, max_length=200)
-    market_cap: Optional[float] = None
-    sector: Optional[str] = None
+    market_cap: float = Field(..., ge=0, description="Market capitalization in USD")
+    sector: str = Field(..., min_length=1, max_length=100, description="Company sector/industry")
+    reporting_year: Optional[str] = Field(None, description="Reporting year (e.g., '2024')")
+    reporting_quarter: Optional[str] = Field(None, description="Reporting quarter (e.g., 'Q4')")
 
 
 class CompanyCreate(CompanyBase):
@@ -150,7 +150,7 @@ class CompanyCreate(CompanyBase):
 
 
 class Company(CompanyBase):
-    id: int
+    id: UUID
     created_at: datetime
     updated_at: datetime
     ratios: List[FinancialRatio] = []
@@ -163,17 +163,17 @@ class Company(CompanyBase):
 class PredictionRequest(BaseModel):
     stock_symbol: str = Field(..., min_length=1, max_length=10)
     company_name: str = Field(..., min_length=1, max_length=200)
-    market_cap: Optional[float] = None
-    sector: Optional[str] = None
-    debt_to_equity_ratio: Optional[float] = None
-    current_ratio: Optional[float] = None
-    quick_ratio: Optional[float] = None
-    return_on_equity: Optional[float] = None
-    return_on_assets: Optional[float] = None
-    profit_margin: Optional[float] = None
-    interest_coverage: Optional[float] = None
-    fixed_asset_turnover: Optional[float] = None
-    total_debt_ebitda: Optional[float] = None
+    market_cap: float = Field(..., ge=0, description="Market capitalization in USD")
+    sector: str = Field(..., min_length=1, max_length=100, description="Company sector/industry")
+    reporting_year: Optional[str] = Field(None, description="Reporting year (e.g., '2024')")
+    reporting_quarter: Optional[str] = Field(None, description="Reporting quarter (e.g., 'Q4')")
+    
+    # Required ratios for ML model
+    long_term_debt_to_total_capital: float = Field(..., description="Long-term debt / total capital (%)")
+    total_debt_to_ebitda: float = Field(..., description="Total debt / EBITDA")
+    net_income_margin: float = Field(..., description="Net income margin (%)")
+    ebit_to_interest_expense: float = Field(..., description="EBIT / interest expense")
+    return_on_assets: float = Field(..., description="Return on assets (%)")
 
 
 class PredictionResponse(BaseModel):

@@ -9,7 +9,7 @@ from ..database import get_db, User
 from ..schemas import (
     UserCreate, UserLogin, User as UserSchema, Token, 
     OTPVerification, OTPRequest, PasswordReset, AuthResponse,
-    UserUpdate
+    UserUpdate, UserInDB
 )
 from ..auth import (
     auth_manager, authenticate_user, get_user_by_email, 
@@ -236,11 +236,27 @@ async def login_user(
         user.last_login = datetime.utcnow()
         db.commit()
         
+        # Convert SQLAlchemy model to dict for Pydantic
+        user_dict = {
+            "id": user.id,
+            "email": user.email,
+            "username": user.username,
+            "full_name": user.full_name,
+            "is_active": user.is_active,
+            "is_verified": user.is_verified,
+            "is_superuser": user.is_superuser,
+            "role": user.role,
+            "created_at": user.created_at,
+            "updated_at": user.updated_at,
+            "last_login": user.last_login
+        }
+        user_response = UserInDB(**user_dict)
+        
         return Token(
             access_token=access_token,
             token_type="bearer",
             expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-            user=UserSchema.from_orm(user)
+            user=user_response
         )
         
     except HTTPException as e:

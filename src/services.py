@@ -83,14 +83,19 @@ class CompanyService:
         """Get company by symbol (lightweight for predictions)"""
         return self.db.query(Company).filter(Company.symbol == symbol.upper()).first()
 
-    def create_company(self, company_data: CompanyCreate, created_by_id: Optional[int] = None):
+    def get_company_by_name(self, name: str):
+        """Get company by name (lightweight for predictions)"""
+        return self.db.query(Company).filter(Company.name == name).first()
+
+    def create_company(self, company_data: CompanyCreate):
         """Create a new company"""
         company = Company(
             symbol=company_data.symbol.upper(),
             name=company_data.name,
             market_cap=company_data.market_cap,
             sector=company_data.sector,
-            created_by_id=created_by_id
+            reporting_year=company_data.reporting_year,
+            reporting_quarter=company_data.reporting_quarter
         )
         
         self.db.add(company)
@@ -115,43 +120,73 @@ class PredictionService:
             )
         ).order_by(desc(DefaultRatePrediction.predicted_at)).first()
 
-    def save_prediction(self, company_id: int, prediction_data: dict, ratios: dict):
-        """Save prediction results to database (optimized - no immediate commit)"""
-        prediction = DefaultRatePrediction(
-            company_id=company_id,
-            risk_level=prediction_data["risk_level"],
-            confidence=prediction_data["confidence"],
-            probability=prediction_data.get("probability"),
-            debt_to_equity_ratio=ratios.get("debt_to_equity_ratio"),
-            current_ratio=ratios.get("current_ratio"),
-            quick_ratio=ratios.get("quick_ratio"),
-            return_on_equity=ratios.get("return_on_equity"),
-            return_on_assets=ratios.get("return_on_assets"),
-            profit_margin=ratios.get("profit_margin"),
-            interest_coverage=ratios.get("interest_coverage")
-        )
+    def save_prediction(self, company_id: str, prediction_data: dict, ratios: dict, reporting_year: Optional[str] = None, reporting_quarter: Optional[str] = None):
+        """Save or update prediction results to database (one prediction per company)"""
+        # First, save/update the financial ratios
+        financial_ratio = self.save_financial_ratios(company_id, ratios, reporting_year, reporting_quarter)
         
-        self.db.add(prediction)
-        self.db.flush()
-        return prediction
+        # Check if company already has a prediction
+        existing_prediction = self.db.query(DefaultRatePrediction).filter(
+            DefaultRatePrediction.company_id == company_id
+        ).first()
+        
+        if existing_prediction:
+            # Update existing prediction
+            existing_prediction.risk_level = prediction_data["risk_level"]
+            existing_prediction.confidence = prediction_data["confidence"]
+            existing_prediction.probability = prediction_data.get("probability")
+            existing_prediction.financial_ratio_id = financial_ratio.id
+            existing_prediction.predicted_at = datetime.utcnow()
+            existing_prediction.updated_at = datetime.utcnow()
+            
+            self.db.flush()
+            return existing_prediction
+        else:
+            # Create new prediction
+            prediction = DefaultRatePrediction(
+                company_id=company_id,
+                financial_ratio_id=financial_ratio.id,
+                risk_level=prediction_data["risk_level"],
+                confidence=prediction_data["confidence"],
+                probability=prediction_data.get("probability")
+            )
+            
+            self.db.add(prediction)
+            self.db.flush()
+            return prediction
 
-    def save_financial_ratios(self, company_id: int, ratios: dict):
-        """Save or update financial ratios for a company (optimized - no immediate commit)"""
+    def save_financial_ratios(self, company_id: str, ratios: dict, reporting_year: Optional[str] = None, reporting_quarter: Optional[str] = None):
+        """Save or update financial ratios for a company (one ratio record per company)"""
+        # Set defaults if not provided
+        if not reporting_year:
+            reporting_year = str(datetime.utcnow().year)
+        if not reporting_quarter:
+            # Determine quarter based on current month
+            current_month = datetime.utcnow().month
+            reporting_quarter = f"Q{(current_month - 1) // 3 + 1}"
+        
         existing_ratio = self.db.query(FinancialRatio).filter(
             FinancialRatio.company_id == company_id
         ).first()
 
         if existing_ratio:
+            # Update existing ratios
             for key, value in ratios.items():
                 if value is not None and hasattr(existing_ratio, key):
                     setattr(existing_ratio, key, value)
             existing_ratio.updated_at = datetime.utcnow()
+            existing_ratio.reporting_year = reporting_year
+            existing_ratio.reporting_quarter = reporting_quarter
+            self.db.flush()
             return existing_ratio
         else:
-            financial_ratio = FinancialRatio(
-                company_id=company_id,
-                **{k: v for k, v in ratios.items() if v is not None}
-            )
+            # Create new financial ratios
+            ratio_data = {k: v for k, v in ratios.items() if v is not None}
+            ratio_data['company_id'] = company_id
+            ratio_data['reporting_year'] = reporting_year
+            ratio_data['reporting_quarter'] = reporting_quarter
+                
+            financial_ratio = FinancialRatio(**ratio_data)
             self.db.add(financial_ratio)
             self.db.flush() 
             return financial_ratio
