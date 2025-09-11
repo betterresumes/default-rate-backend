@@ -16,7 +16,6 @@ from .database import create_tables, create_database_engine
 from .celery_app import celery_app
 from .routers import companies, predictions, auth
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -36,13 +35,11 @@ def check_database_connection():
 def check_redis_connection():
     """Check if Redis connection is working"""
     try:
-        # Get Redis configuration from environment
         redis_host = os.getenv("REDIS_HOST", "localhost")
         redis_port = int(os.getenv("REDIS_PORT", "6379"))
         redis_db = int(os.getenv("REDIS_DB", "0"))
         redis_password = os.getenv("REDIS_PASSWORD", "")
         
-        # Create Redis client
         redis_client = redis.Redis(
             host=redis_host,
             port=redis_port,
@@ -53,7 +50,6 @@ def check_redis_connection():
             socket_timeout=5
         )
         
-        # Test connection
         redis_client.ping()
         logger.info(f"✅ Redis connection: HEALTHY (Host: {redis_host}:{redis_port}, DB: {redis_db})")
         return True
@@ -64,7 +60,6 @@ def check_redis_connection():
 def check_celery_worker_connection():
     """Check if Celery workers are available"""
     try:
-        # Get active workers
         active_workers = celery_app.control.inspect().active()
         if active_workers:
             worker_count = len(active_workers)
@@ -84,13 +79,11 @@ async def lifespan(app: FastAPI):
     """Initialize database tables and pre-load ML models on startup"""
     logger.info("🚀 Starting FastAPI server...")
     
-    # Check all connections
     logger.info("🔍 Checking system connections...")
     
     db_status = check_database_connection()
     redis_status = check_redis_connection()
     
-    # Initialize database
     logger.info("📊 Initializing database...")
     try:
         create_tables()
@@ -98,28 +91,24 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ Database initialization error: {e}")
     
-    # Check Celery workers (after a short delay to allow workers to start)
     import asyncio
-    await asyncio.sleep(2)  # Give workers time to connect
+    await asyncio.sleep(2)
     worker_status = check_celery_worker_connection()
     
-    # Pre-load ML models
+    # Pre-load ML models (using new 5-ratio model)
     logger.info("🤖 Pre-loading ML models...")
     try:
-        from .ml_service import ml_service
+        from .ml_service import ml_model
+        # Test with new 5-ratio model to verify it loads correctly
         test_ratios = {
-            "debt_to_equity_ratio": 0.5,
-            "current_ratio": 2.0,
-            "quick_ratio": 1.5,
-            "return_on_equity": 0.15,
-            "return_on_assets": 0.08,
-            "profit_margin": 0.10,
-            "interest_coverage": 5.0,
-            "fixed_asset_turnover": 1.2,
-            "total_debt_ebitda": 2.5
+            "long_term_debt_to_total_capital": 45.0,
+            "total_debt_to_ebitda": 3.2,
+            "net_income_margin": 8.5,
+            "ebit_to_interest_expense": 4.1,
+            "return_on_assets": 6.2
         }
-        ml_service.predict_default_probability(test_ratios)
-        logger.info("✅ ML models pre-loaded successfully")
+        result = ml_model.predict_default_probability(test_ratios)
+        logger.info(f"✅ ML models pre-loaded successfully - Test prediction: {result['probability']:.4f} ({result['risk_level']})")
     except Exception as e:
         logger.warning(f"⚠️ ML model pre-loading warning: {e}")
     

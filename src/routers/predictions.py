@@ -6,7 +6,7 @@ from ..schemas import (
     BulkPredictionItem, BulkJobResponse, JobStatusResponse
 )
 from ..services import CompanyService, PredictionService
-from ..ml_service import ml_service
+from ..ml_service import ml_model
 from ..auth import get_current_verified_user
 from typing import Dict, List
 from datetime import datetime
@@ -30,13 +30,13 @@ def serialize_datetime(dt):
     return dt
 
 
-@router.post("/predict-default-rate", response_model=dict)
+@router.post("/predict-default-rate", response_model=PredictionResponse)
 async def predict_default_rate(
     request: PredictionRequest,
     current_user: User = Depends(get_current_verified_user),
     db: Session = Depends(get_db)
 ):
-    """Predict default rate for a company using ML model"""
+    """Predict default rate for a company using new ML model"""
     try:
         company_service = CompanyService(db)
         prediction_service = PredictionService(db)
@@ -51,104 +51,86 @@ async def predict_default_rate(
                 symbol=request.stock_symbol,
                 name=request.company_name,
                 market_cap=request.market_cap,
-                sector=request.sector
+                sector=request.sector,
+                reporting_year=request.reporting_year,
+                reporting_quarter=request.reporting_quarter
             )
-            company = company_service.create_company(company_data, created_by_id=current_user.id)
+            company = company_service.create_company(company_data)  # Removed user reference
 
-        # Check for recent prediction (within 24 hours)
-        recent_prediction = prediction_service.get_recent_prediction(company.id, 24)
-        
-        if recent_prediction:
-            # For cached predictions, still run through ML service to get enhanced features
-            ratios = {
-                "debt_to_equity_ratio": request.debt_to_equity_ratio,
-                "current_ratio": request.current_ratio,
-                "quick_ratio": request.quick_ratio,
-                "return_on_equity": request.return_on_equity,
-                "return_on_assets": request.return_on_assets,
-                "profit_margin": request.profit_margin,
-                "interest_coverage": request.interest_coverage,
-                "fixed_asset_turnover": request.fixed_asset_turnover,
-                "total_debt_ebitda": request.total_debt_ebitda
-            }
-            
-            # Get enhanced features from ML service
-            prediction_result = ml_service.predict_default_probability(ratios)
-            
-            return {
-                "success": True,
-                "message": "Using cached prediction",
-                "company": {
-                    "id": company.id,
-                    "symbol": company.symbol,
-                    "name": company.name,
-                    "sector": company.sector
-                },
-                "prediction": {
-                    "risk_level": recent_prediction.risk_level,
-                    "confidence": float(recent_prediction.confidence),
-                    "probability": float(recent_prediction.probability) if recent_prediction.probability else None,
-                    "predicted_at": serialize_datetime(recent_prediction.predicted_at),
-                    "model_features": prediction_result.get("model_features", {}),
-                    "raw_inputs": prediction_result.get("raw_inputs", {}),
-                    "historical_benchmarks": prediction_result.get("historical_benchmarks", {}),
-                    "model_info": {
-                        "model_type": "Logistic Regression"
-                    }
-                }
-            }
-
-        # Prepare financial ratios for prediction
+        # Prepare financial ratios for new ML model
         ratios = {
-            "debt_to_equity_ratio": request.debt_to_equity_ratio,
-            "current_ratio": request.current_ratio,
-            "quick_ratio": request.quick_ratio,
-            "return_on_equity": request.return_on_equity,
-            "return_on_assets": request.return_on_assets,
-            "profit_margin": request.profit_margin,
-            "interest_coverage": request.interest_coverage,
-            "fixed_asset_turnover": request.fixed_asset_turnover,
-            "total_debt_ebitda": request.total_debt_ebitda
+            "long_term_debt_to_total_capital": request.long_term_debt_to_total_capital,
+            "total_debt_to_ebitda": request.total_debt_to_ebitda,
+            "net_income_margin": request.net_income_margin,
+            "ebit_to_interest_expense": request.ebit_to_interest_expense,
+            "return_on_assets": request.return_on_assets
         }
 
-        # Make prediction using ML model (optimized)
-        prediction_result = ml_service.predict_default_probability(ratios)
+        # Make prediction using new ML model
+        prediction_result = ml_model.predict_default_probability(ratios)
 
-        # Batch database operations - save both prediction and ratios, then commit once
+        if "error" in prediction_result:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "Prediction failed",
+                    "details": prediction_result["error"]
+                }
+            )
+
+        # Save prediction and ratios
         saved_prediction = prediction_service.save_prediction(
             company.id, 
             prediction_result, 
-            ratios
+            ratios,
+            request.reporting_year,
+            request.reporting_quarter
         )
-        
-        prediction_service.save_financial_ratios(company.id, ratios)
         
         # Single commit for both operations
         prediction_service.commit_transaction()
 
         return {
             "success": True,
-            "message": "New prediction generated",
-            "id": company.id,
+            "message": "Prediction generated using new ML model",
             "company": {
+                "id": company.id,
                 "symbol": company.symbol,
                 "name": company.name,
-                "sector": company.sector
+                "market_cap": float(company.market_cap) if company.market_cap else None,
+                "sector": company.sector,
+                "reporting_year": request.reporting_year or company.reporting_year,
+                "reporting_quarter": request.reporting_quarter or company.reporting_quarter
+            },
+            "ratios": {
+                "long_term_debt_to_total_capital": request.long_term_debt_to_total_capital,
+                "total_debt_to_ebitda": request.total_debt_to_ebitda,
+                "net_income_margin": request.net_income_margin,
+                "ebit_to_interest_expense": request.ebit_to_interest_expense,
+                "return_on_assets": request.return_on_assets
             },
             "prediction": {
+                "probability": prediction_result["probability"],
                 "risk_level": prediction_result["risk_level"],
                 "confidence": prediction_result["confidence"],
-                "probability": prediction_result["probability"],
-                "predicted_at": serialize_datetime(saved_prediction.predicted_at),
+                "predicted_at": prediction_result["predicted_at"],
                 "model_features": prediction_result.get("model_features", {}),
                 "raw_inputs": prediction_result.get("raw_inputs", {}),
-                "historical_benchmarks": prediction_result.get("historical_benchmarks", {}),
                 "model_info": {
-                    "model_type": "Logistic Regression"
+                    "model_type": "New Logistic Regression Model",
+                    "features": [
+                        "Long-term debt / total capital (%)",
+                        "Total debt / EBITDA", 
+                        "Net income margin (%)",
+                        "EBIT / interest expense",
+                        "Return on assets (%)"
+                    ]
                 }
             }
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Prediction error: {e}")
         # Rollback on error
@@ -176,15 +158,13 @@ async def bulk_predict_from_excel(
     - company_name: Company name (required)
     - market_cap: Market capitalization (optional)
     - sector: Company sector (optional)
-    - debt_to_equity_ratio: Debt to equity ratio (required for prediction)
-    - current_ratio: Current ratio (required for prediction)
-    - quick_ratio: Quick ratio (required for prediction)
-    - return_on_equity: Return on equity (required for prediction)
-    - return_on_assets: Return on assets (required for prediction)
-    - profit_margin: Profit margin (required for prediction)
-    - interest_coverage: Interest coverage ratio (required for prediction)
-    - fixed_asset_turnover: Fixed asset turnover (required for prediction)
-    - total_debt_ebitda: Total debt to EBITDA ratio (required for prediction)
+    - reporting_year: Reporting year (optional, e.g., '2024')
+    - reporting_quarter: Reporting quarter (optional, e.g., 'Q4')
+    - long_term_debt_to_total_capital: Long-term debt / total capital (%) (required)
+    - total_debt_to_ebitda: Total debt / EBITDA (required)
+    - net_income_margin: Net income margin (%) (required)
+    - ebit_to_interest_expense: EBIT / interest expense (required)
+    - return_on_assets: Return on assets (%) (required)
     """
     start_time = time.time()
     
@@ -202,10 +182,9 @@ async def bulk_predict_from_excel(
         
         # Validate required columns
         required_columns = [
-            'stock_symbol', 'company_name', 'debt_to_equity_ratio', 
-            'current_ratio', 'quick_ratio', 'return_on_equity', 
-            'return_on_assets', 'profit_margin', 'interest_coverage', 
-            'fixed_asset_turnover', 'total_debt_ebitda'
+            'stock_symbol', 'company_name', 
+            'long_term_debt_to_total_capital', 'total_debt_to_ebitda', 
+            'net_income_margin', 'ebit_to_interest_expense', 'return_on_assets'
         ]
         
         missing_columns = [col for col in required_columns if col not in df.columns]
@@ -243,16 +222,17 @@ async def bulk_predict_from_excel(
                         symbol=stock_symbol,
                         name=company_name,
                         market_cap=float(row.get('market_cap', 0)) if pd.notna(row.get('market_cap')) else None,
-                        sector=str(row.get('sector', '')).strip() if pd.notna(row.get('sector')) else None
+                        sector=str(row.get('sector', '')).strip() if pd.notna(row.get('sector')) else None,
+                        reporting_year=str(row.get('reporting_year', '')).strip() if pd.notna(row.get('reporting_year')) else None,
+                        reporting_quarter=str(row.get('reporting_quarter', '')).strip() if pd.notna(row.get('reporting_quarter')) else None
                     )
                     company = company_service.create_company(company_data)
                 
-                # Prepare financial ratios
+                # Prepare financial ratios (only the 5 required ones)
                 ratios = {}
                 ratio_columns = [
-                    'debt_to_equity_ratio', 'current_ratio', 'quick_ratio',
-                    'return_on_equity', 'return_on_assets', 'profit_margin',
-                    'interest_coverage', 'fixed_asset_turnover', 'total_debt_ebitda'
+                    'long_term_debt_to_total_capital', 'total_debt_to_ebitda', 
+                    'net_income_margin', 'ebit_to_interest_expense', 'return_on_assets'
                 ]
                 
                 for col in ratio_columns:
@@ -262,8 +242,11 @@ async def bulk_predict_from_excel(
                     else:
                         raise ValueError(f"Missing value for {col}")
                 
-                # Make prediction
-                prediction_result = ml_service.predict_default_probability(ratios)
+                # Make prediction using new ML service
+                prediction_result = ml_model.predict_default_probability(ratios)
+                # Check for prediction errors
+                if "error" in prediction_result:
+                    raise ValueError(f"Prediction failed: {prediction_result['error']}")
                 
                 # Save prediction and ratios
                 saved_prediction = prediction_service.save_prediction(
@@ -271,7 +254,12 @@ async def bulk_predict_from_excel(
                     prediction_result, 
                     ratios
                 )
-                prediction_service.save_financial_ratios(company.id, ratios)
+                
+                # Get reporting info from Excel or use defaults
+                reporting_year = str(row.get('reporting_year', '')).strip() if pd.notna(row.get('reporting_year')) else None
+                reporting_quarter = str(row.get('reporting_quarter', '')).strip() if pd.notna(row.get('reporting_quarter')) else None
+                
+                prediction_service.save_financial_ratios(company.id, ratios, reporting_year, reporting_quarter)
                 
                 # Create result item
                 result_item = BulkPredictionItem(
@@ -368,12 +356,11 @@ async def bulk_predict_async(
             df = pd.read_excel(io.BytesIO(contents))
             company_count = len(df)
             
-            # Validate required columns
+            # Validate required columns (5 required ratios) - standardized names
             required_columns = [
-                'stock_symbol', 'company_name', 'debt_to_equity_ratio', 
-                'current_ratio', 'quick_ratio', 'return_on_equity', 
-                'return_on_assets', 'profit_margin', 'interest_coverage', 
-                'fixed_asset_turnover', 'total_debt_ebitda'
+                'stock_symbol', 'company_name',
+                'long_term_debt_to_total_capital', 'total_debt_to_ebitda', 
+                'net_income_margin', 'ebit_to_interest_expense', 'return_on_assets'
             ]
             
             missing_columns = [col for col in required_columns if col not in df.columns]

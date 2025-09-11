@@ -1,0 +1,23 @@
+# Nixpacks configuration for Railway deployment
+[variables]
+PYTHONPATH = "/app/src"
+PYTHONUNBUFFERED = "1"
+
+[phases.setup]
+nixPkgs = ["python311", "python311Packages.pip"]
+
+[phases.install]
+cmds = [
+    "pip install --no-cache-dir -r requirements.txt"
+]
+
+[phases.build]
+cmds = [
+    "python -c 'import sys; print(f\"Python version: {sys.version}\")'",
+    "pip list | grep -E '(fastapi|uvicorn|scikit-learn)'",
+    "ls -la src/",
+    "ls -la src/model/"
+]
+
+[start]
+cmd = "python3 start.py"

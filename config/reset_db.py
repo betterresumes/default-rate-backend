@@ -6,9 +6,13 @@ Drops existing tables and recreates them with the new schema
 
 import sys
 import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Add src to path
-sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from database import create_database_engine, Base
 from sqlalchemy import text
@@ -26,23 +30,26 @@ def reset_database():
             # Drop tables in correct order (handle foreign key constraints)
             conn.execute(text("DROP TABLE IF EXISTS default_rate_predictions CASCADE"))
             conn.execute(text("DROP TABLE IF EXISTS financial_ratios CASCADE"))
+            conn.execute(text("DROP TABLE IF EXISTS user_sessions CASCADE"))
+            conn.execute(text("DROP TABLE IF EXISTS otp_tokens CASCADE"))
             conn.execute(text("DROP TABLE IF EXISTS companies CASCADE"))
-            conn.execute(text("DROP TABLE IF EXISTS sectors CASCADE"))
+            conn.execute(text("DROP TABLE IF EXISTS users CASCADE"))
             conn.commit()
         
         print("✅ Existing tables dropped successfully!")
         
-        # Create all tables with new schema
-        print("📊 Creating tables with new schema...")
+        # Create all tables with new UUID schema
+        print("📊 Creating tables with new UUID schema...")
         Base.metadata.create_all(bind=engine)
         print("✅ New tables created successfully!")
         
         print("\n🎉 Database schema updated successfully!")
-        print("✨ New columns added:")
-        print("   - financial_ratios.fixed_asset_turnover")
-        print("   - financial_ratios.total_debt_ebitda")
-        print("   - default_rate_predictions.fixed_asset_turnover")
-        print("   - default_rate_predictions.total_debt_ebitda")
+        print("✨ Schema changes applied:")
+        print("   - All models now use UUID primary keys instead of integers")
+        print("   - User, OTPToken, UserSession, Company, FinancialRatio models updated")
+        print("   - DefaultRatePrediction model updated")
+        print("   - All foreign key relationships use UUIDs")
+        print("   - Enhanced security with non-sequential identifiers")
         
         return True
         

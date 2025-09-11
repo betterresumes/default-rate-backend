@@ -9,7 +9,7 @@ from celery import current_task
 from .celery_app import celery_app
 from .database import get_session_local
 from .services import CompanyService, PredictionService
-from .ml_service import ml_service
+from .ml_service import ml_model
 from .email_service import email_service
 
 
@@ -87,21 +87,43 @@ def process_bulk_excel_task(self, file_content_b64: str, original_filename: str)
     total_companies = 0
     
     try:
-        # Decode the base64 file content and read Excel
         file_content = base64.b64decode(file_content_b64)
         df = pd.read_excel(io.BytesIO(file_content))
         total_companies = len(df)
         
+        column_mapping = {
+            'long-term debt / total capital (%)': 'long_term_debt_to_total_capital',
+            'long_term_debt_to_total_capital': 'long_term_debt_to_total_capital',
+            'total debt / ebitda': 'total_debt_to_ebitda', 
+            'total_debt_to_ebitda': 'total_debt_to_ebitda',
+            'net income margin': 'net_income_margin',
+            'net_income_margin': 'net_income_margin', 
+            'ebit / interest expense': 'ebit_to_interest_expense',
+            'ebit_to_interest_expense': 'ebit_to_interest_expense',
+            'return on assets': 'return_on_assets',
+            'return_on_assets': 'return_on_assets'
+        }
+        
         required_columns = [
-            'stock_symbol', 'company_name', 'debt_to_equity_ratio', 
-            'current_ratio', 'quick_ratio', 'return_on_equity', 
-            'return_on_assets', 'profit_margin', 'interest_coverage', 
-            'fixed_asset_turnover', 'total_debt_ebitda'
+            'company_name',
+            'stock_symbol',
+            'market_cap',
+            'sector'
         ]
         
         missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        ratio_columns_found = False
+        for excel_col, api_col in column_mapping.items():
+            if excel_col in df.columns:
+                ratio_columns_found = True
+                break
+                
         if missing_columns:
             raise ValueError(f"Missing required columns: {', '.join(missing_columns)}")
+            
+        if not ratio_columns_found:
+            raise ValueError(f"Missing financial ratio columns. Expected one of: {', '.join(column_mapping.keys())}")
         
         self.update_state(
             state="PROGRESS",
@@ -133,50 +155,98 @@ def process_bulk_excel_task(self, file_content_b64: str, original_filename: str)
                         }
                     )
                 
-                stock_symbol = str(row['stock_symbol']).strip()
                 company_name = str(row['company_name']).strip()
+                stock_symbol = str(row['stock_symbol']).strip().upper()
+                market_cap = float(row['market_cap'])
+                sector = str(row['sector']).strip()
                 
-                if not stock_symbol or not company_name:
-                    raise ValueError("Stock symbol and company name are required")
+                if not company_name:
+                    raise ValueError("Company name is required")
+                if not stock_symbol:
+                    raise ValueError("Stock symbol is required")
+                if not sector:
+                    raise ValueError("Sector is required")
                 
+                # Get or create company with all required fields
                 company = company_service.get_company_by_symbol(stock_symbol)
                 
                 if not company:
                     from .schemas import CompanyCreate
                     company_data = CompanyCreate(
-                        symbol=stock_symbol,
                         name=company_name,
-                        market_cap=float(row.get('market_cap', 0)) if pd.notna(row.get('market_cap')) else None,
-                        sector=str(row.get('sector', '')).strip() if pd.notna(row.get('sector')) else None
+                        symbol=stock_symbol,
+                        market_cap=market_cap,
+                        sector=sector,
+                        reporting_year=str(row.get('reporting_year', '')).strip() if pd.notna(row.get('reporting_year')) else None,
+                        reporting_quarter=str(row.get('reporting_quarter', '')).strip() if pd.notna(row.get('reporting_quarter')) else None
                     )
                     company = company_service.create_company(company_data)
                 
+                # Extract financial ratios (5 required ratios) using column mapping
                 ratios = {}
-                ratio_columns = [
-                    'debt_to_equity_ratio', 'current_ratio', 'quick_ratio',
-                    'return_on_equity', 'return_on_assets', 'profit_margin',
-                    'interest_coverage', 'fixed_asset_turnover', 'total_debt_ebitda'
-                ]
+                try:
+                    # Use column mapping to handle different naming conventions
+                    if 'long-term debt / total capital (%)' in df.columns:
+                        ratios['long_term_debt_to_total_capital'] = float(row['long-term debt / total capital (%)'])
+                    elif 'long_term_debt_to_total_capital' in df.columns:
+                        ratios['long_term_debt_to_total_capital'] = float(row['long_term_debt_to_total_capital'])
+                    
+                    if 'total debt / ebitda' in df.columns:
+                        ratios['total_debt_to_ebitda'] = float(row['total debt / ebitda'])
+                    elif 'total_debt_to_ebitda' in df.columns:
+                        ratios['total_debt_to_ebitda'] = float(row['total_debt_to_ebitda'])
+                    
+                    if 'net income margin' in df.columns:
+                        ratios['net_income_margin'] = float(row['net income margin'])
+                    elif 'net_income_margin' in df.columns:
+                        ratios['net_income_margin'] = float(row['net_income_margin'])
+                    
+                    if 'ebit / interest expense' in df.columns:
+                        ratios['ebit_to_interest_expense'] = float(row['ebit / interest expense'])
+                    elif 'ebit_to_interest_expense' in df.columns:
+                        ratios['ebit_to_interest_expense'] = float(row['ebit_to_interest_expense'])
+                    
+                    if 'return on assets' in df.columns:
+                        ratios['return_on_assets'] = float(row['return on assets'])
+                    elif 'return_on_assets' in df.columns:
+                        ratios['return_on_assets'] = float(row['return_on_assets'])
+                        
+                except (ValueError, TypeError, KeyError) as e:
+                    raise ValueError(f"Invalid or missing financial ratio values: {str(e)}")
                 
-                for col in ratio_columns:
-                    value = row.get(col)
-                    if pd.notna(value):
-                        ratios[col] = float(value)
-                    else:
-                        raise ValueError(f"Missing value for {col}")
+                # Ensure all 5 ratios are present
+                required_ratios = ['long_term_debt_to_total_capital', 'total_debt_to_ebitda', 
+                                 'net_income_margin', 'ebit_to_interest_expense', 'return_on_assets']
+                missing_ratios = [ratio for ratio in required_ratios if ratio not in ratios]
+                if missing_ratios:
+                    raise ValueError(f"Missing financial ratios: {', '.join(missing_ratios)}")
                 
-                prediction_result = ml_service.predict_default_probability(ratios)
+                # Check for missing values
+                if any(pd.isna(val) for val in ratios.values()):
+                    raise ValueError("One or more financial ratios are missing")
+                
+                # Make prediction using new ML service
+                prediction_result = ml_model.predict_default_probability(ratios)
+                
+                # Check for prediction errors
+                if "error" in prediction_result:
+                    raise ValueError(f"Prediction failed: {prediction_result['error']}")
+                
+                # Get reporting info from Excel or use defaults
+                reporting_year = str(row.get('reporting_year', '')).strip() if pd.notna(row.get('reporting_year')) else None
+                reporting_quarter = str(row.get('reporting_quarter', '')).strip() if pd.notna(row.get('reporting_quarter')) else None
                 
                 saved_prediction = prediction_service.save_prediction(
                     company.id, 
                     prediction_result, 
-                    ratios
+                    ratios,
+                    reporting_year,
+                    reporting_quarter
                 )
-                prediction_service.save_financial_ratios(company.id, ratios)
                 
                 result_item = {
-                    "stock_symbol": stock_symbol,
                     "company_name": company_name,
+                    "stock_symbol": stock_symbol,
                     "sector": company.sector,
                     "market_cap": company.market_cap,
                     "prediction": {
@@ -194,8 +264,8 @@ def process_bulk_excel_task(self, file_content_b64: str, original_filename: str)
                 
             except Exception as e:
                 result_item = {
-                    "stock_symbol": str(row.get('stock_symbol', f'Row {index + 1}')),
                     "company_name": str(row.get('company_name', 'Unknown')),
+                    "stock_symbol": str(row.get('stock_symbol', 'Unknown')),
                     "sector": str(row.get('sector', '')) if pd.notna(row.get('sector')) else None,
                     "market_cap": float(row.get('market_cap', 0)) if pd.notna(row.get('market_cap')) else None,
                     "prediction": {},
@@ -236,17 +306,21 @@ def process_bulk_excel_task(self, file_content_b64: str, original_filename: str)
         print(f"Bulk prediction task failed: {error_message}")
         print(f"Traceback: {error_traceback}")
         
+        # Fix Celery exception serialization issue
         self.update_state(
             state="FAILURE",
             meta={
                 "error": error_message,
                 "traceback": error_traceback,
                 "filename": original_filename,
-                "processed": successful_predictions + failed_predictions
+                "processed": successful_predictions + failed_predictions,
+                "exc_type": type(e).__name__,
+                "exc_message": error_message
             }
         )
         
-        raise Exception(error_message)
+        # Re-raise with proper exception type
+        raise type(e)(error_message)
         
     finally:
         try:
