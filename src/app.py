@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from .database import create_tables, create_database_engine, Base
+from .database import create_tables, create_database_engine
 from .celery_app import celery_app
 from .routers import companies, predictions, auth
 
@@ -74,48 +74,6 @@ def check_celery_worker_connection():
         logger.error(f"❌ Celery worker connection: FAILED - {str(e)}")
         return False
 
-def emergency_reset_database():
-    """
-    🚨 EMERGENCY: Reset database to fix schema mismatch
-    This function will be REMOVED after fixing the UUID/integer issue
-    """
-    try:
-        logger.warning("🚨 EMERGENCY RESET: Fixing schema mismatch...")
-        
-        engine = create_database_engine()
-        
-        # Drop all existing tables
-        logger.info("🗑️ Dropping existing tables...")
-        with engine.connect() as conn:
-            tables_to_drop = [
-                "default_rate_predictions",
-                "financial_ratios", 
-                "user_sessions",
-                "otp_tokens",
-                "companies",
-                "users"
-            ]
-            
-            for table in tables_to_drop:
-                try:
-                    conn.execute(text(f"DROP TABLE IF EXISTS {table} CASCADE"))
-                    logger.info(f"   ✅ Dropped table: {table}")
-                except Exception as e:
-                    logger.warning(f"   ⚠️ Could not drop {table}: {e}")
-            
-            conn.commit()
-        
-        # Recreate all tables with current schema
-        logger.info("📊 Creating tables with UUID schema...")
-        Base.metadata.create_all(bind=engine)
-        logger.info("✅ Emergency reset completed - UUID schema applied!")
-        
-        return True
-        
-    except Exception as e:
-        logger.error(f"❌ Emergency reset failed: {e}")
-        return False
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize database tables and pre-load ML models on startup"""
@@ -126,29 +84,12 @@ async def lifespan(app: FastAPI):
     db_status = check_database_connection()
     redis_status = check_redis_connection()
     
-    # 🚨 TEMPORARY: Emergency reset for schema mismatch
-    # TODO: REMOVE THIS AFTER SCHEMA IS FIXED
-    emergency_reset_enabled = os.getenv("EMERGENCY_RESET", "false").lower() == "true"
-    if emergency_reset_enabled:
-        logger.warning("🚨 EMERGENCY RESET ENABLED - This will reset your database!")
-        emergency_reset_database()
-    
     logger.info("📊 Initializing database...")
     try:
         create_tables()
         logger.info("✅ Database tables created/verified")
     except Exception as e:
         logger.error(f"❌ Database initialization error: {e}")
-        # If create_tables fails due to schema mismatch, try emergency reset
-        if "DatatypeMismatch" in str(e) or "uuid" in str(e).lower():
-            logger.warning("🔧 Schema mismatch detected - attempting emergency reset...")
-            if emergency_reset_database():
-                logger.info("🔄 Retrying table creation after reset...")
-                try:
-                    create_tables()
-                    logger.info("✅ Database tables created successfully after reset!")
-                except Exception as retry_e:
-                    logger.error(f"❌ Database initialization still failed: {retry_e}")
     
     import asyncio
     await asyncio.sleep(2)
@@ -350,6 +291,7 @@ async def test_celery_task():
             "status": "failed",
             "message": "Celery worker connectivity failed"
         }
+
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
