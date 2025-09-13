@@ -191,6 +191,153 @@ class PredictionService:
             self.db.flush() 
             return financial_ratio
 
+    def update_prediction(self, company_id: str, update_data: dict):
+        """Update existing prediction for a company with flexible field updates"""
+        # Check if company exists
+        company = self.db.query(Company).filter(Company.id == company_id).first()
+        if not company:
+            raise ValueError(f"Company with ID {company_id} not found")
+        
+        # Check if prediction exists
+        existing_prediction = self.db.query(DefaultRatePrediction).filter(
+            DefaultRatePrediction.company_id == company_id
+        ).first()
+        
+        if not existing_prediction:
+            raise ValueError(f"No prediction found for company {company_id}")
+        
+        # Update company information if provided
+        if update_data.get("company_name") is not None:
+            company.name = update_data["company_name"]
+        if update_data.get("market_cap") is not None:
+            company.market_cap = update_data["market_cap"]
+        if update_data.get("sector") is not None:
+            company.sector = update_data["sector"]
+        if update_data.get("reporting_year") is not None:
+            company.reporting_year = update_data["reporting_year"]
+        if update_data.get("reporting_quarter") is not None:
+            company.reporting_quarter = update_data["reporting_quarter"]
+        
+        company.updated_at = datetime.utcnow()
+        
+        # Check if financial ratios are provided for prediction update
+        financial_ratios_provided = any([
+            update_data.get("long_term_debt_to_total_capital") is not None,
+            update_data.get("total_debt_to_ebitda") is not None,
+            update_data.get("net_income_margin") is not None,
+            update_data.get("ebit_to_interest_expense") is not None,
+            update_data.get("return_on_assets") is not None
+        ])
+        
+        if financial_ratios_provided:
+            # Get current financial ratios to use as defaults
+            current_ratios = {}
+            if existing_prediction and existing_prediction.financial_ratio:
+                current_ratio = existing_prediction.financial_ratio
+                current_ratios = {
+                    "long_term_debt_to_total_capital": float(current_ratio.long_term_debt_to_total_capital),
+                    "total_debt_to_ebitda": float(current_ratio.total_debt_to_ebitda),
+                    "net_income_margin": float(current_ratio.net_income_margin),
+                    "ebit_to_interest_expense": float(current_ratio.ebit_to_interest_expense),
+                    "return_on_assets": float(current_ratio.return_on_assets)
+                }
+            
+            # Prepare ratios dict with current values as defaults, updated with new values
+            ratios = current_ratios.copy()
+            for key in ["long_term_debt_to_total_capital", "total_debt_to_ebitda", 
+                       "net_income_margin", "ebit_to_interest_expense", "return_on_assets"]:
+                if update_data.get(key) is not None:
+                    ratios[key] = update_data[key]
+            
+            # Update financial ratios
+            financial_ratio = self.save_financial_ratios(
+                company_id, 
+                ratios, 
+                update_data.get("reporting_year"), 
+                update_data.get("reporting_quarter")
+            )
+            
+            # Recalculate prediction with complete ratios (updated + existing)
+            updated_prediction, prediction_result = self.recalculate_prediction(company_id, ratios)
+            
+            # Update prediction with new financial ratio reference
+            if updated_prediction:
+                updated_prediction.financial_ratio_id = financial_ratio.id
+                existing_prediction = updated_prediction
+        
+        self.db.flush()
+        return existing_prediction, company
+
+    def delete_prediction(self, company_id: str):
+        """Delete prediction for a company - deletes both prediction and financial ratios"""
+        # Check if company exists
+        company = self.db.query(Company).filter(Company.id == company_id).first()
+        if not company:
+            raise ValueError(f"Company with ID {company_id} not found")
+        
+        # Check if prediction exists
+        existing_prediction = self.db.query(DefaultRatePrediction).filter(
+            DefaultRatePrediction.company_id == company_id
+        ).first()
+        
+        if not existing_prediction:
+            raise ValueError(f"No prediction found for company {company_id}")
+        
+        # Get the financial ratio ID before deleting prediction
+        financial_ratio_id = existing_prediction.financial_ratio_id
+        
+        # Delete the prediction first
+        print(f"🗑️ Deleting prediction {existing_prediction.id} for company {company_id}")
+        self.db.delete(existing_prediction)
+        
+        # Delete the associated financial ratio
+        if financial_ratio_id:
+            financial_ratio = self.db.query(FinancialRatio).filter(
+                FinancialRatio.id == financial_ratio_id
+            ).first()
+            if financial_ratio:
+                print(f"🗑️ Deleting financial ratio {financial_ratio.id} for company {company_id}")
+                self.db.delete(financial_ratio)
+        
+        self.db.flush()
+        print(f"✅ Complete prediction data deleted successfully for company {company_id}")
+        
+        return company
+
+    def get_prediction_by_company_id(self, company_id: str):
+        """Get prediction for a specific company"""
+        return self.db.query(DefaultRatePrediction).filter(
+            DefaultRatePrediction.company_id == company_id
+        ).first()
+    
+    def recalculate_prediction(self, company_id: str, ratios: dict):
+        """Recalculate prediction using ML model with new ratios"""
+        from .ml_service import ml_model
+        
+        # Make prediction using ML model
+        prediction_result = ml_model.predict_default_probability(ratios)
+        
+        if "error" in prediction_result:
+            raise ValueError(f"Prediction failed: {prediction_result['error']}")
+        
+        # Get existing prediction
+        existing_prediction = self.db.query(DefaultRatePrediction).filter(
+            DefaultRatePrediction.company_id == company_id
+        ).first()
+        
+        if existing_prediction:
+            # Update existing prediction
+            existing_prediction.risk_level = prediction_result["risk_level"]
+            existing_prediction.confidence = prediction_result["confidence"]
+            existing_prediction.probability = prediction_result.get("probability")
+            existing_prediction.predicted_at = datetime.utcnow()
+            existing_prediction.updated_at = datetime.utcnow()
+            
+            self.db.flush()
+            return existing_prediction, prediction_result
+        
+        return None, prediction_result
+
     def commit_transaction(self):
         """Commit the current transaction"""
         self.db.commit()

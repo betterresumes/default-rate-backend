@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
-from ..database import get_db, User
+from ..database import get_db, User, Company
 from ..schemas import (
     PredictionRequest, PredictionResponse, BulkPredictionResponse, 
-    BulkPredictionItem, BulkJobResponse, JobStatusResponse
+    BulkPredictionItem, BulkJobResponse, JobStatusResponse,
+    PredictionUpdateRequest, PredictionUpdateResponse, PredictionDeleteResponse
 )
 from ..services import CompanyService, PredictionService
 from ..ml_service import ml_model
@@ -553,6 +554,231 @@ async def get_job_result(
             status_code=500,
             detail={
                 "error": "Failed to get job result",
+                "details": str(e)
+            }
+        )
+
+
+@router.put("/{company_id}", response_model=PredictionUpdateResponse)
+async def update_prediction(
+    company_id: str,
+    request: PredictionUpdateRequest,
+    current_user: User = Depends(get_current_verified_user),
+    db: Session = Depends(get_db)
+):
+    """Update prediction for a company - flexible updates for any field"""
+    try:
+        prediction_service = PredictionService(db)
+
+        # Convert request to dict, excluding None values
+        update_data = request.dict(exclude_unset=True)
+        
+        # Check if any data is provided for update
+        if not update_data:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "No update data provided",
+                    "details": "At least one field must be provided for update"
+                }
+            )
+
+        # Update prediction and company information
+        updated_prediction, updated_company = prediction_service.update_prediction(
+            company_id,
+            update_data
+        )
+        
+        # Commit the transaction
+        prediction_service.commit_transaction()
+
+        # Get current financial ratios
+        current_ratios = {}
+        if updated_prediction and updated_prediction.financial_ratio:
+            financial_ratio = updated_prediction.financial_ratio
+            current_ratios = {
+                "long_term_debt_to_total_capital": float(financial_ratio.long_term_debt_to_total_capital),
+                "total_debt_to_ebitda": float(financial_ratio.total_debt_to_ebitda),
+                "net_income_margin": float(financial_ratio.net_income_margin),
+                "ebit_to_interest_expense": float(financial_ratio.ebit_to_interest_expense),
+                "return_on_assets": float(financial_ratio.return_on_assets),
+                "reporting_year": financial_ratio.reporting_year,
+                "reporting_quarter": financial_ratio.reporting_quarter
+            }
+
+        # Prepare response
+        response_data = {
+            "success": True,
+            "message": "Prediction updated successfully",
+            "company": {
+                "id": str(updated_company.id),
+                "symbol": updated_company.symbol,
+                "name": updated_company.name,
+                "market_cap": float(updated_company.market_cap) if updated_company.market_cap else None,
+                "sector": updated_company.sector,
+                "reporting_year": updated_company.reporting_year,
+                "reporting_quarter": updated_company.reporting_quarter
+            },
+            "ratios": current_ratios,
+            "prediction": {
+                "id": str(updated_prediction.id) if updated_prediction else None,
+                "probability": float(updated_prediction.probability) if updated_prediction and updated_prediction.probability else None,
+                "risk_level": updated_prediction.risk_level if updated_prediction else None,
+                "confidence": float(updated_prediction.confidence) if updated_prediction else None,
+                "predicted_at": serialize_datetime(updated_prediction.predicted_at) if updated_prediction else None,
+                "updated_at": serialize_datetime(updated_prediction.updated_at) if updated_prediction else None
+            }
+        }
+
+        return response_data
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "Not found",
+                "details": str(e)
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Update prediction error: {e}")
+        # Rollback on error
+        db.rollback()
+        raise HTTPException(
+            status_code=500, 
+            detail={
+                "error": "Update prediction failed",
+                "details": str(e)
+            }
+        )
+
+
+@router.delete("/{company_id}", response_model=PredictionDeleteResponse)
+async def delete_prediction(
+    company_id: str,
+    current_user: User = Depends(get_current_verified_user),
+    db: Session = Depends(get_db)
+):
+    """Delete prediction for a company"""
+    try:
+        prediction_service = PredictionService(db)
+
+        # Delete prediction
+        company = prediction_service.delete_prediction(company_id)
+        
+        # Commit the transaction
+        prediction_service.commit_transaction()
+
+        return {
+            "success": True,
+            "message": "Prediction deleted successfully",
+            "company": {
+                "id": str(company.id),
+                "symbol": company.symbol,
+                "name": company.name,
+                "market_cap": float(company.market_cap) if company.market_cap else None,
+                "sector": company.sector
+            }
+        }
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "Not found",
+                "details": str(e)
+            }
+        )
+    except Exception as e:
+        print(f"Delete prediction error: {e}")
+        # Rollback on error
+        db.rollback()
+        raise HTTPException(
+            status_code=500, 
+            detail={
+                "error": "Delete prediction failed",
+                "details": str(e)
+            }
+        )
+
+
+@router.get("/{company_id}")
+async def get_prediction(
+    company_id: str,
+    current_user: User = Depends(get_current_verified_user),
+    db: Session = Depends(get_db)
+):
+    """Get prediction for a specific company"""
+    try:
+        prediction_service = PredictionService(db)
+        company_service = CompanyService(db)
+
+        # Get company details
+        company = company_service.get_company_by_id(company_id)
+        if not company:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "Company not found",
+                    "details": f"Company with ID {company_id} does not exist"
+                }
+            )
+
+        # Get prediction
+        prediction = prediction_service.get_prediction_by_company_id(company_id)
+        if not prediction:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "Prediction not found",
+                    "details": f"No prediction found for company {company_id}"
+                }
+            )
+
+        # Get financial ratios
+        financial_ratio = prediction.financial_ratio
+
+        return {
+            "success": True,
+            "company": {
+                "id": str(company.id),
+                "symbol": company.symbol,
+                "name": company.name,
+                "market_cap": float(company.market_cap) if company.market_cap else None,
+                "sector": company.sector,
+                "reporting_year": company.reporting_year,
+                "reporting_quarter": company.reporting_quarter
+            },
+            "ratios": {
+                "long_term_debt_to_total_capital": float(financial_ratio.long_term_debt_to_total_capital),
+                "total_debt_to_ebitda": float(financial_ratio.total_debt_to_ebitda),
+                "net_income_margin": float(financial_ratio.net_income_margin),
+                "ebit_to_interest_expense": float(financial_ratio.ebit_to_interest_expense),
+                "return_on_assets": float(financial_ratio.return_on_assets),
+                "reporting_year": financial_ratio.reporting_year,
+                "reporting_quarter": financial_ratio.reporting_quarter
+            },
+            "prediction": {
+                "id": str(prediction.id),
+                "probability": float(prediction.probability) if prediction.probability else None,
+                "risk_level": prediction.risk_level,
+                "confidence": float(prediction.confidence),
+                "predicted_at": serialize_datetime(prediction.predicted_at),
+                "created_at": serialize_datetime(prediction.created_at),
+                "updated_at": serialize_datetime(prediction.updated_at)
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Get prediction error: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail={
+                "error": "Failed to get prediction",
                 "details": str(e)
             }
         )

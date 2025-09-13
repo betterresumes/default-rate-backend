@@ -238,3 +238,38 @@ class JobStatusResponse(BaseModel):
     error: Optional[str] = None
     created_at: Optional[float] = None
     completed_at: Optional[float] = None
+
+
+class PredictionUpdateRequest(BaseModel):
+    """Schema for updating a prediction - all fields are optional for flexible updates"""
+    # Company information (optional)
+    company_name: Optional[str] = Field(None, min_length=1, max_length=200, description="Company name")
+    market_cap: Optional[float] = Field(None, ge=0, description="Market capitalization in USD")
+    sector: Optional[str] = Field(None, min_length=1, max_length=100, description="Company sector/industry")
+    
+    # Financial ratios for ML model (optional - if provided, prediction will be recalculated)
+    long_term_debt_to_total_capital: Optional[float] = Field(None, description="Long-term debt / total capital (%)")
+    total_debt_to_ebitda: Optional[float] = Field(None, description="Total debt / EBITDA")
+    net_income_margin: Optional[float] = Field(None, description="Net income margin (%)")
+    ebit_to_interest_expense: Optional[float] = Field(None, description="EBIT / interest expense")
+    return_on_assets: Optional[float] = Field(None, description="Return on assets (%)")
+    
+    # Reporting information (optional)
+    reporting_year: Optional[str] = Field(None, description="Reporting year (e.g., '2024')")
+    reporting_quarter: Optional[str] = Field(None, description="Reporting quarter (e.g., 'Q4')")
+
+
+class PredictionUpdateResponse(BaseModel):
+    """Schema for prediction update response"""
+    success: bool
+    message: str
+    company: dict
+    prediction: dict
+    ratios: dict
+
+
+class PredictionDeleteResponse(BaseModel):
+    """Schema for prediction delete response"""
+    success: bool
+    message: str
+    company: dict
