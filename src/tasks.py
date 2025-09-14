@@ -8,7 +8,8 @@ from typing import Dict, Any
 from celery import current_task
 from .celery_app import celery_app
 from .database import get_session_local
-from .services import CompanyService, PredictionService
+from .services import CompanyService
+from .schemas import CompanyCreate
 from .ml_service import ml_model
 from .email_service import email_service
 
@@ -105,25 +106,14 @@ def process_bulk_excel_task(self, file_content_b64: str, original_filename: str)
         }
         
         required_columns = [
-            'company_name',
-            'stock_symbol',
-            'market_cap',
-            'sector'
+            'stock_symbol', 'company_name',
+            'long_term_debt_to_total_capital', 'total_debt_to_ebitda', 
+            'net_income_margin', 'ebit_to_interest_expense', 'return_on_assets'
         ]
         
         missing_columns = [col for col in required_columns if col not in df.columns]
-        
-        ratio_columns_found = False
-        for excel_col, api_col in column_mapping.items():
-            if excel_col in df.columns:
-                ratio_columns_found = True
-                break
-                
         if missing_columns:
             raise ValueError(f"Missing required columns: {', '.join(missing_columns)}")
-            
-        if not ratio_columns_found:
-            raise ValueError(f"Missing financial ratio columns. Expected one of: {', '.join(column_mapping.keys())}")
         
         self.update_state(
             state="PROGRESS",
@@ -138,7 +128,6 @@ def process_bulk_excel_task(self, file_content_b64: str, original_filename: str)
         )
         
         company_service = CompanyService(db)
-        prediction_service = PredictionService(db)
         
         for index, row in df.iterrows():
             try:
@@ -155,105 +144,84 @@ def process_bulk_excel_task(self, file_content_b64: str, original_filename: str)
                         }
                     )
                 
+                stock_symbol = str(row['stock_symbol']).strip()
                 company_name = str(row['company_name']).strip()
-                stock_symbol = str(row['stock_symbol']).strip().upper()
-                market_cap = float(row['market_cap'])
-                sector = str(row['sector']).strip()
                 
-                if not company_name:
-                    raise ValueError("Company name is required")
-                if not stock_symbol:
-                    raise ValueError("Stock symbol is required")
-                if not sector:
-                    raise ValueError("Sector is required")
+                if not stock_symbol or not company_name:
+                    raise ValueError("Stock symbol and company name are required")
                 
-                # Get or create company with all required fields
-                company = company_service.get_company_by_symbol(stock_symbol)
+                market_cap = row.get('market_cap', 1000000000)  
+                if pd.isna(market_cap):
+                    market_cap = 1000000000
+                else:
+                    market_cap = float(market_cap)
                 
-                if not company:
-                    from .schemas import CompanyCreate
-                    company_data = CompanyCreate(
-                        name=company_name,
-                        symbol=stock_symbol,
-                        market_cap=market_cap,
-                        sector=sector,
-                        reporting_year=str(row.get('reporting_year', '')).strip() if pd.notna(row.get('reporting_year')) else None,
-                        reporting_quarter=str(row.get('reporting_quarter', '')).strip() if pd.notna(row.get('reporting_quarter')) else None
-                    )
-                    company = company_service.create_company(company_data)
+                sector = row.get('sector', 'Unknown')
+                if pd.isna(sector):
+                    sector = 'Unknown'
+                else:
+                    sector = str(sector).strip()
                 
-                # Extract financial ratios (5 required ratios) using column mapping
-                ratios = {}
-                try:
-                    # Use column mapping to handle different naming conventions
-                    if 'long-term debt / total capital (%)' in df.columns:
-                        ratios['long_term_debt_to_total_capital'] = float(row['long-term debt / total capital (%)'])
-                    elif 'long_term_debt_to_total_capital' in df.columns:
-                        ratios['long_term_debt_to_total_capital'] = float(row['long_term_debt_to_total_capital'])
-                    
-                    if 'total debt / ebitda' in df.columns:
-                        ratios['total_debt_to_ebitda'] = float(row['total debt / ebitda'])
-                    elif 'total_debt_to_ebitda' in df.columns:
-                        ratios['total_debt_to_ebitda'] = float(row['total_debt_to_ebitda'])
-                    
-                    if 'net income margin' in df.columns:
-                        ratios['net_income_margin'] = float(row['net income margin'])
-                    elif 'net_income_margin' in df.columns:
-                        ratios['net_income_margin'] = float(row['net_income_margin'])
-                    
-                    if 'ebit / interest expense' in df.columns:
-                        ratios['ebit_to_interest_expense'] = float(row['ebit / interest expense'])
-                    elif 'ebit_to_interest_expense' in df.columns:
-                        ratios['ebit_to_interest_expense'] = float(row['ebit_to_interest_expense'])
-                    
-                    if 'return on assets' in df.columns:
-                        ratios['return_on_assets'] = float(row['return on assets'])
-                    elif 'return_on_assets' in df.columns:
-                        ratios['return_on_assets'] = float(row['return_on_assets'])
-                        
-                except (ValueError, TypeError, KeyError) as e:
-                    raise ValueError(f"Invalid or missing financial ratio values: {str(e)}")
+                reporting_year = row.get('reporting_year')
+                if pd.isna(reporting_year):
+                    reporting_year = None
+                else:
+                    reporting_year = str(reporting_year).strip()
                 
-                # Ensure all 5 ratios are present
-                required_ratios = ['long_term_debt_to_total_capital', 'total_debt_to_ebitda', 
-                                 'net_income_margin', 'ebit_to_interest_expense', 'return_on_assets']
-                missing_ratios = [ratio for ratio in required_ratios if ratio not in ratios]
-                if missing_ratios:
-                    raise ValueError(f"Missing financial ratios: {', '.join(missing_ratios)}")
+                reporting_quarter = row.get('reporting_quarter')
+                if pd.isna(reporting_quarter):
+                    reporting_quarter = None
+                else:
+                    reporting_quarter = str(reporting_quarter).strip()
                 
-                # Check for missing values
-                if any(pd.isna(val) for val in ratios.values()):
-                    raise ValueError("One or more financial ratios are missing")
+                ratios = {
+                    'long_term_debt_to_total_capital': float(row['long_term_debt_to_total_capital']),
+                    'total_debt_to_ebitda': float(row['total_debt_to_ebitda']),
+                    'net_income_margin': float(row['net_income_margin']),
+                    'ebit_to_interest_expense': float(row['ebit_to_interest_expense']),
+                    'return_on_assets': float(row['return_on_assets'])
+                }
                 
-                # Make prediction using new ML service
                 prediction_result = ml_model.predict_default_probability(ratios)
                 
-                # Check for prediction errors
                 if "error" in prediction_result:
                     raise ValueError(f"Prediction failed: {prediction_result['error']}")
                 
-                # Get reporting info from Excel or use defaults
-                reporting_year = str(row.get('reporting_year', '')).strip() if pd.notna(row.get('reporting_year')) else None
-                reporting_quarter = str(row.get('reporting_quarter', '')).strip() if pd.notna(row.get('reporting_quarter')) else None
-                
-                saved_prediction = prediction_service.save_prediction(
-                    company.id, 
-                    prediction_result, 
-                    ratios,
-                    reporting_year,
-                    reporting_quarter
+                company_data = CompanyCreate(
+                    symbol=stock_symbol,
+                    name=company_name,
+                    market_cap=market_cap,
+                    sector=sector,
+                    reporting_year=reporting_year,
+                    reporting_quarter=reporting_quarter,
+                    long_term_debt_to_total_capital=ratios['long_term_debt_to_total_capital'],
+                    total_debt_to_ebitda=ratios['total_debt_to_ebitda'],
+                    net_income_margin=ratios['net_income_margin'],
+                    ebit_to_interest_expense=ratios['ebit_to_interest_expense'],
+                    return_on_assets=ratios['return_on_assets']
                 )
+                
+                # Save to database using single table structure with upsert
+                company = company_service.upsert_company(company_data, prediction_result)
                 
                 result_item = {
                     "company_name": company_name,
                     "stock_symbol": stock_symbol,
                     "sector": company.sector,
-                    "market_cap": company.market_cap,
+                    "market_cap": float(company.market_cap),
                     "prediction": {
-                        "risk_level": prediction_result["risk_level"],
-                        "confidence": prediction_result["confidence"],
-                        "probability": prediction_result["probability"],
-                        "predicted_at": saved_prediction.predicted_at.isoformat() if saved_prediction.predicted_at else None
+                        "id": str(company.id),
+                        "risk_level": company.risk_level,
+                        "confidence": float(company.confidence),
+                        "probability": float(company.probability) if company.probability else None,
+                        "predicted_at": company.predicted_at.isoformat() if company.predicted_at else None,
+                        "financial_ratios": {
+                            "long_term_debt_to_total_capital": float(company.long_term_debt_to_total_capital),
+                            "total_debt_to_ebitda": float(company.total_debt_to_ebitda),
+                            "net_income_margin": float(company.net_income_margin),
+                            "ebit_to_interest_expense": float(company.ebit_to_interest_expense),
+                            "return_on_assets": float(company.return_on_assets)
+                        }
                     },
                     "status": "success",
                     "error_message": None
@@ -279,7 +247,7 @@ def process_bulk_excel_task(self, file_content_b64: str, original_filename: str)
                 
                 db.rollback()
         
-        prediction_service.commit_transaction()
+        db.commit()  
         
         processing_time = time.time() - start_time
         
@@ -306,7 +274,6 @@ def process_bulk_excel_task(self, file_content_b64: str, original_filename: str)
         print(f"Bulk prediction task failed: {error_message}")
         print(f"Traceback: {error_traceback}")
         
-        # Fix Celery exception serialization issue
         self.update_state(
             state="FAILURE",
             meta={
@@ -319,7 +286,6 @@ def process_bulk_excel_task(self, file_content_b64: str, original_filename: str)
             }
         )
         
-        # Re-raise with proper exception type
         raise type(e)(error_message)
         
     finally:

@@ -91,50 +91,6 @@ class AuthResponse(BaseModel):
     message: str
     data: Optional[dict] = None
 
-class FinancialRatioBase(BaseModel):
-    # Required ratios for ML model
-    long_term_debt_to_total_capital: float = Field(..., description="Long-term debt / total capital (%)")
-    total_debt_to_ebitda: float = Field(..., description="Total debt / EBITDA")
-    net_income_margin: float = Field(..., description="Net income margin (%)")
-    ebit_to_interest_expense: float = Field(..., description="EBIT / interest expense")
-    return_on_assets: float = Field(..., description="Return on assets (%)")
-
-
-class FinancialRatio(FinancialRatioBase):
-    id: int
-    company_id: int
-    reporting_year: Optional[str] = Field(None, description="Reporting year (e.g., '2024')")
-    reporting_quarter: Optional[str] = Field(None, description="Reporting quarter (e.g., 'Q4')")
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-class DefaultRatePredictionBase(BaseModel):
-    risk_level: str
-    confidence: float
-    probability: Optional[float] = None
-    
-    # Required ratios for ML model
-    long_term_debt_to_total_capital: float
-    total_debt_to_ebitda: float
-    net_income_margin: float
-    ebit_to_interest_expense: float
-    return_on_assets: float
-
-
-class DefaultRatePrediction(DefaultRatePredictionBase):
-    id: int
-    company_id: int
-    predicted_at: datetime
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True
-
 
 class CompanyBase(BaseModel):
     symbol: str = Field(..., min_length=1, max_length=10)
@@ -143,18 +99,38 @@ class CompanyBase(BaseModel):
     sector: str = Field(..., min_length=1, max_length=100, description="Company sector/industry")
     reporting_year: Optional[str] = Field(None, description="Reporting year (e.g., '2024')")
     reporting_quarter: Optional[str] = Field(None, description="Reporting quarter (e.g., 'Q4')")
+    
+    long_term_debt_to_total_capital: float = Field(..., description="Long-term debt / total capital (%)")
+    total_debt_to_ebitda: float = Field(..., description="Total debt / EBITDA")
+    net_income_margin: float = Field(..., description="Net income margin (%)")
+    ebit_to_interest_expense: float = Field(..., description="EBIT / interest expense")
+    return_on_assets: float = Field(..., description="Return on assets (%)")
+    
+    risk_level: str = Field(..., description="Risk level (LOW, MEDIUM, HIGH)")
+    confidence: float = Field(..., ge=0, le=1, description="Prediction confidence (0-1)")
+    probability: Optional[float] = Field(None, ge=0, le=1, description="Default probability (0-1)")
+    predicted_at: datetime = Field(..., description="When the prediction was made")
 
 
-class CompanyCreate(CompanyBase):
-    pass
+class CompanyCreate(BaseModel):
+    symbol: str = Field(..., min_length=1, max_length=10)
+    name: str = Field(..., min_length=1, max_length=200)
+    market_cap: float = Field(..., ge=0, description="Market capitalization in USD")
+    sector: str = Field(..., min_length=1, max_length=100, description="Company sector/industry")
+    reporting_year: Optional[str] = Field(None, description="Reporting year (e.g., '2024')")
+    reporting_quarter: Optional[str] = Field(None, description="Reporting quarter (e.g., 'Q4')")
+    
+    long_term_debt_to_total_capital: float = Field(..., description="Long-term debt / total capital (%)")
+    total_debt_to_ebitda: float = Field(..., description="Total debt / EBITDA")
+    net_income_margin: float = Field(..., description="Net income margin (%)")
+    ebit_to_interest_expense: float = Field(..., description="EBIT / interest expense")
+    return_on_assets: float = Field(..., description="Return on assets (%)")
 
 
 class Company(CompanyBase):
     id: UUID
     created_at: datetime
     updated_at: datetime
-    ratios: List[FinancialRatio] = []
-    predictions: List[DefaultRatePrediction] = []
 
     class Config:
         from_attributes = True
@@ -168,7 +144,6 @@ class PredictionRequest(BaseModel):
     reporting_year: Optional[str] = Field(None, description="Reporting year (e.g., '2024')")
     reporting_quarter: Optional[str] = Field(None, description="Reporting quarter (e.g., 'Q4')")
     
-    # Required ratios for ML model
     long_term_debt_to_total_capital: float = Field(..., description="Long-term debt / total capital (%)")
     total_debt_to_ebitda: float = Field(..., description="Total debt / EBITDA")
     net_income_margin: float = Field(..., description="Net income margin (%)")
@@ -180,7 +155,6 @@ class PredictionResponse(BaseModel):
     success: bool
     message: str
     company: dict
-    prediction: dict
 
 
 class PaginatedResponse(BaseModel):
@@ -196,7 +170,6 @@ class ErrorResponse(BaseModel):
 
 
 class BulkPredictionItem(BaseModel):
-    """Schema for individual company prediction result in bulk upload"""
     stock_symbol: str
     company_name: str
     sector: Optional[str] = None
@@ -207,7 +180,6 @@ class BulkPredictionItem(BaseModel):
 
 
 class BulkPredictionResponse(BaseModel):
-    """Schema for bulk upload response"""
     success: bool
     message: str
     total_companies: int
@@ -218,7 +190,6 @@ class BulkPredictionResponse(BaseModel):
 
 
 class BulkJobResponse(BaseModel):
-    """Schema for bulk job submission response"""
     success: bool
     message: str
     job_id: str
@@ -228,7 +199,6 @@ class BulkJobResponse(BaseModel):
 
 
 class JobStatusResponse(BaseModel):
-    """Schema for job status response"""
     success: bool
     job_id: str
     status: str 
@@ -238,3 +208,30 @@ class JobStatusResponse(BaseModel):
     error: Optional[str] = None
     created_at: Optional[float] = None
     completed_at: Optional[float] = None
+
+
+class PredictionUpdateRequest(BaseModel):
+    company_name: Optional[str] = Field(None, min_length=1, max_length=200)
+    market_cap: Optional[float] = Field(None, ge=0, description="Market capitalization in USD")
+    sector: Optional[str] = Field(None, min_length=1, max_length=100, description="Company sector/industry")
+    reporting_year: Optional[str] = Field(None, description="Reporting year (e.g., '2024')")
+    reporting_quarter: Optional[str] = Field(None, description="Reporting quarter (e.g., 'Q4')")
+    
+    # Financial ratios (optional for update - if any provided, prediction will be recalculated)
+    long_term_debt_to_total_capital: Optional[float] = Field(None, description="Long-term debt / total capital (%)")
+    total_debt_to_ebitda: Optional[float] = Field(None, description="Total debt / EBITDA")
+    net_income_margin: Optional[float] = Field(None, description="Net income margin (%)")
+    ebit_to_interest_expense: Optional[float] = Field(None, description="EBIT / interest expense")
+    return_on_assets: Optional[float] = Field(None, description="Return on assets (%)")
+
+
+class DatabaseResetRequest(BaseModel):
+    table_name: Optional[str] = Field(None, description="Specific table to reset: 'companies', 'users', 'otp_tokens', 'user_sessions' (if not provided, resets all tables)")
+    confirm_reset: bool = Field(..., description="Confirmation flag to prevent accidental resets")
+
+
+class DatabaseResetResponse(BaseModel):
+    success: bool
+    message: str
+    tables_reset: List[str]
+    affected_records: Optional[int] = None

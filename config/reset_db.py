@@ -28,12 +28,13 @@ def reset_database():
         print("🗑️ Dropping existing tables...")
         with engine.connect() as conn:
             # Drop tables in correct order (handle foreign key constraints)
-            conn.execute(text("DROP TABLE IF EXISTS default_rate_predictions CASCADE"))
-            conn.execute(text("DROP TABLE IF EXISTS financial_ratios CASCADE"))
             conn.execute(text("DROP TABLE IF EXISTS user_sessions CASCADE"))
             conn.execute(text("DROP TABLE IF EXISTS otp_tokens CASCADE"))
             conn.execute(text("DROP TABLE IF EXISTS companies CASCADE"))
             conn.execute(text("DROP TABLE IF EXISTS users CASCADE"))
+            # Remove old tables that no longer exist
+            conn.execute(text("DROP TABLE IF EXISTS default_rate_predictions CASCADE"))
+            conn.execute(text("DROP TABLE IF EXISTS financial_ratios CASCADE"))
             conn.commit()
         
         print("✅ Existing tables dropped successfully!")
@@ -45,11 +46,11 @@ def reset_database():
         
         print("\n🎉 Database schema updated successfully!")
         print("✨ Schema changes applied:")
-        print("   - All models now use UUID primary keys instead of integers")
-        print("   - User, OTPToken, UserSession, Company, FinancialRatio models updated")
-        print("   - DefaultRatePrediction model updated")
-        print("   - All foreign key relationships use UUIDs")
-        print("   - Enhanced security with non-sequential identifiers")
+        print("   - Single Company table with all data (company info, ratios, predictions)")
+        print("   - Removed separate FinancialRatio and DefaultRatePrediction tables")
+        print("   - All models use UUID primary keys instead of integers")
+        print("   - User, OTPToken, UserSession models retained")
+        print("   - Simplified data model for better performance")
         
         return True
         

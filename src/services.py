@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import and_, or_, desc
-from .database import Company, FinancialRatio, DefaultRatePrediction
+from .database import Company, User, OTPToken, UserSession
 from .schemas import CompanyCreate, PredictionRequest
 from typing import Optional, List
 from datetime import datetime, timedelta
@@ -22,10 +22,7 @@ class CompanyService:
         skip = (page - 1) * limit
         take = min(limit, 100) 
 
-        query = self.db.query(Company).options(
-            selectinload(Company.ratios),
-            selectinload(Company.predictions)
-        )
+        query = self.db.query(Company)
 
         if sector:
             query = query.filter(Company.sector.ilike(f"%{sector}%"))
@@ -72,30 +69,36 @@ class CompanyService:
             }
         }
 
-    def get_company_by_id(self, company_id: int):
-        """Get company by ID with related data"""
-        return self.db.query(Company).options(
-            selectinload(Company.ratios),
-            selectinload(Company.predictions)
-        ).filter(Company.id == company_id).first()
+    def get_company_by_id(self, company_id: str):
+        """Get company by ID"""
+        return self.db.query(Company).filter(Company.id == company_id).first()
 
     def get_company_by_symbol(self, symbol: str):
-        """Get company by symbol (lightweight for predictions)"""
+        """Get company by symbol"""
         return self.db.query(Company).filter(Company.symbol == symbol.upper()).first()
 
     def get_company_by_name(self, name: str):
-        """Get company by name (lightweight for predictions)"""
+        """Get company by name"""
         return self.db.query(Company).filter(Company.name == name).first()
 
-    def create_company(self, company_data: CompanyCreate):
-        """Create a new company"""
+    def create_company(self, company_data: CompanyCreate, prediction_data: dict):
+        """Create a new company with prediction data"""
         company = Company(
             symbol=company_data.symbol.upper(),
             name=company_data.name,
             market_cap=company_data.market_cap,
             sector=company_data.sector,
             reporting_year=company_data.reporting_year,
-            reporting_quarter=company_data.reporting_quarter
+            reporting_quarter=company_data.reporting_quarter,
+            long_term_debt_to_total_capital=company_data.long_term_debt_to_total_capital,
+            total_debt_to_ebitda=company_data.total_debt_to_ebitda,
+            net_income_margin=company_data.net_income_margin,
+            ebit_to_interest_expense=company_data.ebit_to_interest_expense,
+            return_on_assets=company_data.return_on_assets,
+            risk_level=prediction_data["risk_level"],
+            confidence=prediction_data["confidence"],
+            probability=prediction_data.get("probability"),
+            predicted_at=datetime.utcnow()
         )
         
         self.db.add(company)
@@ -104,93 +107,155 @@ class CompanyService:
         
         return company
 
+    def upsert_company(self, company_data: CompanyCreate, prediction_data: dict):
+        """Create a new company or update existing one if symbol already exists"""
+        existing_company = self.get_company_by_symbol(company_data.symbol)
+        
+        if existing_company:
+            # Update existing company
+            existing_company.name = company_data.name
+            existing_company.market_cap = company_data.market_cap
+            existing_company.sector = company_data.sector
+            existing_company.reporting_year = company_data.reporting_year
+            existing_company.reporting_quarter = company_data.reporting_quarter
+            existing_company.long_term_debt_to_total_capital = company_data.long_term_debt_to_total_capital
+            existing_company.total_debt_to_ebitda = company_data.total_debt_to_ebitda
+            existing_company.net_income_margin = company_data.net_income_margin
+            existing_company.ebit_to_interest_expense = company_data.ebit_to_interest_expense
+            existing_company.return_on_assets = company_data.return_on_assets
+            existing_company.risk_level = prediction_data["risk_level"]
+            existing_company.confidence = prediction_data["confidence"]
+            existing_company.probability = prediction_data.get("probability")
+            existing_company.predicted_at = datetime.utcnow()
+            
+            self.db.commit()
+            self.db.refresh(existing_company)
+            return existing_company
+        else:
+            # Create new company
+            return self.create_company(company_data, prediction_data)
+
+    def update_company(self, company_id: str, update_data: dict, prediction_data: dict = None):
+        """Update company information and optionally recalculate prediction"""
+        company = self.get_company_by_id(company_id)
+        if not company:
+            return None
+        
+        for field, value in update_data.items():
+            if value is not None and hasattr(company, field):
+                if field == 'name':
+                    setattr(company, field, value)
+                else:
+                    setattr(company, field, value)
+        
+        if prediction_data:
+            company.risk_level = prediction_data["risk_level"]
+            company.confidence = prediction_data["confidence"]
+            company.probability = prediction_data.get("probability")
+            company.predicted_at = datetime.utcnow()
+        
+        company.updated_at = datetime.utcnow()
+        self.db.commit()
+        self.db.refresh(company)
+        return company
+
+    def delete_company_data(self, company_id: str):
+        """Delete company (all data is in one table now)"""
+        company = self.get_company_by_id(company_id)
+        if not company:
+            return False
+        
+        self.db.delete(company)
+        self.db.commit()
+        return True
+
 
 class PredictionService:
     def __init__(self, db: Session):
         self.db = db
 
-    def get_recent_prediction(self, company_id: int, hours: int = 24):
-        """Check if there's a recent prediction for the company"""
-        cutoff_time = datetime.utcnow() - timedelta(hours=hours)
+    def save_or_update_company_prediction(self, company_id: str, prediction_data: dict, ratios: dict, reporting_year: Optional[str] = None, reporting_quarter: Optional[str] = None):
+        """Update existing company with new prediction and ratios"""
+        company = self.db.query(Company).filter(Company.id == company_id).first()
+        if not company:
+            return None
         
-        return self.db.query(DefaultRatePrediction).filter(
-            and_(
-                DefaultRatePrediction.company_id == company_id,
-                DefaultRatePrediction.predicted_at > cutoff_time
-            )
-        ).order_by(desc(DefaultRatePrediction.predicted_at)).first()
-
-    def save_prediction(self, company_id: str, prediction_data: dict, ratios: dict, reporting_year: Optional[str] = None, reporting_quarter: Optional[str] = None):
-        """Save or update prediction results to database (one prediction per company)"""
-        # First, save/update the financial ratios
-        financial_ratio = self.save_financial_ratios(company_id, ratios, reporting_year, reporting_quarter)
+        for key, value in ratios.items():
+            if value is not None and hasattr(company, key):
+                setattr(company, key, value)
         
-        # Check if company already has a prediction
-        existing_prediction = self.db.query(DefaultRatePrediction).filter(
-            DefaultRatePrediction.company_id == company_id
-        ).first()
+        company.risk_level = prediction_data["risk_level"]
+        company.confidence = prediction_data["confidence"]
+        company.probability = prediction_data.get("probability")
+        company.predicted_at = datetime.utcnow()
         
-        if existing_prediction:
-            # Update existing prediction
-            existing_prediction.risk_level = prediction_data["risk_level"]
-            existing_prediction.confidence = prediction_data["confidence"]
-            existing_prediction.probability = prediction_data.get("probability")
-            existing_prediction.financial_ratio_id = financial_ratio.id
-            existing_prediction.predicted_at = datetime.utcnow()
-            existing_prediction.updated_at = datetime.utcnow()
-            
-            self.db.flush()
-            return existing_prediction
-        else:
-            # Create new prediction
-            prediction = DefaultRatePrediction(
-                company_id=company_id,
-                financial_ratio_id=financial_ratio.id,
-                risk_level=prediction_data["risk_level"],
-                confidence=prediction_data["confidence"],
-                probability=prediction_data.get("probability")
-            )
-            
-            self.db.add(prediction)
-            self.db.flush()
-            return prediction
-
-    def save_financial_ratios(self, company_id: str, ratios: dict, reporting_year: Optional[str] = None, reporting_quarter: Optional[str] = None):
-        """Save or update financial ratios for a company (one ratio record per company)"""
-        # Set defaults if not provided
-        if not reporting_year:
-            reporting_year = str(datetime.utcnow().year)
-        if not reporting_quarter:
-            # Determine quarter based on current month
-            current_month = datetime.utcnow().month
-            reporting_quarter = f"Q{(current_month - 1) // 3 + 1}"
+        if reporting_year:
+            company.reporting_year = reporting_year
+        if reporting_quarter:
+            company.reporting_quarter = reporting_quarter
         
-        existing_ratio = self.db.query(FinancialRatio).filter(
-            FinancialRatio.company_id == company_id
-        ).first()
-
-        if existing_ratio:
-            # Update existing ratios
-            for key, value in ratios.items():
-                if value is not None and hasattr(existing_ratio, key):
-                    setattr(existing_ratio, key, value)
-            existing_ratio.updated_at = datetime.utcnow()
-            existing_ratio.reporting_year = reporting_year
-            existing_ratio.reporting_quarter = reporting_quarter
-            self.db.flush()
-            return existing_ratio
-        else:
-            # Create new financial ratios
-            ratio_data = {k: v for k, v in ratios.items() if v is not None}
-            ratio_data['company_id'] = company_id
-            ratio_data['reporting_year'] = reporting_year
-            ratio_data['reporting_quarter'] = reporting_quarter
-                
-            financial_ratio = FinancialRatio(**ratio_data)
-            self.db.add(financial_ratio)
-            self.db.flush() 
-            return financial_ratio
+        company.updated_at = datetime.utcnow()
+        self.db.flush()
+        return company
 
     def commit_transaction(self):
         """Commit the current transaction"""
         self.db.commit()
+
+
+class DatabaseService:
+    def __init__(self, db: Session):
+        self.db = db
+
+    def reset_table(self, table_name: str = None):
+        """Reset specific table or all tables"""
+        from .database import Base, Company, User, OTPToken, UserSession
+        
+        tables_reset = []
+        affected_records = 0
+        
+        if table_name:
+            if table_name.lower() == "companies":
+                count = self.db.query(Company).count()
+                self.db.query(Company).delete()
+                tables_reset.append("companies")
+                affected_records += count
+                
+            elif table_name.lower() == "users":
+                count = self.db.query(User).count()
+                self.db.query(User).delete()
+                tables_reset.append("users")
+                affected_records += count
+                
+            elif table_name.lower() == "otp_tokens":
+                count = self.db.query(OTPToken).count()
+                self.db.query(OTPToken).delete()
+                tables_reset.append("otp_tokens")
+                affected_records += count
+                
+            elif table_name.lower() == "user_sessions":
+                count = self.db.query(UserSession).count()
+                self.db.query(UserSession).delete()
+                tables_reset.append("user_sessions")
+                affected_records += count
+            else:
+                raise ValueError(f"Unknown table: {table_name}")
+        else:
+            count_companies = self.db.query(Company).count()
+            count_otp = self.db.query(OTPToken).count()
+            count_sessions = self.db.query(UserSession).count()
+            count_users = self.db.query(User).count()
+            
+            self.db.query(Company).delete()
+            self.db.query(OTPToken).delete()
+            self.db.query(UserSession).delete()
+            self.db.query(User).delete()
+            
+            tables_reset = ["companies", "otp_tokens", "user_sessions", "users"]
+            affected_records = count_companies + count_otp + count_sessions + count_users
+        
+        self.db.commit()
+        return {
+            "tables_reset": tables_reset,
+            "affected_records": affected_records
+        }

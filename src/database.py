@@ -28,7 +28,6 @@ class User(Base):
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     last_login = Column(DateTime, nullable=True)
     
-    # Removed company relationship as requested
     otp_tokens = relationship("OTPToken", back_populates="user", cascade="all, delete-orphan")
     sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
 
@@ -64,59 +63,27 @@ class Company(Base):
     __tablename__ = "companies"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    
     symbol = Column(String, unique=True, index=True, nullable=False)
     name = Column(String, nullable=False)
     market_cap = Column(Numeric(precision=20, scale=2), nullable=False)
     sector = Column(String, nullable=False)
     reporting_year = Column(String, nullable=True)
     reporting_quarter = Column(String, nullable=True)
-    created_at = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
-    # Removed user relationship as requested
-    ratios = relationship("FinancialRatio", back_populates="company", cascade="all, delete-orphan")
-    predictions = relationship("DefaultRatePrediction", back_populates="company", cascade="all, delete-orphan")
-
-class FinancialRatio(Base):
-    __tablename__ = "financial_ratios"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
-    
-    # Required ratios for ML model
     long_term_debt_to_total_capital = Column(Numeric(precision=10, scale=4), nullable=False)
     total_debt_to_ebitda = Column(Numeric(precision=10, scale=4), nullable=False)
     net_income_margin = Column(Numeric(precision=10, scale=4), nullable=False)
     ebit_to_interest_expense = Column(Numeric(precision=10, scale=4), nullable=False)
     return_on_assets = Column(Numeric(precision=10, scale=4), nullable=False)
     
-    # Reporting information
-    reporting_year = Column(String, nullable=True)
-    reporting_quarter = Column(String, nullable=True)
-    
-    created_at = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
-    
-    company = relationship("Company", back_populates="ratios")
-    predictions = relationship("DefaultRatePrediction", back_populates="financial_ratio", cascade="all, delete-orphan")
-
-class DefaultRatePrediction(Base):
-    __tablename__ = "default_rate_predictions"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
-    financial_ratio_id = Column(UUID(as_uuid=True), ForeignKey("financial_ratios.id"), nullable=False)
-    
     risk_level = Column(String, nullable=False)
     confidence = Column(Numeric(precision=5, scale=4), nullable=False)
     probability = Column(Numeric(precision=5, scale=4), nullable=True)
-    
     predicted_at = Column(DateTime, default=func.now())
+    
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
-    
-    company = relationship("Company", back_populates="predictions")
-    financial_ratio = relationship("FinancialRatio", back_populates="predictions")
 
 def get_database_url():
     database_url = os.getenv("DATABASE_URL")

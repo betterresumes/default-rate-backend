@@ -39,36 +39,8 @@ async def get_companies(
         
         companies_data = []
         for company in result["companies"]:
-            # Serialize recent ratios with only the 5 required fields
-            recent_ratios = []
-            if company.ratios:
-                for ratio in company.ratios[-3:]:
-                    recent_ratios.append({
-                        "id": ratio.id,
-                        "long_term_debt_to_total_capital": float(ratio.long_term_debt_to_total_capital),
-                        "total_debt_to_ebitda": float(ratio.total_debt_to_ebitda),
-                        "net_income_margin": float(ratio.net_income_margin),
-                        "ebit_to_interest_expense": float(ratio.ebit_to_interest_expense),
-                        "return_on_assets": float(ratio.return_on_assets),
-                        "reporting_year": ratio.reporting_year,
-                        "reporting_quarter": ratio.reporting_quarter,
-                        "created_at": serialize_datetime(ratio.created_at)
-                    })
-            
-            # Serialize recent predictions
-            recent_predictions = []
-            if company.predictions:
-                for pred in company.predictions[-3:]:
-                    recent_predictions.append({
-                        "id": pred.id,
-                        "risk_level": pred.risk_level,
-                        "confidence": float(pred.confidence),
-                        "probability": float(pred.probability) if pred.probability else None,
-                        "predicted_at": serialize_datetime(pred.predicted_at)
-                    })
-
-            company_dict = {
-                "id": company.id,
+            company_data = {
+                "id": str(company.id),
                 "symbol": company.symbol,
                 "name": company.name,
                 "market_cap": float(company.market_cap) if company.market_cap else None,
@@ -77,10 +49,21 @@ async def get_companies(
                 "reporting_quarter": company.reporting_quarter,
                 "created_at": serialize_datetime(company.created_at),
                 "updated_at": serialize_datetime(company.updated_at),
-                "recent_ratios": recent_ratios,
-                "recent_predictions": recent_predictions
+                "ratios": {
+                    "long_term_debt_to_total_capital": float(company.long_term_debt_to_total_capital),
+                    "total_debt_to_ebitda": float(company.total_debt_to_ebitda),
+                    "net_income_margin": float(company.net_income_margin),
+                    "ebit_to_interest_expense": float(company.ebit_to_interest_expense),
+                    "return_on_assets": float(company.return_on_assets)
+                },
+                "prediction": {
+                    "risk_level": company.risk_level,
+                    "confidence": float(company.confidence),
+                    "probability": float(company.probability) if company.probability else None,
+                    "predicted_at": serialize_datetime(company.predicted_at)
+                }
             }
-            companies_data.append(company_dict)
+            companies_data.append(company_data)
         
         return PaginatedResponse(
             success=True,
@@ -90,9 +73,10 @@ async def get_companies(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch companies: {str(e)}")
 
+
 @router.get("/{company_id}", response_model=dict)
 async def get_company_by_id(
-    company_id: int, 
+    company_id: str, 
     current_user: User = Depends(get_current_verified_user),
     db: Session = Depends(get_db)
 ):
@@ -107,7 +91,7 @@ async def get_company_by_id(
         return {
             "success": True,
             "data": {
-                "id": company.id,
+                "id": str(company.id),
                 "symbol": company.symbol,
                 "name": company.name,
                 "market_cap": float(company.market_cap) if company.market_cap else None,
@@ -116,42 +100,20 @@ async def get_company_by_id(
                 "reporting_quarter": company.reporting_quarter,
                 "created_at": serialize_datetime(company.created_at),
                 "updated_at": serialize_datetime(company.updated_at),
-                "ratios": [
-                    {
-                        "id": ratio.id,
-                        "long_term_debt_to_total_capital": float(ratio.long_term_debt_to_total_capital),
-                        "total_debt_to_ebitda": float(ratio.total_debt_to_ebitda),
-                        "net_income_margin": float(ratio.net_income_margin),
-                        "ebit_to_interest_expense": float(ratio.ebit_to_interest_expense),
-                        "return_on_assets": float(ratio.return_on_assets),
-                        "reporting_year": ratio.reporting_year,
-                        "reporting_quarter": ratio.reporting_quarter,
-                        "created_at": serialize_datetime(ratio.created_at),
-                        "updated_at": serialize_datetime(ratio.updated_at)
-                    } for ratio in company.ratios[-10:]
-                ],
-                "predictions": [
-                    {
-                        "id": pred.id,
-                        "risk_level": pred.risk_level,
-                        "confidence": float(pred.confidence),
-                        "probability": float(pred.probability) if pred.probability else None,
-                        "long_term_debt_to_total_capital": float(pred.long_term_debt_to_total_capital),
-                        "total_debt_to_ebitda": float(pred.total_debt_to_ebitda),
-                        "net_income_margin": float(pred.net_income_margin),
-                        "ebit_to_interest_expense": float(pred.ebit_to_interest_expense),
-                        "return_on_assets": float(pred.return_on_assets),
-                        "predicted_at": serialize_datetime(pred.predicted_at),
-                        "created_at": serialize_datetime(pred.created_at)
-                    } for pred in company.predictions[-10:]
-                ]
+                "ratios": {
+                    "long_term_debt_to_total_capital": float(company.long_term_debt_to_total_capital),
+                    "total_debt_to_ebitda": float(company.total_debt_to_ebitda),
+                    "net_income_margin": float(company.net_income_margin),
+                    "ebit_to_interest_expense": float(company.ebit_to_interest_expense),
+                    "return_on_assets": float(company.return_on_assets)
+                },
+                "prediction": {
+                    "risk_level": company.risk_level,
+                    "confidence": float(company.confidence),
+                    "probability": float(company.probability) if company.probability else None,
+                    "predicted_at": serialize_datetime(company.predicted_at)
+                }
             }
         }
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch company: {str(e)}")
-
-# Company creation removed - companies are only created through prediction API
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create company: {str(e)}")
