@@ -475,6 +475,7 @@ def process_bulk_normalized_task(self, file_content_b64: str, original_filename:
                             "risk_level": annual_prediction.risk_level,
                             "confidence": safe_float(annual_prediction.confidence),
                             "reporting_year": annual_prediction.reporting_year,
+                            "reporting_quarter": annual_prediction.reporting_quarter,
                             "financial_ratios": ratios
                         },
                         "status": "success",

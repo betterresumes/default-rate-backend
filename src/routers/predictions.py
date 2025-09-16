@@ -118,6 +118,7 @@ async def predict_annual_default_rate(
                     "id": str(annual_prediction.id),
                     "type": "annual",
                     "reporting_year": annual_prediction.reporting_year,
+                    "reporting_quarter": annual_prediction.reporting_quarter,
                     "probability": safe_float(annual_prediction.probability),
                     "primary_probability": safe_float(annual_prediction.probability),
                     "risk_level": annual_prediction.risk_level,
@@ -262,6 +263,7 @@ async def unified_predict(
                 market_cap=request.market_cap,
                 sector=request.sector,
                 reporting_year=request.reporting_year,
+                reporting_quarter=request.reporting_quarter,
                 long_term_debt_to_total_capital=request.long_term_debt_to_total_capital,
                 total_debt_to_ebitda=request.total_debt_to_ebitda,
                 net_income_margin=request.net_income_margin,
@@ -344,6 +346,7 @@ async def get_companies_with_predictions(
                 company_data["annual_predictions"].append({
                     "id": str(pred.id),
                     "reporting_year": pred.reporting_year,
+                    "reporting_quarter": pred.reporting_quarter,
                     "probability": safe_float(pred.probability),
                     "risk_level": pred.risk_level,
                     "confidence": safe_float(pred.confidence),
@@ -416,6 +419,7 @@ async def get_company_by_id(
             company_data["annual_predictions"].append({
                 "id": str(pred.id),
                 "reporting_year": pred.reporting_year,
+                "reporting_quarter": pred.reporting_quarter,
                 "probability": safe_float(pred.probability),
                 "risk_level": pred.risk_level,
                 "confidence": safe_float(pred.confidence),
@@ -673,7 +677,8 @@ async def bulk_predict_from_file(
                         company=company,
                         financial_data=financial_data,
                         prediction_results=prediction_result,
-                        reporting_year=str(row.get('reporting_year', '2024'))
+                        reporting_year=str(row.get('reporting_year', '2024')),
+                        reporting_quarter=str(row['reporting_quarter'])
                     )
                     
                     result_item = BulkPredictionItem(
@@ -1113,13 +1118,15 @@ async def update_company_prediction(
                     company=company,
                     financial_data=financial_data,
                     prediction_results=prediction_result,
-                    reporting_year=request.reporting_year
+                    reporting_year=request.reporting_year,
+                    reporting_quarter=request.reporting_quarter
                 )
                 
                 response_data["updated_prediction"] = {
                     "type": "annual",
                     "id": str(updated_prediction.id),
                     "reporting_year": updated_prediction.reporting_year,
+                    "reporting_quarter": updated_prediction.reporting_quarter,
                     "probability": safe_float(updated_prediction.probability),
                     "primary_probability": safe_float(updated_prediction.probability),
                     "risk_level": updated_prediction.risk_level,

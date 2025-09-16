@@ -72,6 +72,7 @@ async def get_companies(
                     {
                         "id": str(pred.id),
                         "reporting_year": pred.reporting_year,
+                        "reporting_quarter": pred.reporting_quarter,
                         "risk_level": pred.risk_level,
                         "confidence": safe_float(pred.confidence),
                         "probability": safe_float(pred.probability),
@@ -143,6 +144,7 @@ async def get_company_by_id(
                     {
                         "id": str(pred.id),
                         "reporting_year": pred.reporting_year,
+                        "reporting_quarter": pred.reporting_quarter,
                         "risk_level": pred.risk_level,
                         "confidence": safe_float(pred.confidence),
                         "probability": safe_float(pred.probability),
