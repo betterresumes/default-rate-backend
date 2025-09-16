@@ -1,62 +1,28 @@
 #!/usr/bin/env python3
 """
-Database schema update script
-Drops existing tables and recreates them with the new schema
+Database reset script for the new single table schema
 """
-
-import sys
 import os
+import sys
 from dotenv import load_dotenv
 
-# Load environment variables
+# Load environment variables from .env file
 load_dotenv()
 
-# Add src to path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
+# Add the current directory to Python path
+sys.path.append('/Users/nikhil/Downloads/pranit/work/final/default-rate/backend')
 
-from database import create_database_engine, Base
-from sqlalchemy import text
+from src.database import engine, Base
 
 def reset_database():
-    """Drop all tables and recreate them"""
-    print("🗄️ Resetting database schema...")
+    print('Dropping all existing tables...')
+    Base.metadata.drop_all(bind=engine)
     
-    try:
-        engine = create_database_engine()
-        
-        # Drop all tables
-        print("🗑️ Dropping existing tables...")
-        with engine.connect() as conn:
-            # Drop tables in correct order (handle foreign key constraints)
-            conn.execute(text("DROP TABLE IF EXISTS user_sessions CASCADE"))
-            conn.execute(text("DROP TABLE IF EXISTS otp_tokens CASCADE"))
-            conn.execute(text("DROP TABLE IF EXISTS companies CASCADE"))
-            conn.execute(text("DROP TABLE IF EXISTS users CASCADE"))
-            # Remove old tables that no longer exist
-            conn.execute(text("DROP TABLE IF EXISTS default_rate_predictions CASCADE"))
-            conn.execute(text("DROP TABLE IF EXISTS financial_ratios CASCADE"))
-            conn.commit()
-        
-        print("✅ Existing tables dropped successfully!")
-        
-        # Create all tables with new UUID schema
-        print("📊 Creating tables with new UUID schema...")
-        Base.metadata.create_all(bind=engine)
-        print("✅ New tables created successfully!")
-        
-        print("\n🎉 Database schema updated successfully!")
-        print("✨ Schema changes applied:")
-        print("   - Single Company table with all data (company info, ratios, predictions)")
-        print("   - Removed separate FinancialRatio and DefaultRatePrediction tables")
-        print("   - All models use UUID primary keys instead of integers")
-        print("   - User, OTPToken, UserSession models retained")
-        print("   - Simplified data model for better performance")
-        
-        return True
-        
-    except Exception as e:
-        print(f"❌ Database reset failed: {e}")
-        return False
+    print('Creating new tables with updated schema...')
+    Base.metadata.create_all(bind=engine)
+    
+    print('Database reset complete!')
+    print('New schema includes a single "companies" table with all company info, financial ratios, and predictions.')
 
 if __name__ == "__main__":
     reset_database()

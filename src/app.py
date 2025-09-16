@@ -95,7 +95,6 @@ async def lifespan(app: FastAPI):
     await asyncio.sleep(2)
     worker_status = check_celery_worker_connection()
     
-    # Pre-load ML models (using new 5-ratio model)
     logger.info("🤖 Pre-loading ML models...")
     try:
         from .ml_service import ml_model
@@ -218,12 +217,10 @@ async def health_check():
     
     start_time = time.time()
     
-    # Check all connections
     db_status = check_database_connection()
     redis_status = check_redis_connection()
     worker_status = check_celery_worker_connection()
     
-    # Get worker details
     worker_details = {}
     try:
         stats = celery_app.control.inspect().stats()
@@ -273,11 +270,10 @@ async def health_check():
 async def test_celery_task():
     """Test Celery task execution"""
     try:
-        # Send a test task (this won't actually process anything, just test connectivity)
         result = celery_app.send_task(
             'src.tasks.process_bulk_excel_task',
             args=['/tmp/test', 'test.xlsx'],
-            countdown=1  # Delay execution by 1 second
+            countdown=1  
         )
         
         return {

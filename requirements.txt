@@ -8,6 +8,7 @@ pandas
 numpy
 scikit-learn
 joblib
+lightgbm
 python-multipart
 openpyxl
 celery

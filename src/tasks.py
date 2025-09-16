@@ -4,6 +4,7 @@ import time
 import traceback
 import io
 import base64
+import math
 from typing import Dict, Any
 from celery import current_task
 from .celery_app import celery_app
@@ -12,6 +13,20 @@ from .services import CompanyService
 from .schemas import CompanyCreate
 from .ml_service import ml_model
 from .email_service import email_service
+
+
+def safe_float(value):
+    """Convert value to float, handling None and NaN values"""
+    if value is None:
+        return None
+    try:
+        float_val = float(value)
+        # Check if it's NaN or infinite
+        if math.isnan(float_val) or math.isinf(float_val):
+            return None
+        return float_val
+    except (ValueError, TypeError):
+        return None
 
 
 @celery_app.task(name="src.tasks.send_verification_email_task")
@@ -154,7 +169,7 @@ def process_bulk_excel_task(self, file_content_b64: str, original_filename: str)
                 if pd.isna(market_cap):
                     market_cap = 1000000000
                 else:
-                    market_cap = float(market_cap)
+                    market_cap = safe_float(market_cap)
                 
                 sector = row.get('sector', 'Unknown')
                 if pd.isna(sector):
@@ -175,11 +190,11 @@ def process_bulk_excel_task(self, file_content_b64: str, original_filename: str)
                     reporting_quarter = str(reporting_quarter).strip()
                 
                 ratios = {
-                    'long_term_debt_to_total_capital': float(row['long_term_debt_to_total_capital']),
-                    'total_debt_to_ebitda': float(row['total_debt_to_ebitda']),
-                    'net_income_margin': float(row['net_income_margin']),
-                    'ebit_to_interest_expense': float(row['ebit_to_interest_expense']),
-                    'return_on_assets': float(row['return_on_assets'])
+                    'long_term_debt_to_total_capital': safe_float(row['long_term_debt_to_total_capital']),
+                    'total_debt_to_ebitda': safe_float(row['total_debt_to_ebitda']),
+                    'net_income_margin': safe_float(row['net_income_margin']),
+                    'ebit_to_interest_expense': safe_float(row['ebit_to_interest_expense']),
+                    'return_on_assets': safe_float(row['return_on_assets'])
                 }
                 
                 prediction_result = ml_model.predict_default_probability(ratios)
@@ -208,19 +223,19 @@ def process_bulk_excel_task(self, file_content_b64: str, original_filename: str)
                     "company_name": company_name,
                     "stock_symbol": stock_symbol,
                     "sector": company.sector,
-                    "market_cap": float(company.market_cap),
+                    "market_cap": safe_float(company.market_cap),
                     "prediction": {
                         "id": str(company.id),
                         "risk_level": company.risk_level,
-                        "confidence": float(company.confidence),
-                        "probability": float(company.probability) if company.probability else None,
+                        "confidence": safe_float(company.confidence),
+                        "probability": safe_float(company.probability) if company.probability else None,
                         "predicted_at": company.predicted_at.isoformat() if company.predicted_at else None,
                         "financial_ratios": {
-                            "long_term_debt_to_total_capital": float(company.long_term_debt_to_total_capital),
-                            "total_debt_to_ebitda": float(company.total_debt_to_ebitda),
-                            "net_income_margin": float(company.net_income_margin),
-                            "ebit_to_interest_expense": float(company.ebit_to_interest_expense),
-                            "return_on_assets": float(company.return_on_assets)
+                            "long_term_debt_to_total_capital": safe_float(company.long_term_debt_to_total_capital),
+                            "total_debt_to_ebitda": safe_float(company.total_debt_to_ebitda),
+                            "net_income_margin": safe_float(company.net_income_margin),
+                            "ebit_to_interest_expense": safe_float(company.ebit_to_interest_expense),
+                            "return_on_assets": safe_float(company.return_on_assets)
                         }
                     },
                     "status": "success",
@@ -235,7 +250,7 @@ def process_bulk_excel_task(self, file_content_b64: str, original_filename: str)
                     "company_name": str(row.get('company_name', 'Unknown')),
                     "stock_symbol": str(row.get('stock_symbol', 'Unknown')),
                     "sector": str(row.get('sector', '')) if pd.notna(row.get('sector')) else None,
-                    "market_cap": float(row.get('market_cap', 0)) if pd.notna(row.get('market_cap')) else None,
+                    "market_cap": safe_float(row.get('market_cap', 0)) if pd.notna(row.get('market_cap')) else None,
                     "prediction": {},
                     "status": "error",
                     "error_message": str(e)
@@ -293,3 +308,283 @@ def process_bulk_excel_task(self, file_content_b64: str, original_filename: str)
             db.close()
         except Exception:
             pass
+
+
+@celery_app.task(bind=True, name="src.tasks.process_bulk_normalized_task")
+def process_bulk_normalized_task(self, file_content_b64: str, original_filename: str, prediction_type: str = "annual") -> Dict[str, Any]:
+    """
+    Background task to process CSV/Excel file with multiple companies for bulk predictions.
+    Uses the new normalized database schema (companies, annual_predictions, quarterly_predictions).
+    
+    Args:
+        file_content_b64: Base64 encoded content of the uploaded file
+        original_filename: Original name of the uploaded file
+        prediction_type: "annual" or "quarterly"
+        
+    Returns:
+        Dictionary with processing results
+    """
+    task_id = self.request.id
+    start_time = time.time()
+    
+    self.update_state(
+        state="PROGRESS",
+        meta={
+            "status": f"Starting {prediction_type} bulk prediction processing...",
+            "current": 0,
+            "total": 0,
+            "filename": original_filename,
+            "prediction_type": prediction_type
+        }
+    )
+    
+    session_factory = get_session_local()
+    db = session_factory()
+    
+    results = []
+    successful_predictions = 0
+    failed_predictions = 0
+    total_companies = 0
+    
+    try:
+        # Decode and read file
+        file_content = base64.b64decode(file_content_b64)
+        
+        if original_filename.endswith('.csv'):
+            df = pd.read_csv(io.StringIO(file_content.decode('utf-8')))
+        else:
+            df = pd.read_excel(io.BytesIO(file_content))
+        
+        total_companies = len(df)
+        
+        # Validate required columns based on prediction type
+        if prediction_type == "annual":
+            required_columns = [
+                'stock_symbol', 'company_name',
+                'long_term_debt_to_total_capital', 'total_debt_to_ebitda', 
+                'net_income_margin', 'ebit_to_interest_expense', 'return_on_assets'
+            ]
+        else:  # quarterly
+            required_columns = [
+                'stock_symbol', 'company_name', 'reporting_year', 'reporting_quarter',
+                'total_debt_to_ebitda', 'sga_margin', 
+                'long_term_debt_to_total_capital', 'return_on_capital'
+            ]
+        
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            raise ValueError(f"Missing required columns: {', '.join(missing_columns)}")
+        
+        # Optional columns with defaults
+        optional_columns = {
+            'market_cap': 1000000000,
+            'sector': 'Unknown',
+            'reporting_year': '2024',
+        }
+        
+        if prediction_type == "quarterly":
+            optional_columns['reporting_quarter'] = 'Q4'
+        
+        # Add missing optional columns
+        for col, default_value in optional_columns.items():
+            if col not in df.columns:
+                df[col] = default_value
+        
+        company_service = CompanyService(db)
+        
+        # Process each company
+        for index, row in df.iterrows():
+            try:
+                # Update progress
+                self.update_state(
+                    state="PROGRESS",
+                    meta={
+                        "status": f"Processing company {index + 1} of {total_companies}...",
+                        "current": index + 1,
+                        "total": total_companies,
+                        "filename": original_filename,
+                        "successful": successful_predictions,
+                        "failed": failed_predictions,
+                        "prediction_type": prediction_type
+                    }
+                )
+                
+                # Validate required data
+                stock_symbol = str(row['stock_symbol']).strip().upper()
+                company_name = str(row['company_name']).strip()
+                
+                if not stock_symbol or not company_name or stock_symbol.lower() == 'nan' or company_name.lower() == 'nan':
+                    raise ValueError("Stock symbol and company name are required")
+                
+                # Handle optional fields
+                market_cap = row.get('market_cap', 1000000000)
+                if pd.isna(market_cap):
+                    market_cap = 1000000000
+                else:
+                    market_cap = safe_float(market_cap)
+                
+                sector = row.get('sector', 'Unknown')
+                if pd.isna(sector):
+                    sector = 'Unknown'
+                else:
+                    sector = str(sector).strip()
+                
+                reporting_year = str(row.get('reporting_year', '2024')).strip()
+                
+                # Create or get company
+                company = company_service.create_company(
+                    symbol=stock_symbol,
+                    name=company_name,
+                    market_cap=market_cap,
+                    sector=sector
+                )
+                
+                if prediction_type == "annual":
+                    # Annual prediction
+                    ratios = {
+                        'long_term_debt_to_total_capital': safe_float(row['long_term_debt_to_total_capital']),
+                        'total_debt_to_ebitda': safe_float(row['total_debt_to_ebitda']),
+                        'net_income_margin': safe_float(row['net_income_margin']),
+                        'ebit_to_interest_expense': safe_float(row['ebit_to_interest_expense']),
+                        'return_on_assets': safe_float(row['return_on_assets'])
+                    }
+                    
+                    prediction_result = ml_model.predict_default_probability(ratios)
+                    
+                    if "error" in prediction_result:
+                        raise ValueError(f"Annual prediction failed: {prediction_result['error']}")
+                    
+                    # Create annual prediction
+                    annual_prediction = company_service.create_annual_prediction(
+                        company=company,
+                        financial_data=ratios,
+                        prediction_results=prediction_result,
+                        reporting_year=reporting_year
+                    )
+                    
+                    result_item = {
+                        "stock_symbol": stock_symbol,
+                        "company_name": company_name,
+                        "sector": sector,
+                        "market_cap": market_cap,
+                        "prediction": {
+                            "id": str(annual_prediction.id),
+                            "type": "annual",
+                            "probability": safe_float(annual_prediction.probability),
+                            "primary_probability": safe_float(annual_prediction.probability),
+                            "risk_level": annual_prediction.risk_level,
+                            "confidence": safe_float(annual_prediction.confidence),
+                            "reporting_year": annual_prediction.reporting_year,
+                            "financial_ratios": ratios
+                        },
+                        "status": "success",
+                        "error_message": None
+                    }
+                    
+                else:  # quarterly
+                    # Quarterly prediction
+                    reporting_quarter = str(row['reporting_quarter']).strip()
+                    
+                    ratios = {
+                        'total_debt_to_ebitda': safe_float(row['total_debt_to_ebitda']),
+                        'sga_margin': safe_float(row['sga_margin']),
+                        'long_term_debt_to_total_capital': safe_float(row['long_term_debt_to_total_capital']),
+                        'return_on_capital': safe_float(row['return_on_capital'])
+                    }
+                    
+                    from .quarterly_ml_service import quarterly_ml_model
+                    prediction_result = quarterly_ml_model.predict_default_probability(ratios)
+                    
+                    if "error" in prediction_result:
+                        raise ValueError(f"Quarterly prediction failed: {prediction_result['error']}")
+                    
+                    # Create quarterly prediction
+                    quarterly_prediction = company_service.create_quarterly_prediction(
+                        company=company,
+                        financial_data=ratios,
+                        prediction_results=prediction_result,
+                        reporting_year=reporting_year,
+                        reporting_quarter=reporting_quarter
+                    )
+                    
+                    result_item = {
+                        "stock_symbol": stock_symbol,
+                        "company_name": company_name,
+                        "sector": sector,
+                        "market_cap": market_cap,
+                        "prediction": {
+                            "id": str(quarterly_prediction.id),
+                            "type": "quarterly",
+                            "probabilities": {
+                                "logistic": safe_float(quarterly_prediction.logistic_probability),
+                                "gbm": safe_float(quarterly_prediction.gbm_probability),
+                                "ensemble": safe_float(quarterly_prediction.ensemble_probability)
+                            },
+                            "primary_probability": safe_float(quarterly_prediction.ensemble_probability),
+                            "risk_level": quarterly_prediction.risk_level,
+                            "confidence": safe_float(quarterly_prediction.confidence),
+                            "reporting_year": quarterly_prediction.reporting_year,
+                            "reporting_quarter": quarterly_prediction.reporting_quarter,
+                            "financial_ratios": ratios
+                        },
+                        "status": "success",
+                        "error_message": None
+                    }
+                
+                results.append(result_item)
+                successful_predictions += 1
+                
+            except Exception as e:
+                # Handle individual company prediction failure
+                result_item = {
+                    "stock_symbol": str(row.get('stock_symbol', 'Unknown')),
+                    "company_name": str(row.get('company_name', 'Unknown')),
+                    "sector": str(row.get('sector', 'Unknown')),
+                    "market_cap": safe_float(row.get('market_cap', 0)),
+                    "prediction": None,
+                    "status": "failed",
+                    "error_message": str(e)
+                }
+                results.append(result_item)
+                failed_predictions += 1
+                print(f"Error processing row {index + 1}: {e}")
+        
+        processing_time = time.time() - start_time
+        
+        # Final result
+        result = {
+            "success": True,
+            "message": f"Bulk {prediction_type} prediction completed. {successful_predictions} successful, {failed_predictions} failed.",
+            "total_processed": total_companies,
+            "successful_predictions": successful_predictions,
+            "failed_predictions": failed_predictions,
+            "results": results,
+            "processing_time": processing_time,
+            "completed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "prediction_type": prediction_type,
+            "filename": original_filename
+        }
+        
+        return result
+        
+    except Exception as e:
+        error_msg = f"Bulk processing failed: {str(e)}"
+        print(f"Task {task_id} failed: {error_msg}")
+        print(f"Traceback: {traceback.format_exc()}")
+        
+        # Return error result
+        return {
+            "success": False,
+            "message": error_msg,
+            "total_processed": total_companies,
+            "successful_predictions": successful_predictions,
+            "failed_predictions": failed_predictions,
+            "results": results,
+            "processing_time": time.time() - start_time,
+            "error": error_msg,
+            "prediction_type": prediction_type,
+            "filename": original_filename
+        }
+    
+    finally:
+        db.close()

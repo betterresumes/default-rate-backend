@@ -9,6 +9,7 @@ from ..services import CompanyService
 from ..auth import get_current_verified_user
 from typing import Optional
 from datetime import datetime
+import math
 
 router = APIRouter()
 
@@ -19,6 +20,19 @@ def serialize_datetime(dt):
     if isinstance(dt, datetime):
         return dt.isoformat()
     return dt
+
+def safe_float(value):
+    """Convert value to float, handling None and NaN values"""
+    if value is None:
+        return None
+    try:
+        float_val = float(value)
+        # Check if it's NaN or infinite
+        if math.isnan(float_val) or math.isinf(float_val):
+            return None
+        return float_val
+    except (ValueError, TypeError):
+        return None
 
 
 @router.get("/", response_model=PaginatedResponse)
@@ -35,7 +49,14 @@ async def get_companies(
     """Get paginated list of companies with filtering and sorting"""
     try:
         service = CompanyService(db)
-        result = service.get_companies(page, limit, sector, search, sort_by, sort_order)
+        result = service.get_companies_with_predictions(
+            page=page,
+            limit=limit,
+            sector=sector,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order
+        )
         
         companies_data = []
         for company in result["companies"]:
@@ -43,25 +64,45 @@ async def get_companies(
                 "id": str(company.id),
                 "symbol": company.symbol,
                 "name": company.name,
-                "market_cap": float(company.market_cap) if company.market_cap else None,
+                "market_cap": safe_float(company.market_cap),
                 "sector": company.sector,
-                "reporting_year": company.reporting_year,
-                "reporting_quarter": company.reporting_quarter,
                 "created_at": serialize_datetime(company.created_at),
                 "updated_at": serialize_datetime(company.updated_at),
-                "ratios": {
-                    "long_term_debt_to_total_capital": float(company.long_term_debt_to_total_capital),
-                    "total_debt_to_ebitda": float(company.total_debt_to_ebitda),
-                    "net_income_margin": float(company.net_income_margin),
-                    "ebit_to_interest_expense": float(company.ebit_to_interest_expense),
-                    "return_on_assets": float(company.return_on_assets)
-                },
-                "prediction": {
-                    "risk_level": company.risk_level,
-                    "confidence": float(company.confidence),
-                    "probability": float(company.probability) if company.probability else None,
-                    "predicted_at": serialize_datetime(company.predicted_at)
-                }
+                "annual_predictions": [
+                    {
+                        "id": str(pred.id),
+                        "reporting_year": pred.reporting_year,
+                        "risk_level": pred.risk_level,
+                        "confidence": safe_float(pred.confidence),
+                        "probability": safe_float(pred.probability),
+                        "primary_probability": safe_float(pred.probability),
+                        "long_term_debt_to_total_capital": safe_float(pred.long_term_debt_to_total_capital),
+                        "total_debt_to_ebitda": safe_float(pred.total_debt_to_ebitda),
+                        "net_income_margin": safe_float(pred.net_income_margin),
+                        "ebit_to_interest_expense": safe_float(pred.ebit_to_interest_expense),
+                        "return_on_assets": safe_float(pred.return_on_assets),
+                        "created_at": serialize_datetime(pred.created_at)
+                    } for pred in company.annual_predictions
+                ],
+                "quarterly_predictions": [
+                    {
+                        "id": str(pred.id),
+                        "reporting_year": pred.reporting_year,
+                        "reporting_quarter": pred.reporting_quarter,
+                        "risk_level": pred.risk_level,
+                        "confidence": safe_float(pred.confidence),
+                        "ensemble_probability": safe_float(pred.ensemble_probability),
+                        "logistic_probability": safe_float(pred.logistic_probability),
+                        "gbm_probability": safe_float(pred.gbm_probability),
+                        "total_debt_to_ebitda": safe_float(pred.total_debt_to_ebitda),
+                        "sga_margin": safe_float(pred.sga_margin),
+                        "long_term_debt_to_total_capital": safe_float(pred.long_term_debt_to_total_capital),
+                        "return_on_capital": safe_float(pred.return_on_capital),
+                        "created_at": serialize_datetime(pred.created_at)
+                    } for pred in company.quarterly_predictions
+                ],
+                "annual_predictions_count": len(company.annual_predictions),
+                "quarterly_predictions_count": len(company.quarterly_predictions)
             }
             companies_data.append(company_data)
         
@@ -94,25 +135,34 @@ async def get_company_by_id(
                 "id": str(company.id),
                 "symbol": company.symbol,
                 "name": company.name,
-                "market_cap": float(company.market_cap) if company.market_cap else None,
+                "market_cap": safe_float(company.market_cap),
                 "sector": company.sector,
-                "reporting_year": company.reporting_year,
-                "reporting_quarter": company.reporting_quarter,
                 "created_at": serialize_datetime(company.created_at),
                 "updated_at": serialize_datetime(company.updated_at),
-                "ratios": {
-                    "long_term_debt_to_total_capital": float(company.long_term_debt_to_total_capital),
-                    "total_debt_to_ebitda": float(company.total_debt_to_ebitda),
-                    "net_income_margin": float(company.net_income_margin),
-                    "ebit_to_interest_expense": float(company.ebit_to_interest_expense),
-                    "return_on_assets": float(company.return_on_assets)
-                },
-                "prediction": {
-                    "risk_level": company.risk_level,
-                    "confidence": float(company.confidence),
-                    "probability": float(company.probability) if company.probability else None,
-                    "predicted_at": serialize_datetime(company.predicted_at)
-                }
+                "annual_predictions": [
+                    {
+                        "id": str(pred.id),
+                        "reporting_year": pred.reporting_year,
+                        "risk_level": pred.risk_level,
+                        "confidence": safe_float(pred.confidence),
+                        "probability": safe_float(pred.probability),
+                        "primary_probability": safe_float(pred.probability),
+                        "created_at": serialize_datetime(pred.created_at)
+                    } for pred in company.annual_predictions
+                ],
+                "quarterly_predictions": [
+                    {
+                        "id": str(pred.id),
+                        "reporting_year": pred.reporting_year,
+                        "reporting_quarter": pred.reporting_quarter,
+                        "risk_level": pred.risk_level,
+                        "confidence": float(pred.confidence),
+                        "ensemble_probability": float(pred.ensemble_probability),
+                        "logistic_probability": float(pred.logistic_probability),
+                        "gbm_probability": float(pred.gbm_probability),
+                        "created_at": serialize_datetime(pred.created_at)
+                    } for pred in company.quarterly_predictions
+                ]
             }
         }
     except Exception as e:

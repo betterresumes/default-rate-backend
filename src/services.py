@@ -1,15 +1,22 @@
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import and_, or_, desc
-from .database import Company, User, OTPToken, UserSession
+from .database import Company, User, OTPToken, UserSession, AnnualPrediction, QuarterlyPrediction
 from .schemas import CompanyCreate, PredictionRequest
 from typing import Optional, List
+from datetime import datetime, timedelta
+
+from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy import and_, or_, desc
+from .database import Company, User, OTPToken, UserSession, AnnualPrediction, QuarterlyPrediction
+from .schemas import CompanyCreate, PredictionRequest
+from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 
 class CompanyService:
     def __init__(self, db: Session):
         self.db = db
 
-    def get_companies(
+    def get_companies_with_predictions(
         self,
         page: int = 1,
         limit: int = 10,
@@ -18,11 +25,14 @@ class CompanyService:
         sort_by: str = "name",
         sort_order: str = "asc"
     ):
-        """Get paginated list of companies with filtering and sorting"""
+        """Get paginated list of companies with their predictions"""
         skip = (page - 1) * limit
-        take = min(limit, 100) 
+        take = min(limit, 100)
 
-        query = self.db.query(Company)
+        query = self.db.query(Company).options(
+            joinedload(Company.annual_predictions),
+            joinedload(Company.quarterly_predictions)
+        )
 
         if sector:
             query = query.filter(Company.sector.ilike(f"%{sector}%"))
@@ -44,6 +54,7 @@ class CompanyService:
         else:
             query = query.order_by(Company.name)
 
+        # Count query
         count_query = self.db.query(Company)
         if sector:
             count_query = count_query.filter(Company.sector.ilike(f"%{sector}%"))
@@ -70,102 +81,204 @@ class CompanyService:
         }
 
     def get_company_by_id(self, company_id: str):
-        """Get company by ID"""
-        return self.db.query(Company).filter(Company.id == company_id).first()
+        """Get company by ID with all predictions"""
+        return self.db.query(Company).options(
+            joinedload(Company.annual_predictions),
+            joinedload(Company.quarterly_predictions)
+        ).filter(Company.id == company_id).first()
 
     def get_company_by_symbol(self, symbol: str):
-        """Get company by symbol"""
-        return self.db.query(Company).filter(Company.symbol == symbol.upper()).first()
+        """Get company by symbol with all predictions"""
+        return self.db.query(Company).options(
+            joinedload(Company.annual_predictions),
+            joinedload(Company.quarterly_predictions)
+        ).filter(Company.symbol == symbol.upper()).first()
 
-    def get_company_by_name(self, name: str):
-        """Get company by name"""
-        return self.db.query(Company).filter(Company.name == name).first()
+    def get_all_companies(self):
+        """Get all companies with predictions for testing"""
+        return self.db.query(Company).options(
+            joinedload(Company.annual_predictions),
+            joinedload(Company.quarterly_predictions)
+        ).all()
 
-    def create_company(self, company_data: CompanyCreate, prediction_data: dict):
-        """Create a new company with prediction data"""
-        company = Company(
-            symbol=company_data.symbol.upper(),
-            name=company_data.name,
-            market_cap=company_data.market_cap,
-            sector=company_data.sector,
-            reporting_year=company_data.reporting_year,
-            reporting_quarter=company_data.reporting_quarter,
-            long_term_debt_to_total_capital=company_data.long_term_debt_to_total_capital,
-            total_debt_to_ebitda=company_data.total_debt_to_ebitda,
-            net_income_margin=company_data.net_income_margin,
-            ebit_to_interest_expense=company_data.ebit_to_interest_expense,
-            return_on_assets=company_data.return_on_assets,
-            risk_level=prediction_data["risk_level"],
-            confidence=prediction_data["confidence"],
-            probability=prediction_data.get("probability"),
-            predicted_at=datetime.utcnow()
-        )
-        
-        self.db.add(company)
-        self.db.commit()
-        self.db.refresh(company)
-        
-        return company
+    def create_company(self, symbol: str, name: str, market_cap: float, sector: str):
+        """Create a new company (for router compatibility)"""
+        return self.create_or_get_company(symbol, name, market_cap, sector)
 
-    def upsert_company(self, company_data: CompanyCreate, prediction_data: dict):
-        """Create a new company or update existing one if symbol already exists"""
-        existing_company = self.get_company_by_symbol(company_data.symbol)
+    def get_company_by_symbol_and_type(self, symbol: str, prediction_type: str):
+        """Get company by symbol if it has the specified prediction type"""
+        company = self.get_company_by_symbol(symbol)
+        if not company:
+            return None
+            
+        if prediction_type == "annual" and company.annual_predictions:
+            return company
+        elif prediction_type == "quarterly" and company.quarterly_predictions:
+            return company
+        else:
+            return None
+
+    def create_or_get_company(self, symbol: str, name: str, market_cap: float, sector: str):
+        """Create a new company or get existing one by symbol"""
+        existing_company = self.get_company_by_symbol(symbol)
         
         if existing_company:
-            # Update existing company
-            existing_company.name = company_data.name
-            existing_company.market_cap = company_data.market_cap
-            existing_company.sector = company_data.sector
-            existing_company.reporting_year = company_data.reporting_year
-            existing_company.reporting_quarter = company_data.reporting_quarter
-            existing_company.long_term_debt_to_total_capital = company_data.long_term_debt_to_total_capital
-            existing_company.total_debt_to_ebitda = company_data.total_debt_to_ebitda
-            existing_company.net_income_margin = company_data.net_income_margin
-            existing_company.ebit_to_interest_expense = company_data.ebit_to_interest_expense
-            existing_company.return_on_assets = company_data.return_on_assets
-            existing_company.risk_level = prediction_data["risk_level"]
-            existing_company.confidence = prediction_data["confidence"]
-            existing_company.probability = prediction_data.get("probability")
-            existing_company.predicted_at = datetime.utcnow()
-            
+            # Update company info if needed
+            existing_company.name = name
+            existing_company.market_cap = market_cap
+            existing_company.sector = sector
+            existing_company.updated_at = datetime.utcnow()
             self.db.commit()
             self.db.refresh(existing_company)
             return existing_company
         else:
             # Create new company
-            return self.create_company(company_data, prediction_data)
+            company = Company(
+                symbol=symbol.upper(),
+                name=name,
+                market_cap=market_cap,
+                sector=sector
+            )
+            self.db.add(company)
+            self.db.commit()
+            self.db.refresh(company)
+            return company
 
-    def update_company(self, company_id: str, update_data: dict, prediction_data: dict = None):
-        """Update company information and optionally recalculate prediction"""
-        company = self.get_company_by_id(company_id)
-        if not company:
-            return None
+    def create_annual_prediction(
+        self, 
+        company: Company, 
+        financial_data: Dict[str, Any], 
+        prediction_results: Dict[str, Any],
+        reporting_year: Optional[str] = None,
+        reporting_quarter: Optional[str] = None
+    ):
+        """Create annual prediction for a company"""
+        annual_prediction = AnnualPrediction(
+            company_id=company.id,
+            reporting_year=reporting_year,
+            reporting_quarter=reporting_quarter,
+            long_term_debt_to_total_capital=financial_data['long_term_debt_to_total_capital'],
+            total_debt_to_ebitda=financial_data['total_debt_to_ebitda'],
+            net_income_margin=financial_data['net_income_margin'],
+            ebit_to_interest_expense=financial_data['ebit_to_interest_expense'],
+            return_on_assets=financial_data['return_on_assets'],
+            probability=prediction_results['probability'],
+            risk_level=prediction_results['risk_level'],
+            confidence=prediction_results['confidence']
+        )
         
-        for field, value in update_data.items():
-            if value is not None and hasattr(company, field):
-                if field == 'name':
-                    setattr(company, field, value)
-                else:
-                    setattr(company, field, value)
-        
-        if prediction_data:
-            company.risk_level = prediction_data["risk_level"]
-            company.confidence = prediction_data["confidence"]
-            company.probability = prediction_data.get("probability")
-            company.predicted_at = datetime.utcnow()
-        
-        company.updated_at = datetime.utcnow()
+        self.db.add(annual_prediction)
         self.db.commit()
-        self.db.refresh(company)
-        return company
+        self.db.refresh(annual_prediction)
+        return annual_prediction
 
-    def delete_company_data(self, company_id: str):
-        """Delete company (all data is in one table now)"""
+    def create_quarterly_prediction(
+        self,
+        company: Company,
+        financial_data: Dict[str, Any],
+        prediction_results: Dict[str, Any],
+        reporting_year: str,
+        reporting_quarter: str
+    ):
+        """Create quarterly prediction for a company"""
+        quarterly_prediction = QuarterlyPrediction(
+            company_id=company.id,
+            reporting_year=reporting_year,
+            reporting_quarter=reporting_quarter,
+            total_debt_to_ebitda=financial_data['total_debt_to_ebitda'],
+            sga_margin=financial_data['sga_margin'],
+            long_term_debt_to_total_capital=financial_data['long_term_debt_to_total_capital'],
+            return_on_capital=financial_data['return_on_capital'],
+            logistic_probability=prediction_results['logistic_probability'],
+            gbm_probability=prediction_results['gbm_probability'],
+            ensemble_probability=prediction_results['ensemble_probability'],
+            risk_level=prediction_results['risk_level'],
+            confidence=prediction_results['confidence']
+        )
+        
+        self.db.add(quarterly_prediction)
+        self.db.commit()
+        self.db.refresh(quarterly_prediction)
+        return quarterly_prediction
+
+    def get_annual_prediction(self, company_id: str, reporting_year: Optional[str] = None):
+        """Get annual prediction for a company"""
+        query = self.db.query(AnnualPrediction).filter(AnnualPrediction.company_id == company_id)
+        if reporting_year:
+            query = query.filter(AnnualPrediction.reporting_year == reporting_year)
+        return query.order_by(desc(AnnualPrediction.created_at)).first()
+
+    def get_quarterly_prediction(self, company_id: str, reporting_year: str, reporting_quarter: str):
+        """Get specific quarterly prediction for a company"""
+        return self.db.query(QuarterlyPrediction).filter(
+            QuarterlyPrediction.company_id == company_id,
+            QuarterlyPrediction.reporting_year == reporting_year,
+            QuarterlyPrediction.reporting_quarter == reporting_quarter
+        ).first()
+
+    def update_annual_prediction(
+        self,
+        prediction_id: str,
+        financial_data: Dict[str, Any],
+        prediction_results: Dict[str, Any]
+    ):
+        """Update existing annual prediction"""
+        prediction = self.db.query(AnnualPrediction).filter(AnnualPrediction.id == prediction_id).first()
+        if not prediction:
+            return None
+
+        # Update financial data
+        for field, value in financial_data.items():
+            if hasattr(prediction, field) and value is not None:
+                setattr(prediction, field, value)
+
+        # Update prediction results
+        prediction.probability = prediction_results['probability']
+        prediction.risk_level = prediction_results['risk_level']
+        prediction.confidence = prediction_results['confidence']
+        prediction.predicted_at = datetime.utcnow()
+        prediction.updated_at = datetime.utcnow()
+
+        self.db.commit()
+        self.db.refresh(prediction)
+        return prediction
+
+    def update_quarterly_prediction(
+        self,
+        prediction_id: str,
+        financial_data: Dict[str, Any],
+        prediction_results: Dict[str, Any]
+    ):
+        """Update existing quarterly prediction"""
+        prediction = self.db.query(QuarterlyPrediction).filter(QuarterlyPrediction.id == prediction_id).first()
+        if not prediction:
+            return None
+
+        # Update financial data
+        for field, value in financial_data.items():
+            if hasattr(prediction, field) and value is not None:
+                setattr(prediction, field, value)
+
+        # Update prediction results
+        prediction.logistic_probability = prediction_results['logistic_probability']
+        prediction.gbm_probability = prediction_results['gbm_probability']
+        prediction.ensemble_probability = prediction_results['ensemble_probability']
+        prediction.risk_level = prediction_results['risk_level']
+        prediction.confidence = prediction_results['confidence']
+        prediction.predicted_at = datetime.utcnow()
+        prediction.updated_at = datetime.utcnow()
+
+        self.db.commit()
+        self.db.refresh(prediction)
+        return prediction
+
+    def delete_company_and_predictions(self, company_id: str):
+        """Delete company and all its predictions"""
         company = self.get_company_by_id(company_id)
         if not company:
             return False
-        
-        self.db.delete(company)
+
+        self.db.delete(company)  # Cascade will delete predictions
         self.db.commit()
         return True
 
@@ -174,33 +287,20 @@ class PredictionService:
     def __init__(self, db: Session):
         self.db = db
 
-    def save_or_update_company_prediction(self, company_id: str, prediction_data: dict, ratios: dict, reporting_year: Optional[str] = None, reporting_quarter: Optional[str] = None):
-        """Update existing company with new prediction and ratios"""
-        company = self.db.query(Company).filter(Company.id == company_id).first()
-        if not company:
-            return None
+    def get_prediction_summary(self, company_id: str):
+        """Get summary of all predictions for a company"""
+        annual_predictions = self.db.query(AnnualPrediction).filter(
+            AnnualPrediction.company_id == company_id
+        ).order_by(desc(AnnualPrediction.created_at)).all()
         
-        for key, value in ratios.items():
-            if value is not None and hasattr(company, key):
-                setattr(company, key, value)
+        quarterly_predictions = self.db.query(QuarterlyPrediction).filter(
+            QuarterlyPrediction.company_id == company_id
+        ).order_by(desc(QuarterlyPrediction.created_at)).all()
         
-        company.risk_level = prediction_data["risk_level"]
-        company.confidence = prediction_data["confidence"]
-        company.probability = prediction_data.get("probability")
-        company.predicted_at = datetime.utcnow()
-        
-        if reporting_year:
-            company.reporting_year = reporting_year
-        if reporting_quarter:
-            company.reporting_quarter = reporting_quarter
-        
-        company.updated_at = datetime.utcnow()
-        self.db.flush()
-        return company
-
-    def commit_transaction(self):
-        """Commit the current transaction"""
-        self.db.commit()
+        return {
+            "annual_predictions": annual_predictions,
+            "quarterly_predictions": quarterly_predictions
+        }
 
 
 class DatabaseService:
@@ -209,7 +309,7 @@ class DatabaseService:
 
     def reset_table(self, table_name: str = None):
         """Reset specific table or all tables"""
-        from .database import Base, Company, User, OTPToken, UserSession
+        from .database import Base, Company, AnnualPrediction, QuarterlyPrediction, User, OTPToken, UserSession
         
         tables_reset = []
         affected_records = 0
@@ -219,6 +319,18 @@ class DatabaseService:
                 count = self.db.query(Company).count()
                 self.db.query(Company).delete()
                 tables_reset.append("companies")
+                affected_records += count
+                
+            elif table_name.lower() == "annual_predictions":
+                count = self.db.query(AnnualPrediction).count()
+                self.db.query(AnnualPrediction).delete()
+                tables_reset.append("annual_predictions")
+                affected_records += count
+                
+            elif table_name.lower() == "quarterly_predictions":
+                count = self.db.query(QuarterlyPrediction).count()
+                self.db.query(QuarterlyPrediction).delete()
+                tables_reset.append("quarterly_predictions")
                 affected_records += count
                 
             elif table_name.lower() == "users":
@@ -241,18 +353,23 @@ class DatabaseService:
             else:
                 raise ValueError(f"Unknown table: {table_name}")
         else:
+            # Reset all tables
             count_companies = self.db.query(Company).count()
+            count_annual = self.db.query(AnnualPrediction).count()
+            count_quarterly = self.db.query(QuarterlyPrediction).count()
             count_otp = self.db.query(OTPToken).count()
             count_sessions = self.db.query(UserSession).count()
             count_users = self.db.query(User).count()
             
+            self.db.query(AnnualPrediction).delete()
+            self.db.query(QuarterlyPrediction).delete()
             self.db.query(Company).delete()
             self.db.query(OTPToken).delete()
             self.db.query(UserSession).delete()
             self.db.query(User).delete()
             
-            tables_reset = ["companies", "otp_tokens", "user_sessions", "users"]
-            affected_records = count_companies + count_otp + count_sessions + count_users
+            tables_reset = ["annual_predictions", "quarterly_predictions", "companies", "otp_tokens", "user_sessions", "users"]
+            affected_records = count_companies + count_annual + count_quarterly + count_otp + count_sessions + count_users
         
         self.db.commit()
         return {

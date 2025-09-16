@@ -54,10 +54,8 @@ async def register_user(
         
         otp = create_otp_token(db, user.id, "email_verification")
         
-        # Try to send email immediately first (for quick response)
         email_sent = False
         try:
-            # Quick attempt with short timeout for immediate feedback
             email_sent = email_service.send_verification_email(
                 to_email=user.email,
                 username=user.username,
@@ -66,7 +64,6 @@ async def register_user(
         except Exception as e:
             print(f"Immediate email send failed: {str(e)}")
             
-            # If immediate send fails, try background task (if Celery is available)
             try:
                 from ..tasks import send_verification_email_task
                 send_verification_email_task.delay(user.email, user.username, otp)
@@ -85,7 +82,7 @@ async def register_user(
                 "email": user.email,
                 "username": user.username,
                 "email_sent": email_sent,
-                "can_login_directly": True  # Indicate that login is now available
+                "can_login_directly": True  
             }
         )
         
@@ -163,7 +160,6 @@ async def resend_verification_email(
         
         otp = create_otp_token(db, user.id, "email_verification")
         
-        # Try immediate send first, fallback to background task
         email_sent = False
         try:
             email_sent = email_service.send_verification_email(
@@ -212,7 +208,6 @@ async def login_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
         
-        # Skip email verification check for now - activate user directly on login
         if not user.is_active:
             user.is_active = True
             db.commit()
@@ -236,7 +231,6 @@ async def login_user(
         user.last_login = datetime.utcnow()
         db.commit()
         
-        # Convert SQLAlchemy model to dict for Pydantic
         user_dict = {
             "id": user.id,
             "email": user.email,
@@ -300,7 +294,6 @@ async def forgot_password(
         
         otp = create_otp_token(db, user.id, "password_reset")
         
-        # Try immediate send first, fallback to background task
         email_sent = False
         try:
             email_sent = email_service.send_password_reset_email(
@@ -372,7 +365,19 @@ async def get_current_user_info(
     current_user: User = Depends(get_current_verified_user)
 ):
     """Get current user information."""
-    return current_user
+    return UserSchema(
+        id=current_user.id,
+        email=current_user.email,
+        username=current_user.username,
+        full_name=current_user.full_name,
+        is_active=current_user.is_active,
+        is_verified=current_user.is_verified,
+        is_superuser=current_user.is_superuser,
+        role=current_user.role,
+        created_at=current_user.created_at,
+        updated_at=current_user.updated_at,
+        last_login=current_user.last_login
+    )
 
 @router.put("/me", response_model=UserSchema)
 async def update_current_user(
@@ -408,7 +413,19 @@ async def update_current_user(
         db.commit()
         db.refresh(current_user)
         
-        return current_user
+        return UserSchema(
+            id=current_user.id,
+            email=current_user.email,
+            username=current_user.username,
+            full_name=current_user.full_name,
+            is_active=current_user.is_active,
+            is_verified=current_user.is_verified,
+            is_superuser=current_user.is_superuser,
+            role=current_user.role,
+            created_at=current_user.created_at,
+            updated_at=current_user.updated_at,
+            last_login=current_user.last_login
+        )
         
     except HTTPException as e:
         raise e
@@ -427,7 +444,21 @@ async def get_all_users(
 ):
     """Get all users (admin only)."""
     users = db.query(User).offset(skip).limit(limit).all()
-    return users
+    return [
+        UserSchema(
+            id=user.id,
+            email=user.email,
+            username=user.username,
+            full_name=user.full_name,
+            is_active=user.is_active,
+            is_verified=user.is_verified,
+            is_superuser=user.is_superuser,
+            role=user.role,
+            created_at=user.created_at,
+            updated_at=user.updated_at,
+            last_login=user.last_login
+        ) for user in users
+    ]
 
 @router.put("/users/{user_id}", response_model=UserSchema)
 async def update_user(
@@ -460,7 +491,19 @@ async def update_user(
         db.commit()
         db.refresh(user)
         
-        return user
+        return UserSchema(
+            id=user.id,
+            email=user.email,
+            username=user.username,
+            full_name=user.full_name,
+            is_active=user.is_active,
+            is_verified=user.is_verified,
+            is_superuser=user.is_superuser,
+            role=user.role,
+            created_at=user.created_at,
+            updated_at=user.updated_at,
+            last_login=user.last_login
+        )
         
     except HTTPException as e:
         raise e
@@ -525,7 +568,6 @@ async def test_email_service(email_data: OTPRequest):
         )
     
     try:
-        # Test email sending
         test_otp = "123456"
         result = email_service.send_verification_email(
             to_email=email_data.email,

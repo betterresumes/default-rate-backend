@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, Text, Boolean
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, Text, Boolean, Index
 from sqlalchemy.types import Numeric
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.declarative import declarative_base
@@ -63,11 +63,22 @@ class Company(Base):
     __tablename__ = "companies"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    
     symbol = Column(String, unique=True, index=True, nullable=False)
     name = Column(String, nullable=False)
     market_cap = Column(Numeric(precision=20, scale=2), nullable=False)
     sector = Column(String, nullable=False)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    
+    annual_predictions = relationship("AnnualPrediction", back_populates="company", cascade="all, delete-orphan")
+    quarterly_predictions = relationship("QuarterlyPrediction", back_populates="company", cascade="all, delete-orphan")
+
+class AnnualPrediction(Base):
+    __tablename__ = "annual_predictions"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
+    
     reporting_year = Column(String, nullable=True)
     reporting_quarter = Column(String, nullable=True)
     
@@ -77,13 +88,50 @@ class Company(Base):
     ebit_to_interest_expense = Column(Numeric(precision=10, scale=4), nullable=False)
     return_on_assets = Column(Numeric(precision=10, scale=4), nullable=False)
     
+    probability = Column(Numeric(precision=5, scale=4), nullable=False)
     risk_level = Column(String, nullable=False)
     confidence = Column(Numeric(precision=5, scale=4), nullable=False)
-    probability = Column(Numeric(precision=5, scale=4), nullable=True)
     predicted_at = Column(DateTime, default=func.now())
     
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    
+    company = relationship("Company", back_populates="annual_predictions")
+    
+    __table_args__ = (
+        Index('idx_annual_unique', 'company_id', 'reporting_year', 'reporting_quarter', unique=True),
+    )
+
+
+class QuarterlyPrediction(Base):
+    __tablename__ = "quarterly_predictions"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
+    
+    reporting_year = Column(String, nullable=False)
+    reporting_quarter = Column(String, nullable=False)  
+    
+    total_debt_to_ebitda = Column(Numeric(precision=10, scale=4), nullable=False)
+    sga_margin = Column(Numeric(precision=10, scale=4), nullable=False)
+    long_term_debt_to_total_capital = Column(Numeric(precision=10, scale=4), nullable=False)
+    return_on_capital = Column(Numeric(precision=10, scale=4), nullable=False)
+    
+    logistic_probability = Column(Numeric(precision=5, scale=4), nullable=False)
+    gbm_probability = Column(Numeric(precision=5, scale=4), nullable=False)
+    ensemble_probability = Column(Numeric(precision=5, scale=4), nullable=False)
+    risk_level = Column(String, nullable=False)
+    confidence = Column(Numeric(precision=5, scale=4), nullable=False)
+    predicted_at = Column(DateTime, default=func.now())
+    
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    
+    company = relationship("Company", back_populates="quarterly_predictions")
+    
+    __table_args__ = (
+        Index('idx_quarterly_unique', 'company_id', 'reporting_year', 'reporting_quarter', unique=True),
+    )
 
 def get_database_url():
     database_url = os.getenv("DATABASE_URL")

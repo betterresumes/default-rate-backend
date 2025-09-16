@@ -1,53 +1,82 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
-from ..database import get_db, User, Company
+from sqlalchemy import func
+from ..database import get_db, User, Company, AnnualPrediction, QuarterlyPrediction
 from ..schemas import (
-    PredictionRequest, PredictionResponse, BulkPredictionResponse, 
-    BulkPredictionItem, BulkJobResponse, JobStatusResponse,
-    PredictionUpdateRequest, DatabaseResetRequest, DatabaseResetResponse,
-    CompanyCreate
+    QuarterlyPredictionRequest, AnnualPredictionRequest,
+    UnifiedPredictionRequest, CompanyWithPredictionsResponse,
+    BulkPredictionResponse, BulkPredictionItem, PredictionUpdateRequest,
+    BulkJobResponse, JobStatusResponse
 )
-from ..services import CompanyService, PredictionService, DatabaseService
+from ..services import CompanyService
 from ..ml_service import ml_model
-from ..auth import get_current_verified_user, get_admin_user
+from ..quarterly_ml_service import quarterly_ml_model
+from ..auth import get_current_verified_user
 from typing import Dict, List
 from datetime import datetime
+import uuid
+import pandas as pd
+import io
+import base64
+import time
 import pandas as pd
 import io
 import time
-import os
 import uuid
 import base64
-from pathlib import Path
+import math
 
 router = APIRouter()
-
 
 def serialize_datetime(dt):
     """Helper function to serialize datetime objects"""
     if dt is None:
         return None
-    if isinstance(dt, datetime):
-        return dt.isoformat()
-    return dt
+    return dt.isoformat()
+
+def safe_float(value):
+    """Convert value to float, handling None and NaN values"""
+    if value is None:
+        return None
+    try:
+        float_val = float(value)
+        if math.isnan(float_val) or math.isinf(float_val):
+            return None
+        return float_val
+    except (ValueError, TypeError):
+        return None
+        return None
+    return dt.isoformat()
 
 
-@router.post("/predict-default-rate", response_model=PredictionResponse)
-async def predict_default_rate(
-    request: PredictionRequest,
+@router.post("/predict-annual")
+async def predict_annual_default_rate(
+    request: AnnualPredictionRequest,
     current_user: User = Depends(get_current_verified_user),
     db: Session = Depends(get_db)
 ):
-    """Predict default rate for a company using Annual ML model"""
+    """Create annual default rate prediction using machine learning"""
     try:
         company_service = CompanyService(db)
 
         company = company_service.get_company_by_symbol(request.stock_symbol)
+        
+        if not company:
+            company = company_service.create_company(
+                symbol=request.stock_symbol,
+                name=request.company_name,
+                market_cap=request.market_cap,
+                sector=request.sector
+            )
 
-        if company:
+        existing_prediction = company_service.get_annual_prediction(
+            company.id, request.reporting_year
+        )
+        
+        if existing_prediction:
             raise HTTPException(
                 status_code=400,
-                detail=f"Company with symbol '{request.stock_symbol}' already exists. Use update endpoint to modify."
+                detail=f"Annual prediction for {request.stock_symbol} in {request.reporting_year} already exists"
             )
 
         ratios = {
@@ -64,63 +93,43 @@ async def predict_default_rate(
             raise HTTPException(
                 status_code=400,
                 detail={
-                    "error": "Prediction failed",
+                    "error": "Annual prediction failed",
                     "details": prediction_result["error"]
                 }
             )
 
-        from ..schemas import CompanyCreate
-        company_data = CompanyCreate(
-            symbol=request.stock_symbol,
-            name=request.company_name,
-            market_cap=request.market_cap,
-            sector=request.sector,
-            reporting_year=request.reporting_year,
-            reporting_quarter=request.reporting_quarter,
-            long_term_debt_to_total_capital=request.long_term_debt_to_total_capital,
-            total_debt_to_ebitda=request.total_debt_to_ebitda,
-            net_income_margin=request.net_income_margin,
-            ebit_to_interest_expense=request.ebit_to_interest_expense,
-            return_on_assets=request.return_on_assets
+        annual_prediction = company_service.create_annual_prediction(
+            company=company,
+            financial_data=ratios,
+            prediction_results=prediction_result,
+            reporting_year=request.reporting_year
         )
-        
-        company = company_service.create_company(company_data, prediction_result)
 
         return {
             "success": True,
-            "message": "Prediction generated using Annual ML model",
+            "message": "Annual prediction created successfully",
             "company": {
                 "id": str(company.id),
                 "symbol": company.symbol,
                 "name": company.name,
-                "market_cap": float(company.market_cap) if company.market_cap else None,
+                "market_cap": safe_float(company.market_cap),
                 "sector": company.sector,
-                "reporting_year": company.reporting_year,
-                "reporting_quarter": company.reporting_quarter,
-                "ratios": {
-                    "long_term_debt_to_total_capital": float(company.long_term_debt_to_total_capital),
-                    "total_debt_to_ebitda": float(company.total_debt_to_ebitda),
-                    "net_income_margin": float(company.net_income_margin),
-                    "ebit_to_interest_expense": float(company.ebit_to_interest_expense),
-                    "return_on_assets": float(company.return_on_assets)
-                },
                 "prediction": {
-                    "probability": float(company.probability) if company.probability else None,
-                    "risk_level": company.risk_level,
-                    "confidence": float(company.confidence),
-                    "predicted_at": company.predicted_at.isoformat(),
-                    "model_features": prediction_result.get("model_features", {}),
-                    "raw_inputs": prediction_result.get("raw_inputs", {}),
-                    "model_info": {
-                        "model_type": "New Logistic Regression Model",
-                        "features": [
-                            "Long-term debt / total capital (%)",
-                            "Total debt / EBITDA", 
-                            "Net income margin (%)",
-                            "EBIT / interest expense",
-                            "Return on assets (%)"
-                        ]
-                    }
+                    "id": str(annual_prediction.id),
+                    "type": "annual",
+                    "reporting_year": annual_prediction.reporting_year,
+                    "probability": safe_float(annual_prediction.probability),
+                    "primary_probability": safe_float(annual_prediction.probability),
+                    "risk_level": annual_prediction.risk_level,
+                    "confidence": safe_float(annual_prediction.confidence),
+                    "financial_ratios": {
+                        "long_term_debt_to_total_capital": safe_float(annual_prediction.long_term_debt_to_total_capital),
+                        "total_debt_to_ebitda": safe_float(annual_prediction.total_debt_to_ebitda),
+                        "net_income_margin": safe_float(annual_prediction.net_income_margin),
+                        "ebit_to_interest_expense": safe_float(annual_prediction.ebit_to_interest_expense),
+                        "return_on_assets": safe_float(annual_prediction.return_on_assets)
+                    },
+                    "created_at": serialize_datetime(annual_prediction.created_at)
                 }
             }
         }
@@ -128,201 +137,615 @@ async def predict_default_rate(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Prediction error: {e}")
-        db.rollback()
         raise HTTPException(
-            status_code=500, 
+            status_code=500,
             detail={
-                "error": "Prediction failed",
+                "error": "Annual prediction failed",
                 "details": str(e)
             }
         )
 
+
+@router.post("/predict-quarterly")
+async def predict_quarterly_default_rate(
+    request: QuarterlyPredictionRequest,
+    current_user: User = Depends(get_current_verified_user),
+    db: Session = Depends(get_db)
+):
+    """Create quarterly default rate prediction using machine learning"""
+    try:
+        company_service = CompanyService(db)
+
+        company = company_service.get_company_by_symbol(request.stock_symbol)
+        
+        if not company:
+            company = company_service.create_company(
+                symbol=request.stock_symbol,
+                name=request.company_name,
+                market_cap=request.market_cap,
+                sector=request.sector
+            )
+
+        existing_prediction = company_service.get_quarterly_prediction(
+            company.id, request.reporting_year, request.reporting_quarter
+        )
+        
+        if existing_prediction:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Quarterly prediction for {request.stock_symbol} in {request.reporting_quarter} {request.reporting_year} already exists"
+            )
+
+        ratios = {
+            "total_debt_to_ebitda": request.total_debt_to_ebitda,
+            "sga_margin": request.sga_margin,
+            "long_term_debt_to_total_capital": request.long_term_debt_to_total_capital,
+            "return_on_capital": request.return_on_capital
+        }
+
+        prediction_result = quarterly_ml_model.predict_default_probability(ratios)
+
+        if "error" in prediction_result:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "Quarterly prediction failed",
+                    "details": prediction_result["error"]
+                }
+            )
+
+        quarterly_prediction = company_service.create_quarterly_prediction(
+            company=company,
+            financial_data=ratios,
+            prediction_results=prediction_result,
+            reporting_year=request.reporting_year,
+            reporting_quarter=request.reporting_quarter
+        )
+
+        return {
+            "success": True,
+            "message": "Quarterly prediction created successfully",
+            "company": {
+                "id": str(company.id),
+                "symbol": company.symbol,
+                "name": company.name,
+                "market_cap": safe_float(company.market_cap),
+                "sector": company.sector,
+                "prediction": {
+                    "id": str(quarterly_prediction.id),
+                    "type": "quarterly",
+                    "reporting_year": quarterly_prediction.reporting_year,
+                    "reporting_quarter": quarterly_prediction.reporting_quarter,
+                    "probabilities": {
+                        "logistic": safe_float(quarterly_prediction.logistic_probability),
+                        "gbm": safe_float(quarterly_prediction.gbm_probability),
+                        "ensemble": safe_float(quarterly_prediction.ensemble_probability)
+                    },
+                    "primary_probability": safe_float(quarterly_prediction.ensemble_probability),
+                    "risk_level": quarterly_prediction.risk_level,
+                    "confidence": safe_float(quarterly_prediction.confidence),
+                    "financial_ratios": {
+                        "total_debt_to_ebitda": safe_float(quarterly_prediction.total_debt_to_ebitda),
+                        "sga_margin": safe_float(quarterly_prediction.sga_margin),
+                        "long_term_debt_to_total_capital": safe_float(quarterly_prediction.long_term_debt_to_total_capital),
+                        "return_on_capital": safe_float(quarterly_prediction.return_on_capital)
+                    },
+                    "created_at": serialize_datetime(quarterly_prediction.created_at)
+                }
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "Quarterly prediction failed",
+                "details": str(e)
+            }
+        )
+
+
+@router.post("/unified-predict")
+async def unified_predict(
+    request: UnifiedPredictionRequest,
+    current_user: User = Depends(get_current_verified_user),
+    db: Session = Depends(get_db)
+):
+    """Unified endpoint for both annual and quarterly predictions"""
+    try:
+        if request.prediction_type == "annual":
+            annual_request = AnnualPredictionRequest(
+                stock_symbol=request.stock_symbol,
+                company_name=request.company_name,
+                market_cap=request.market_cap,
+                sector=request.sector,
+                reporting_year=request.reporting_year,
+                long_term_debt_to_total_capital=request.long_term_debt_to_total_capital,
+                total_debt_to_ebitda=request.total_debt_to_ebitda,
+                net_income_margin=request.net_income_margin,
+                ebit_to_interest_expense=request.ebit_to_interest_expense,
+                return_on_assets=request.return_on_assets
+            )
+            return await predict_annual_default_rate(annual_request, current_user, db)
+            
+        elif request.prediction_type == "quarterly":
+            quarterly_request = QuarterlyPredictionRequest(
+                stock_symbol=request.stock_symbol,
+                company_name=request.company_name,
+                market_cap=request.market_cap,
+                sector=request.sector,
+                reporting_year=request.reporting_year,
+                reporting_quarter=request.reporting_quarter,
+                total_debt_to_ebitda=request.total_debt_to_ebitda,
+                sga_margin=request.sga_margin,
+                long_term_debt_to_total_capital=request.long_term_debt_to_total_capital,
+                return_on_capital=request.return_on_capital
+            )
+            return await predict_quarterly_default_rate(quarterly_request, current_user, db)
+        
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid prediction_type. Must be 'annual' or 'quarterly'"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": f"{request.prediction_type.title()} prediction failed",
+                "details": str(e)
+            }
+        )
+
+
+@router.get("/companies", response_model=Dict)
+async def get_companies_with_predictions(
+    page: int = 1,
+    limit: int = 10,
+    sector: str = None,
+    search: str = None,
+    sort_by: str = "name",
+    sort_order: str = "asc",
+    current_user: User = Depends(get_current_verified_user),
+    db: Session = Depends(get_db)
+):
+    """Get paginated list of companies with their predictions"""
+    try:
+        company_service = CompanyService(db)
+        result = company_service.get_companies_with_predictions(
+            page=page,
+            limit=limit,
+            sector=sector,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order
+        )
+
+        formatted_companies = []
+        for company in result["companies"]:
+            company_data = {
+                "id": str(company.id),
+                "symbol": company.symbol,
+                "name": company.name,
+                "market_cap": safe_float(company.market_cap) if company.market_cap else None,
+                "sector": company.sector,
+                "created_at": serialize_datetime(company.created_at),
+                "updated_at": serialize_datetime(company.updated_at),
+                "annual_predictions": [],
+                "quarterly_predictions": []
+            }
+
+            for pred in company.annual_predictions:
+                company_data["annual_predictions"].append({
+                    "id": str(pred.id),
+                    "reporting_year": pred.reporting_year,
+                    "probability": safe_float(pred.probability),
+                    "risk_level": pred.risk_level,
+                    "confidence": safe_float(pred.confidence),
+                    "created_at": serialize_datetime(pred.created_at)
+                })
+
+            for pred in company.quarterly_predictions:
+                company_data["quarterly_predictions"].append({
+                    "id": str(pred.id),
+                    "reporting_year": pred.reporting_year,
+                    "reporting_quarter": pred.reporting_quarter,
+                    "probabilities": {
+                        "logistic": safe_float(pred.logistic_probability),
+                        "gbm": safe_float(pred.gbm_probability),
+                        "ensemble": safe_float(pred.ensemble_probability)
+                    },
+                    "primary_probability": safe_float(pred.ensemble_probability),
+                    "risk_level": pred.risk_level,
+                    "confidence": safe_float(pred.confidence),
+                    "created_at": serialize_datetime(pred.created_at)
+                })
+
+            formatted_companies.append(company_data)
+
+        return {
+            "success": True,
+            "companies": formatted_companies,
+            "pagination": result["pagination"]
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "Failed to retrieve companies",
+                "details": str(e)
+            }
+        )
+
+@router.get("/companies/{company_id}")
+async def get_company_by_id(
+    company_id: str,
+    current_user: User = Depends(get_current_verified_user),
+    db: Session = Depends(get_db)
+):
+    """Get specific company by ID with all predictions"""
+    try:
+        company_service = CompanyService(db)
+        company = company_service.get_company_by_id(company_id)
+        
+        if not company:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Company with ID {company_id} not found"
+            )
+
+        company_data = {
+            "id": str(company.id),
+            "symbol": company.symbol,
+            "name": company.name,
+            "market_cap": safe_float(company.market_cap) if company.market_cap else None,
+            "sector": company.sector,
+            "created_at": serialize_datetime(company.created_at),
+            "updated_at": serialize_datetime(company.updated_at),
+            "annual_predictions": [],
+            "quarterly_predictions": []
+        }
+
+        for pred in company.annual_predictions:
+            company_data["annual_predictions"].append({
+                "id": str(pred.id),
+                "reporting_year": pred.reporting_year,
+                "probability": safe_float(pred.probability),
+                "risk_level": pred.risk_level,
+                "confidence": safe_float(pred.confidence),
+                "financial_ratios": {
+                    "long_term_debt_to_total_capital": safe_float(pred.long_term_debt_to_total_capital),
+                    "total_debt_to_ebitda": safe_float(pred.total_debt_to_ebitda),
+                    "net_income_margin": safe_float(pred.net_income_margin),
+                    "ebit_to_interest_expense": safe_float(pred.ebit_to_interest_expense),
+                    "return_on_assets": safe_float(pred.return_on_assets)
+                },
+                "created_at": serialize_datetime(pred.created_at)
+            })
+
+        for pred in company.quarterly_predictions:
+            company_data["quarterly_predictions"].append({
+                "id": str(pred.id),
+                "reporting_year": pred.reporting_year,
+                "reporting_quarter": pred.reporting_quarter,
+                "probabilities": {
+                    "logistic": safe_float(pred.logistic_probability),
+                    "gbm": safe_float(pred.gbm_probability),
+                    "ensemble": safe_float(pred.ensemble_probability)
+                },
+                "primary_probability": safe_float(pred.ensemble_probability),
+                "risk_level": pred.risk_level,
+                "confidence": safe_float(pred.confidence),
+                "financial_ratios": {
+                    "total_debt_to_ebitda": safe_float(pred.total_debt_to_ebitda),
+                    "sga_margin": safe_float(pred.sga_margin),
+                    "long_term_debt_to_total_capital": safe_float(pred.long_term_debt_to_total_capital),
+                    "return_on_capital": safe_float(pred.return_on_capital)
+                },
+                "created_at": serialize_datetime(pred.created_at)
+            })
+
+        return {
+            "success": True,
+            "company": company_data
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "Failed to retrieve company",
+                "details": str(e)
+            }
+        )
+
+@router.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "message": "Prediction API is running",
+        "timestamp": datetime.utcnow().isoformat(),
+        "endpoints": {
+            "annual": "/api/predictions/predict-annual",
+            "quarterly": "/api/predictions/predict-quarterly", 
+            "unified": "/api/predictions/unified-predict",
+            "companies": "/api/predictions/companies",
+            "bulk_upload": "/api/predictions/bulk-predict",
+            "update": "/api/predictions/update/{company_id}",
+            "delete": "/api/predictions/delete/{company_id}",
+            "summary": "/api/predictions/summary"
+        }
+    }
+
+@router.get("/summary")
+async def get_summary_stats(
+    current_user: User = Depends(get_current_verified_user),
+    db: Session = Depends(get_db)
+):
+    """Get optimized summary statistics without fetching full company data"""
+    try:
+        company_service = CompanyService(db)
+        
+        total_companies = db.query(Company).count()
+        
+        high_risk_annual = db.query(AnnualPrediction).filter(
+            AnnualPrediction.risk_level.in_(['High', 'Critical'])
+        ).count()
+        
+        high_risk_quarterly = db.query(QuarterlyPrediction).filter(
+            QuarterlyPrediction.risk_level.in_(['High', 'Critical'])
+        ).count()
+        
+        high_risk_company_ids = set()
+        
+        annual_high_risk_ids = db.query(AnnualPrediction.company_id).filter(
+            AnnualPrediction.risk_level.in_(['High', 'Critical'])
+        ).all()
+        high_risk_company_ids.update([id[0] for id in annual_high_risk_ids])
+        
+        quarterly_high_risk_ids = db.query(QuarterlyPrediction.company_id).filter(
+            QuarterlyPrediction.risk_level.in_(['High', 'Critical'])
+        ).all()
+        high_risk_company_ids.update([id[0] for id in quarterly_high_risk_ids])
+        
+        high_risk_companies = len(high_risk_company_ids)
+
+        annual_avg = db.query(func.avg(AnnualPrediction.probability)).scalar() or 0
+        
+        quarterly_avg = db.query(func.avg(QuarterlyPrediction.ensemble_probability)).scalar() or 0
+        
+        annual_count = db.query(AnnualPrediction).count()
+        quarterly_count = db.query(QuarterlyPrediction).count()
+        total_predictions = annual_count + quarterly_count
+        
+        if total_predictions > 0:
+            average_default_rate = (
+                (annual_avg * annual_count + quarterly_avg * quarterly_count) / total_predictions
+            ) * 100  
+        else:
+            average_default_rate = 0
+        
+        sectors_covered = db.query(func.count(func.distinct(Company.sector))).scalar() or 0
+        
+        return {
+            "success": True,
+            "data": {
+                "total_companies": total_companies,
+                "average_default_rate": round(safe_float(average_default_rate), 2),
+                "high_risk_companies": high_risk_companies,
+                "sectors_covered": sectors_covered,
+                "prediction_breakdown": {
+                    "annual_predictions": annual_count,
+                    "quarterly_predictions": quarterly_count,
+                    "total_predictions": total_predictions
+                },
+                "last_updated": datetime.utcnow().isoformat(),
+                "model_version": "1.0.0"
+            }
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "Failed to fetch summary statistics",
+                "details": str(e)
+            }
+        )
+
+
 @router.post("/bulk-predict", response_model=BulkPredictionResponse)
-async def bulk_predict_from_excel(
+async def bulk_predict_from_file(
     file: UploadFile = File(...),
+    prediction_type: str = "annual",
     current_user: User = Depends(get_current_verified_user),
     db: Session = Depends(get_db)
 ):
     """
-    Bulk prediction endpoint that accepts Excel files with company data.
-
-    Expected Excel columns:
-    - stock_symbol: Company stock symbol (required)
-    - company_name: Company name (required)
-    - market_cap: Market capitalization (optional)
-    - sector: Company sector (optional)
-    - reporting_year: Reporting year (optional, e.g., '2024')
-    - reporting_quarter: Reporting quarter (optional, e.g., 'Q4')
-    - long_term_debt_to_total_capital: Long-term debt / total capital (%) (required)
-    - total_debt_to_ebitda: Total debt / EBITDA (required)
-    - net_income_margin: Net income margin (%) (required)
-    - ebit_to_interest_expense: EBIT / interest expense (required)
-    - return_on_assets: Return on assets (%) (required)
-    """
+    Bulk prediction endpoint that accepts CSV/Excel files with company data.
     
-    if not file.filename.endswith(('.xlsx', '.xls')):
-        raise HTTPException(
-            status_code=400,
-            detail="File must be an Excel file (.xlsx or .xls)"
-        )
+    Supports 1000-5000 companies at once.
+    
+    Expected columns for Annual predictions:
+    - stock_symbol, company_name, market_cap, sector, reporting_year
+    - long_term_debt_to_total_capital, total_debt_to_ebitda, net_income_margin
+    - ebit_to_interest_expense, return_on_assets
+    
+    Expected columns for Quarterly predictions:
+    - stock_symbol, company_name, market_cap, sector, reporting_year, reporting_quarter
+    - total_debt_to_ebitda, sga_margin, long_term_debt_to_total_capital, return_on_capital
+    """
+    start_time = time.time()
     
     try:
-        contents = await file.read()
-        df = pd.read_excel(io.BytesIO(contents))
+        if not file.filename.endswith(('.csv', '.xlsx', '.xls')):
+            raise HTTPException(
+                status_code=400,
+                detail="File must be CSV (.csv) or Excel (.xlsx, .xls)"
+            )
+        
+        content = await file.read()
+        
+        try:
+            if file.filename.endswith('.csv'):
+                df = pd.read_csv(io.BytesIO(content))
+            else:
+                df = pd.read_excel(io.BytesIO(content))
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Error reading file: {str(e)}"
+            )
         
         if df.empty:
             raise HTTPException(
                 status_code=400,
-                detail="Excel file is empty"
+                detail="File contains no data"
             )
         
-        # Required columns for the new single table schema
-        required_columns = [
-            'stock_symbol', 'company_name',
-            'long_term_debt_to_total_capital', 'total_debt_to_ebitda', 
-            'net_income_margin', 'ebit_to_interest_expense', 'return_on_assets'
-        ]
+        if len(df) > 5000:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File contains {len(df)} rows. Maximum allowed is 5000 companies."
+            )
+        
+        if prediction_type == "annual":
+            required_columns = [
+                'stock_symbol', 'company_name', 'long_term_debt_to_total_capital',
+                'total_debt_to_ebitda', 'net_income_margin', 'ebit_to_interest_expense', 'return_on_assets'
+            ]
+        elif prediction_type == "quarterly":
+            required_columns = [
+                'stock_symbol', 'company_name', 'reporting_year', 'reporting_quarter',
+                'total_debt_to_ebitda', 'sga_margin', 'long_term_debt_to_total_capital', 'return_on_capital'
+            ]
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="prediction_type must be 'annual' or 'quarterly'"
+            )
         
         missing_columns = [col for col in required_columns if col not in df.columns]
         if missing_columns:
             raise HTTPException(
                 status_code=400,
-                detail=f"Missing required columns: {', '.join(missing_columns)}"
+                detail=f"Missing required columns: {missing_columns}"
             )
         
-        # Optional columns with defaults
-        optional_columns = {
-            'market_cap': 1000000000,  # Default 1B
-            'sector': 'Unknown',
-            'reporting_year': None,
-            'reporting_quarter': None
-        }
-        
-        # Add missing optional columns with defaults
-        for col, default_value in optional_columns.items():
-            if col not in df.columns:
-                df[col] = default_value
-        
-        start_time = time.time()
+        company_service = CompanyService(db)
         results = []
         successful_predictions = 0
         failed_predictions = 0
         
-        company_service = CompanyService(db)
-        
         for index, row in df.iterrows():
             try:
-                # Validate required data
-                stock_symbol = str(row['stock_symbol']).strip()
-                company_name = str(row['company_name']).strip()
-                
-                if not stock_symbol or not company_name or stock_symbol.lower() == 'nan' or company_name.lower() == 'nan':
-                    raise ValueError("Stock symbol and company name are required")
-                
-                # Convert financial data
-                ratios = {
-                    'long_term_debt_to_total_capital': float(row['long_term_debt_to_total_capital']),
-                    'total_debt_to_ebitda': float(row['total_debt_to_ebitda']),
-                    'net_income_margin': float(row['net_income_margin']),
-                    'ebit_to_interest_expense': float(row['ebit_to_interest_expense']),
-                    'return_on_assets': float(row['return_on_assets'])
-                }
-                
-                # Handle optional fields
-                market_cap = row.get('market_cap', 1000000000)
-                if pd.isna(market_cap) or market_cap == 'nan':
-                    market_cap = 1000000000
-                else:
-                    market_cap = float(market_cap)
-                
-                sector = row.get('sector', 'Unknown')
-                if pd.isna(sector) or str(sector).lower() == 'nan':
-                    sector = 'Unknown'
-                else:
-                    sector = str(sector).strip()
-                
-                reporting_year = row.get('reporting_year')
-                if pd.isna(reporting_year) or str(reporting_year).lower() == 'nan':
-                    reporting_year = None
-                else:
-                    reporting_year = str(reporting_year).strip()
-                
-                reporting_quarter = row.get('reporting_quarter')
-                if pd.isna(reporting_quarter) or str(reporting_quarter).lower() == 'nan':
-                    reporting_quarter = None
-                else:
-                    reporting_quarter = str(reporting_quarter).strip()
-                
-                # Generate prediction
-                ratios_for_prediction = {
-                    'long_term_debt_to_total_capital': ratios['long_term_debt_to_total_capital'],
-                    'total_debt_to_ebitda': ratios['total_debt_to_ebitda'],
-                    'net_income_margin': ratios['net_income_margin'],
-                    'ebit_to_interest_expense': ratios['ebit_to_interest_expense'],
-                    'return_on_assets': ratios['return_on_assets']
-                }
-                
-                prediction_result = ml_model.predict_default_probability(ratios_for_prediction)
-                
-                # Create company data for single table
-                company_data = CompanyCreate(
-                    symbol=stock_symbol,
-                    name=company_name,
-                    market_cap=market_cap,
-                    sector=sector,
-                    reporting_year=reporting_year,
-                    reporting_quarter=reporting_quarter,
-                    long_term_debt_to_total_capital=ratios['long_term_debt_to_total_capital'],
-                    total_debt_to_ebitda=ratios['total_debt_to_ebitda'],
-                    net_income_margin=ratios['net_income_margin'],
-                    ebit_to_interest_expense=ratios['ebit_to_interest_expense'],
-                    return_on_assets=ratios['return_on_assets']
+                company = company_service.create_company(
+                    symbol=str(row['stock_symbol']).strip().upper(),
+                    name=str(row['company_name']).strip(),
+                    market_cap=safe_float(row.get('market_cap', 1000000000)),
+                    sector=str(row.get('sector', 'Unknown')).strip()
                 )
                 
-                # Save to database using single table structure with upsert
-                company = company_service.upsert_company(company_data, prediction_result)
-                
-                # Build successful response
-                result_item = BulkPredictionItem(
-                    stock_symbol=stock_symbol,
-                    company_name=company_name,
-                    sector=sector,
-                    market_cap=market_cap,
-                    prediction={
-                        "id": str(company.id),
-                        "probability": float(company.probability) if company.probability else None,
-                        "risk_level": company.risk_level,
-                        "confidence": float(company.confidence),
-                        "predicted_at": company.predicted_at.isoformat(),
-                        "financial_ratios": {
-                            "long_term_debt_to_total_capital": float(company.long_term_debt_to_total_capital),
-                            "total_debt_to_ebitda": float(company.total_debt_to_ebitda),
-                            "net_income_margin": float(company.net_income_margin),
-                            "ebit_to_interest_expense": float(company.ebit_to_interest_expense),
-                            "return_on_assets": float(company.return_on_assets)
-                        }
-                    },
-                    status="success",
-                    error_message=None
-                )
+                if prediction_type == "annual":
+                    financial_data = {
+                        "long_term_debt_to_total_capital": safe_float(row['long_term_debt_to_total_capital']),
+                        "total_debt_to_ebitda": safe_float(row['total_debt_to_ebitda']),
+                        "net_income_margin": safe_float(row['net_income_margin']),
+                        "ebit_to_interest_expense": safe_float(row['ebit_to_interest_expense']),
+                        "return_on_assets": safe_float(row['return_on_assets'])
+                    }
+                    
+                    prediction_result = ml_model.predict_default_probability(financial_data)
+                    
+                    if "error" in prediction_result:
+                        raise Exception(prediction_result["error"])
+                    
+                    prediction = company_service.create_annual_prediction(
+                        company=company,
+                        financial_data=financial_data,
+                        prediction_results=prediction_result,
+                        reporting_year=str(row.get('reporting_year', '2024'))
+                    )
+                    
+                    result_item = BulkPredictionItem(
+                        stock_symbol=company.symbol,
+                        company_name=company.name,
+                        sector=company.sector,
+                        market_cap=safe_float(company.market_cap) if company.market_cap else None,
+                        prediction={
+                            "id": str(prediction.id),
+                            "type": "annual",
+                            "probability": safe_float(prediction.probability),
+                            "primary_probability": safe_float(prediction.probability),
+                            "risk_level": prediction.risk_level,
+                            "confidence": safe_float(prediction.confidence)
+                        },
+                        status="success"
+                    )
+                    
+                elif prediction_type == "quarterly":
+                    financial_data = {
+                        "total_debt_to_ebitda": safe_float(row['total_debt_to_ebitda']),
+                        "sga_margin": safe_float(row['sga_margin']),
+                        "long_term_debt_to_total_capital": safe_float(row['long_term_debt_to_total_capital']),
+                        "return_on_capital": safe_float(row['return_on_capital'])
+                    }
+                    
+                    prediction_result = quarterly_ml_model.predict_default_probability(financial_data)
+                    
+                    if "error" in prediction_result:
+                        raise Exception(prediction_result["error"])
+                    
+                    prediction = company_service.create_quarterly_prediction(
+                        company=company,
+                        financial_data=financial_data,
+                        prediction_results=prediction_result,
+                        reporting_year=str(row['reporting_year']),
+                        reporting_quarter=str(row['reporting_quarter'])
+                    )
+                    
+                    result_item = BulkPredictionItem(
+                        stock_symbol=company.symbol,
+                        company_name=company.name,
+                        sector=company.sector,
+                        market_cap=safe_float(company.market_cap) if company.market_cap else None,
+                        prediction={
+                            "id": str(prediction.id),
+                            "type": "quarterly",
+                            "probabilities": {
+                                "logistic": safe_float(prediction.logistic_probability),
+                                "gbm": safe_float(prediction.gbm_probability),
+                                "ensemble": safe_float(prediction.ensemble_probability)
+                            },
+                            "primary_probability": safe_float(prediction.ensemble_probability),
+                            "risk_level": prediction.risk_level,
+                            "confidence": safe_float(prediction.confidence)
+                        },
+                        status="success"
+                    )
                 
                 successful_predictions += 1
                 
             except Exception as e:
-                # Handle individual company prediction failure
                 result_item = BulkPredictionItem(
-                    stock_symbol=str(row.get('stock_symbol', 'Unknown')),
-                    company_name=str(row.get('company_name', 'Unknown')),
+                    stock_symbol=str(row.get('stock_symbol', 'UNKNOWN')),
+                    company_name=str(row.get('company_name', 'Unknown Company')),
                     sector=str(row.get('sector', 'Unknown')),
-                    market_cap=None,
+                    market_cap=safe_float(row.get('market_cap', 0)) if row.get('market_cap') else None,
                     prediction={},
                     status="failed",
                     error_message=str(e)
                 )
-                
                 failed_predictions += 1
-                print(f"Error processing row {index + 1}: {e}")
             
             results.append(result_item)
         
@@ -338,20 +761,21 @@ async def bulk_predict_from_excel(
             processing_time=processing_time
         )
         
-    except pd.errors.EmptyDataError:
-        raise HTTPException(
-            status_code=400,
-            detail="Excel file is empty or contains no data"
-        )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to process Excel file: {str(e)}"
+            detail={
+                "error": "Bulk prediction failed",
+                "details": str(e)
+            }
         )
 
 @router.post("/bulk-predict-async", response_model=BulkJobResponse)
 async def bulk_predict_async(
     file: UploadFile = File(...),
+    prediction_type: str = "annual",
     current_user: User = Depends(get_current_verified_user),
     db: Session = Depends(get_db)
 ):
@@ -359,27 +783,52 @@ async def bulk_predict_async(
     Submit a bulk prediction job that runs in the background.
     Returns a job ID that can be used to check status and retrieve results.
     
-    This endpoint is recommended for large Excel files (>100 companies) to avoid timeouts.
+    This endpoint is recommended for very large files (>1000 companies) to avoid timeouts.
+    For smaller files, use the synchronous /bulk-predict endpoint.
+    
+    Supports CSV and Excel files with 1000-50000 companies.
     """
     
-    if not file.filename.endswith(('.xlsx', '.xls')):
+    if not file.filename.endswith(('.xlsx', '.xls', '.csv')):
         raise HTTPException(
             status_code=400,
-            detail="File must be an Excel file (.xlsx or .xls)"
+            detail="File must be Excel (.xlsx, .xls) or CSV (.csv) format"
+        )
+    
+    if prediction_type not in ["annual", "quarterly"]:
+        raise HTTPException(
+            status_code=400,
+            detail="prediction_type must be 'annual' or 'quarterly'"
         )
     
     try:
         contents = await file.read()
         
-        # Validate Excel file and columns
-        df = pd.read_excel(io.BytesIO(contents))
+        if file.filename.endswith('.csv'):
+            df = pd.read_csv(io.StringIO(contents.decode('utf-8')))
+        else:
+            df = pd.read_excel(io.BytesIO(contents))
+        
+        if df.empty:
+            raise HTTPException(
+                status_code=400,
+                detail="File is empty"
+            )
+        
         company_count = len(df)
         
-        required_columns = [
-            'stock_symbol', 'company_name',
-            'long_term_debt_to_total_capital', 'total_debt_to_ebitda', 
-            'net_income_margin', 'ebit_to_interest_expense', 'return_on_assets'
-        ]
+        base_required = ['stock_symbol', 'company_name']
+        
+        if prediction_type == "annual":
+            required_columns = base_required + [
+                'long_term_debt_to_total_capital', 'total_debt_to_ebitda', 
+                'net_income_margin', 'ebit_to_interest_expense', 'return_on_assets'
+            ]
+        else:  # quarterly
+            required_columns = base_required + [
+                'reporting_year', 'reporting_quarter', 'total_debt_to_ebitda', 
+                'sga_margin', 'long_term_debt_to_total_capital', 'return_on_capital'
+            ]
         
         missing_columns = [col for col in required_columns if col not in df.columns]
         if missing_columns:
@@ -388,36 +837,46 @@ async def bulk_predict_async(
                 detail=f"Missing required columns: {', '.join(missing_columns)}"
             )
         
-        # Submit background task
         file_content_b64 = base64.b64encode(contents).decode('utf-8')
         
-        from ..tasks import process_bulk_excel_task
-        task = process_bulk_excel_task.delay(file_content_b64, file.filename)
+        from ..tasks import process_bulk_normalized_task
+        task = process_bulk_normalized_task.delay(file_content_b64, file.filename, prediction_type)
         
-        estimated_time = f"{company_count * 1.5:.0f}-{company_count * 3:.0f} seconds"
-        if company_count > 100:
+        if company_count <= 100:
+            estimated_time = f"{company_count * 2:.0f}-{company_count * 4:.0f} seconds"
+        elif company_count <= 1000:
             estimated_time = f"{company_count * 1.5 / 60:.1f}-{company_count * 3 / 60:.1f} minutes"
+        else:
+            estimated_time = f"{company_count * 1 / 60:.1f}-{company_count * 2 / 60:.1f} minutes"
         
         return BulkJobResponse(
             success=True,
-            message=f"Bulk prediction job submitted successfully. Processing {company_count} companies.",
+            message=f"Bulk {prediction_type} prediction job submitted successfully. Processing {company_count} companies in background.",
             job_id=task.id,
             status="PENDING",
             filename=file.filename,
             estimated_processing_time=estimated_time
         )
-                
+        
     except pd.errors.EmptyDataError:
         raise HTTPException(
             status_code=400,
-            detail="Excel file is empty or contains no data"
+            detail="File is empty or contains no data"
+        )
+    except pd.errors.ParserError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File parsing error: {str(e)}"
         )
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to submit bulk prediction job: {str(e)}"
+            detail={
+                "error": "Failed to submit bulk prediction job",
+                "details": str(e)
+            }
         )
 
 
@@ -438,7 +897,6 @@ async def get_job_status(
     try:
         from ..celery_app import celery_app
         
-        # Get task result
         task_result = celery_app.AsyncResult(job_id)
         
         if task_result.state == "PENDING":
@@ -463,7 +921,8 @@ async def get_job_status(
                     "total": progress_info.get("total", 0),
                     "filename": progress_info.get("filename", ""),
                     "successful": progress_info.get("successful", 0),
-                    "failed": progress_info.get("failed", 0)
+                    "failed": progress_info.get("failed", 0),
+                    "prediction_type": progress_info.get("prediction_type", "unknown")
                 },
                 result=None
             )
@@ -476,8 +935,7 @@ async def get_job_status(
                 status="SUCCESS",
                 message="Job completed successfully",
                 progress=None,
-                result=result_data,
-                completed_at=result_data.get("completed_at")
+                result=result_data
             )
         
         elif task_result.state == "FAILURE":
@@ -561,14 +1019,14 @@ async def get_job_result(
         )
 
 
-@router.put("/update/{company_id}", response_model=PredictionResponse)
-async def update_prediction(
+@router.put("/update/{company_id}")
+async def update_company_prediction(
     company_id: str,
     request: PredictionUpdateRequest,
     current_user: User = Depends(get_current_verified_user),
     db: Session = Depends(get_db)
 ):
-    """Update company data and recalculate prediction if financial ratios are changed"""
+    """Update company data and recalculate predictions if financial ratios change"""
     try:
         try:
             uuid.UUID(company_id)
@@ -579,120 +1037,197 @@ async def update_prediction(
             )
 
         company_service = CompanyService(db)
-
         company = company_service.get_company_by_id(company_id)
+        
         if not company:
             raise HTTPException(
                 status_code=404,
                 detail="Company not found"
             )
 
-        company_update_data = {}
-        if request.company_name is not None:
-            company_update_data['name'] = request.company_name
+        if request.company_name:
+            company.name = request.company_name
         if request.market_cap is not None:
-            company_update_data['market_cap'] = request.market_cap
-        if request.sector is not None:
-            company_update_data['sector'] = request.sector
-        if request.reporting_year is not None:
-            company_update_data['reporting_year'] = request.reporting_year
-        if request.reporting_quarter is not None:
-            company_update_data['reporting_quarter'] = request.reporting_quarter
-
-        ratios_update = {}
-        ratios_provided = False
+            company.market_cap = request.market_cap
+        if request.sector:
+            company.sector = request.sector
         
-        ratios_update = {
-            "long_term_debt_to_total_capital": request.long_term_debt_to_total_capital if request.long_term_debt_to_total_capital is not None else float(company.long_term_debt_to_total_capital),
-            "total_debt_to_ebitda": request.total_debt_to_ebitda if request.total_debt_to_ebitda is not None else float(company.total_debt_to_ebitda),
-            "net_income_margin": request.net_income_margin if request.net_income_margin is not None else float(company.net_income_margin),
-            "ebit_to_interest_expense": request.ebit_to_interest_expense if request.ebit_to_interest_expense is not None else float(company.ebit_to_interest_expense),
-            "return_on_assets": request.return_on_assets if request.return_on_assets is not None else float(company.return_on_assets)
-        }
-
-        if any([
-            request.long_term_debt_to_total_capital is not None,
-            request.total_debt_to_ebitda is not None,
-            request.net_income_margin is not None,
-            request.ebit_to_interest_expense is not None,
-            request.return_on_assets is not None
-        ]):
-            ratios_provided = True
-
-        prediction_result = None
+        company.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(company)
         
-        if ratios_provided:
-            prediction_result = ml_model.predict_default_probability(ratios_update)
-            
-            if "error" in prediction_result:
-                raise HTTPException(
-                    status_code=400,
-                    detail={
-                        "error": "Prediction calculation failed",
-                        "details": prediction_result["error"]
-                    }
-                )
-
-            company_update_data.update(ratios_update)
-
-        updated_company = company_service.update_company(
-            company_id, 
-            company_update_data, 
-            prediction_result
-        )
-
-        return {
+        response_data = {
             "success": True,
-            "message": "Company data updated successfully" + (" with new prediction" if ratios_provided else ""),
+            "message": "Company updated successfully",
             "company": {
-                "id": str(updated_company.id),
-                "symbol": updated_company.symbol,
-                "name": updated_company.name,
-                "market_cap": float(updated_company.market_cap) if updated_company.market_cap else None,
-                "sector": updated_company.sector,
-                "reporting_year": updated_company.reporting_year,
-                "reporting_quarter": updated_company.reporting_quarter,
-                "ratios": {
-                    "long_term_debt_to_total_capital": float(updated_company.long_term_debt_to_total_capital),
-                    "total_debt_to_ebitda": float(updated_company.total_debt_to_ebitda),
-                    "net_income_margin": float(updated_company.net_income_margin),
-                    "ebit_to_interest_expense": float(updated_company.ebit_to_interest_expense),
-                    "return_on_assets": float(updated_company.return_on_assets)
-                },
-                "prediction": {
-                    "probability": float(updated_company.probability) if updated_company.probability else None,
-                    "risk_level": updated_company.risk_level,
-                    "confidence": float(updated_company.confidence),
-                    "predicted_at": updated_company.predicted_at.isoformat(),
-                    "model_info": {
-                        "model_type": "Updated Logistic Regression Model" if ratios_provided else "Existing Prediction",
-                        "note": "Financial ratios were updated and prediction recalculated" if ratios_provided else "No financial ratio changes"
-                    }
-                }
+                "id": str(company.id),
+                "symbol": company.symbol,
+                "name": company.name,
+                "market_cap": safe_float(company.market_cap) if company.market_cap else None,
+                "sector": company.sector,
+                "updated_at": serialize_datetime(company.updated_at)
             }
         }
+        
+        updated_prediction = None
+        if request.prediction_type and request.reporting_year:
+            
+            if request.prediction_type == "annual":
+                if not all([
+                    request.long_term_debt_to_total_capital is not None,
+                    request.total_debt_to_ebitda is not None,
+                    request.net_income_margin is not None,
+                    request.ebit_to_interest_expense is not None,
+                    request.return_on_assets is not None
+                ]):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="All annual prediction fields are required for annual prediction update"
+                    )
+                
+                existing_prediction = company_service.get_annual_prediction(
+                    company.id, request.reporting_year
+                )
+                
+                if existing_prediction:
+                    db.delete(existing_prediction)
+                    db.flush() 
+                
+                financial_data = {
+                    "long_term_debt_to_total_capital": request.long_term_debt_to_total_capital,
+                    "total_debt_to_ebitda": request.total_debt_to_ebitda,
+                    "net_income_margin": request.net_income_margin,
+                    "ebit_to_interest_expense": request.ebit_to_interest_expense,
+                    "return_on_assets": request.return_on_assets
+                }
+                
+                prediction_result = ml_model.predict_default_probability(financial_data)
+                
+                if "error" in prediction_result:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Annual prediction failed: {prediction_result['error']}"
+                    )
+                
+                updated_prediction = company_service.create_annual_prediction(
+                    company=company,
+                    financial_data=financial_data,
+                    prediction_results=prediction_result,
+                    reporting_year=request.reporting_year
+                )
+                
+                response_data["updated_prediction"] = {
+                    "type": "annual",
+                    "id": str(updated_prediction.id),
+                    "reporting_year": updated_prediction.reporting_year,
+                    "probability": safe_float(updated_prediction.probability),
+                    "primary_probability": safe_float(updated_prediction.probability),
+                    "risk_level": updated_prediction.risk_level,
+                    "confidence": safe_float(updated_prediction.confidence),
+                    "action": "replaced" if existing_prediction else "created",
+                    "financial_ratios": {
+                        "long_term_debt_to_total_capital": safe_float(updated_prediction.long_term_debt_to_total_capital),
+                        "total_debt_to_ebitda": safe_float(updated_prediction.total_debt_to_ebitda),
+                        "net_income_margin": safe_float(updated_prediction.net_income_margin),
+                        "ebit_to_interest_expense": safe_float(updated_prediction.ebit_to_interest_expense),
+                        "return_on_assets": safe_float(updated_prediction.return_on_assets)
+                    }
+                }
+                
+            elif request.prediction_type == "quarterly":
+                if not all([
+                    request.total_debt_to_ebitda is not None,
+                    request.sga_margin is not None,
+                    request.long_term_debt_to_total_capital is not None,
+                    request.return_on_capital is not None,
+                    request.reporting_quarter is not None
+                ]):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="All quarterly prediction fields are required for quarterly prediction update"
+                    )
+                
+                existing_prediction = company_service.get_quarterly_prediction(
+                    company.id, request.reporting_year, request.reporting_quarter
+                )
+                
+                if existing_prediction:
+                    db.delete(existing_prediction)
+                    db.flush()  
+                
+                financial_data = {
+                    "total_debt_to_ebitda": request.total_debt_to_ebitda,
+                    "sga_margin": request.sga_margin,
+                    "long_term_debt_to_total_capital": request.long_term_debt_to_total_capital,
+                    "return_on_capital": request.return_on_capital
+                }
+                
+                prediction_result = quarterly_ml_model.predict_default_probability(financial_data)
+                
+                if "error" in prediction_result:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Quarterly prediction failed: {prediction_result['error']}"
+                    )
+                
+                updated_prediction = company_service.create_quarterly_prediction(
+                    company=company,
+                    financial_data=financial_data,
+                    prediction_results=prediction_result,
+                    reporting_year=request.reporting_year,
+                    reporting_quarter=request.reporting_quarter
+                )
+                
+                response_data["updated_prediction"] = {
+                    "type": "quarterly",
+                    "id": str(updated_prediction.id),
+                    "reporting_year": updated_prediction.reporting_year,
+                    "reporting_quarter": updated_prediction.reporting_quarter,
+                    "probabilities": {
+                        "logistic": safe_float(updated_prediction.logistic_probability),
+                        "gbm": safe_float(updated_prediction.gbm_probability),
+                        "ensemble": safe_float(updated_prediction.ensemble_probability)
+                    },
+                    "primary_probability": safe_float(updated_prediction.ensemble_probability),
+                    "risk_level": updated_prediction.risk_level,
+                    "confidence": safe_float(updated_prediction.confidence),
+                    "action": "replaced" if existing_prediction else "created",
+                    "financial_ratios": {
+                        "total_debt_to_ebitda": safe_float(updated_prediction.total_debt_to_ebitda),
+                        "sga_margin": safe_float(updated_prediction.sga_margin),
+                        "long_term_debt_to_total_capital": safe_float(updated_prediction.long_term_debt_to_total_capital),
+                        "return_on_capital": safe_float(updated_prediction.return_on_capital)
+                    }
+                }
+            
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="prediction_type must be 'annual' or 'quarterly'"
+                )
+        
+        return response_data
 
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Update prediction error: {e}")
         db.rollback()
         raise HTTPException(
             status_code=500,
             detail={
-                "error": "Failed to update prediction",
+                "error": "Failed to update company",
                 "details": str(e)
             }
         )
 
 
 @router.delete("/delete/{company_id}")
-async def delete_company_prediction(
+async def delete_company_and_predictions(
     company_id: str,
     current_user: User = Depends(get_current_verified_user),
     db: Session = Depends(get_db)
 ):
-    """Delete all data for a company (company, financial ratios, and predictions)"""
+    """Delete a company and all its predictions (annual and quarterly)"""
     try:
         try:
             uuid.UUID(company_id)
@@ -703,8 +1238,8 @@ async def delete_company_prediction(
             )
 
         company_service = CompanyService(db)
-
         company = company_service.get_company_by_id(company_id)
+        
         if not company:
             raise HTTPException(
                 status_code=404,
@@ -713,78 +1248,136 @@ async def delete_company_prediction(
 
         company_symbol = company.symbol
         company_name = company.name
+        annual_predictions_count = len(company.annual_predictions)
+        quarterly_predictions_count = len(company.quarterly_predictions)
 
-        success = company_service.delete_company_data(company_id)
+        db.delete(company)
+        db.commit()
         
-        if success:
-            return {
-                "success": True,
-                "message": f"All data for company '{company_name}' ({company_symbol}) has been deleted successfully",
-                "deleted_company": {
-                    "id": company_id,
-                    "symbol": company_symbol,
-                    "name": company_name
-                }
-            }
-        else:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to delete company data"
-            )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Delete company error: {e}")
-        db.rollback()
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error": "Failed to delete company data",
-                "details": str(e)
-            }
-        )
-
-
-@router.post("/admin/reset-database", response_model=DatabaseResetResponse)
-async def reset_database(
-    request: DatabaseResetRequest,
-    current_user: User = Depends(get_admin_user),
-    db: Session = Depends(get_db)
-):
-    """Reset database (Admin only) - Reset complete database or specific table"""
-    try:
-        if not request.confirm_reset:
-            raise HTTPException(
-                status_code=400,
-                detail="Reset confirmation required. Set 'confirm_reset' to true."
-            )
-
-        database_service = DatabaseService(db)
-        
-        result = database_service.reset_table(request.table_name)
-        
-        if request.table_name:
-            message = f"Table '{request.table_name}' has been reset successfully. {result['affected_records']} records deleted."
-        else:
-            message = f"Complete database has been reset successfully. {result['affected_records']} total records deleted."
-
         return {
             "success": True,
-            "message": message,
-            "tables_reset": result["tables_reset"],
-            "affected_records": result["affected_records"]
+            "message": f"Company '{company_name}' ({company_symbol}) and all predictions deleted successfully",
+            "deleted_company": {
+                "id": company_id,
+                "symbol": company_symbol,
+                "name": company_name,
+                "annual_predictions_deleted": annual_predictions_count,
+                "quarterly_predictions_deleted": quarterly_predictions_count
+            }
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Database reset error: {e}")
         db.rollback()
         raise HTTPException(
             status_code=500,
             detail={
-                "error": "Failed to reset database",
+                "error": "Failed to delete company",
                 "details": str(e)
             }
         )
+
+@router.delete("/predictions/annual/{prediction_id}")
+async def delete_annual_prediction(
+    prediction_id: str,
+    current_user: User = Depends(get_current_verified_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a specific annual prediction"""
+    try:
+        try:
+            uuid.UUID(prediction_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid prediction ID format. Must be a valid UUID."
+            )
+
+        prediction = db.query(AnnualPrediction).filter(AnnualPrediction.id == prediction_id).first()
+        
+        if not prediction:
+            raise HTTPException(
+                status_code=404,
+                detail="Annual prediction not found"
+            )
+
+        db.delete(prediction)
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": "Annual prediction deleted successfully",
+            "deleted_prediction": {
+                "id": prediction_id,
+                "type": "annual"
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "Failed to delete annual prediction",
+                "details": str(e)
+            }
+        )
+
+@router.delete("/predictions/quarterly/{prediction_id}")
+async def delete_quarterly_prediction(
+    prediction_id: str,
+    current_user: User = Depends(get_current_verified_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a specific quarterly prediction"""
+    try:
+        try:
+            uuid.UUID(prediction_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid prediction ID format. Must be a valid UUID."
+            )
+
+        prediction = db.query(QuarterlyPrediction).filter(QuarterlyPrediction.id == prediction_id).first()
+        
+        if not prediction:
+            raise HTTPException(
+                status_code=404,
+                detail="Quarterly prediction not found"
+            )
+
+        db.delete(prediction)
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": "Quarterly prediction deleted successfully",
+            "deleted_prediction": {
+                "id": prediction_id,
+                "type": "quarterly"
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "Failed to delete quarterly prediction",
+                "details": str(e)
+            }
+        )
+
+@router.post("/predict-default-rate")
+async def predict_default_rate_legacy(
+    request: AnnualPredictionRequest,
+    current_user: User = Depends(get_current_verified_user),
+    db: Session = Depends(get_db)
+):
+    return await predict_annual_default_rate(request, current_user, db)

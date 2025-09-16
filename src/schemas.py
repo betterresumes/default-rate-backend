@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, EmailStr, validator
+from pydantic import BaseModel, Field, EmailStr, validator, root_validator
 from typing import Optional, List
 from datetime import datetime
 from decimal import Decimal
@@ -92,40 +92,16 @@ class AuthResponse(BaseModel):
     data: Optional[dict] = None
 
 
+# Company schemas (base info only)
 class CompanyBase(BaseModel):
     symbol: str = Field(..., min_length=1, max_length=10)
     name: str = Field(..., min_length=1, max_length=200)
     market_cap: float = Field(..., ge=0, description="Market capitalization in USD")
     sector: str = Field(..., min_length=1, max_length=100, description="Company sector/industry")
-    reporting_year: Optional[str] = Field(None, description="Reporting year (e.g., '2024')")
-    reporting_quarter: Optional[str] = Field(None, description="Reporting quarter (e.g., 'Q4')")
-    
-    long_term_debt_to_total_capital: float = Field(..., description="Long-term debt / total capital (%)")
-    total_debt_to_ebitda: float = Field(..., description="Total debt / EBITDA")
-    net_income_margin: float = Field(..., description="Net income margin (%)")
-    ebit_to_interest_expense: float = Field(..., description="EBIT / interest expense")
-    return_on_assets: float = Field(..., description="Return on assets (%)")
-    
-    risk_level: str = Field(..., description="Risk level (LOW, MEDIUM, HIGH)")
-    confidence: float = Field(..., ge=0, le=1, description="Prediction confidence (0-1)")
-    probability: Optional[float] = Field(None, ge=0, le=1, description="Default probability (0-1)")
-    predicted_at: datetime = Field(..., description="When the prediction was made")
 
-
-class CompanyCreate(BaseModel):
-    symbol: str = Field(..., min_length=1, max_length=10)
-    name: str = Field(..., min_length=1, max_length=200)
-    market_cap: float = Field(..., ge=0, description="Market capitalization in USD")
-    sector: str = Field(..., min_length=1, max_length=100, description="Company sector/industry")
-    reporting_year: Optional[str] = Field(None, description="Reporting year (e.g., '2024')")
-    reporting_quarter: Optional[str] = Field(None, description="Reporting quarter (e.g., 'Q4')")
-    
-    long_term_debt_to_total_capital: float = Field(..., description="Long-term debt / total capital (%)")
-    total_debt_to_ebitda: float = Field(..., description="Total debt / EBITDA")
-    net_income_margin: float = Field(..., description="Net income margin (%)")
-    ebit_to_interest_expense: float = Field(..., description="EBIT / interest expense")
-    return_on_assets: float = Field(..., description="Return on assets (%)")
-
+class CompanyCreate(CompanyBase):
+    """Schema for creating a new company"""
+    pass
 
 class Company(CompanyBase):
     id: UUID
@@ -135,20 +111,131 @@ class Company(CompanyBase):
     class Config:
         from_attributes = True
 
-
-class PredictionRequest(BaseModel):
-    stock_symbol: str = Field(..., min_length=1, max_length=10)
-    company_name: str = Field(..., min_length=1, max_length=200)
-    market_cap: float = Field(..., ge=0, description="Market capitalization in USD")
-    sector: str = Field(..., min_length=1, max_length=100, description="Company sector/industry")
-    reporting_year: Optional[str] = Field(None, description="Reporting year (e.g., '2024')")
-    reporting_quarter: Optional[str] = Field(None, description="Reporting quarter (e.g., 'Q4')")
-    
+# Annual prediction schemas
+class AnnualPredictionBase(BaseModel):
+    reporting_year: str = Field(..., description="Reporting year (e.g., '2024')")
     long_term_debt_to_total_capital: float = Field(..., description="Long-term debt / total capital (%)")
     total_debt_to_ebitda: float = Field(..., description="Total debt / EBITDA")
     net_income_margin: float = Field(..., description="Net income margin (%)")
     ebit_to_interest_expense: float = Field(..., description="EBIT / interest expense")
     return_on_assets: float = Field(..., description="Return on assets (%)")
+    risk_level: str = Field(..., description="Risk level (LOW, MEDIUM, HIGH)")
+    confidence: float = Field(..., ge=0, le=1, description="Prediction confidence (0-1)")
+    probability: float = Field(..., ge=0, le=1, description="Default probability (0-1)")
+
+class AnnualPrediction(AnnualPredictionBase):
+    id: UUID
+    company_id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+# Quarterly prediction schemas
+class QuarterlyPredictionBase(BaseModel):
+    reporting_year: str = Field(..., description="Reporting year (e.g., '2024')")
+    reporting_quarter: str = Field(..., description="Reporting quarter (e.g., 'Q4')")
+    total_debt_to_ebitda: float = Field(..., description="Total debt / EBITDA")
+    sga_margin: float = Field(..., description="SG&A margin (%)")
+    long_term_debt_to_total_capital: float = Field(..., description="Long-term debt / total capital (%)")
+    return_on_capital: float = Field(..., description="Return on capital (%)")
+    risk_level: str = Field(..., description="Risk level (LOW, MEDIUM, HIGH)")
+    confidence: float = Field(..., ge=0, le=1, description="Prediction confidence (0-1)")
+    logistic_probability: float = Field(..., ge=0, le=1, description="Logistic model probability")
+    gbm_probability: float = Field(..., ge=0, le=1, description="GBM model probability")
+    ensemble_probability: float = Field(..., ge=0, le=1, description="Ensemble probability")
+
+class QuarterlyPrediction(QuarterlyPredictionBase):
+    id: UUID
+    company_id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# Request schemas for creating predictions
+class AnnualPredictionRequest(BaseModel):
+    stock_symbol: str = Field(..., min_length=1, max_length=10)
+    company_name: str = Field(..., min_length=1, max_length=200)
+    market_cap: float = Field(..., ge=0, description="Market capitalization in USD")
+    sector: str = Field(..., min_length=1, max_length=100, description="Company sector/industry")
+    reporting_year: str = Field(..., description="Reporting year (e.g., '2024')")
+    
+    # Annual model features (all required)
+    long_term_debt_to_total_capital: float = Field(..., description="Long-term debt / total capital (%)")
+    total_debt_to_ebitda: float = Field(..., description="Total debt / EBITDA")
+    net_income_margin: float = Field(..., description="Net income margin (%)")
+    ebit_to_interest_expense: float = Field(..., description="EBIT / interest expense")
+    return_on_assets: float = Field(..., description="Return on assets (%)")
+
+class QuarterlyPredictionRequest(BaseModel):
+    stock_symbol: str = Field(..., min_length=1, max_length=10)
+    company_name: str = Field(..., min_length=1, max_length=200)
+    market_cap: float = Field(..., ge=0, description="Market capitalization in USD")
+    sector: str = Field(..., min_length=1, max_length=100, description="Company sector/industry")
+    reporting_year: str = Field(..., description="Reporting year (e.g., '2024')")
+    reporting_quarter: str = Field(..., description="Reporting quarter (e.g., 'Q4')")
+    
+    # Quarterly model features (all required)
+    total_debt_to_ebitda: float = Field(..., description="Total debt / EBITDA")
+    sga_margin: float = Field(..., description="SG&A margin (%)")
+    long_term_debt_to_total_capital: float = Field(..., description="Long-term debt / total capital (%)")
+    return_on_capital: float = Field(..., description="Return on capital (%)")
+
+# Response schemas with company and prediction data
+class CompanyWithPredictionsResponse(BaseModel):
+    company: Company
+    annual_predictions: List[AnnualPrediction] = []
+    quarterly_predictions: List[QuarterlyPrediction] = []
+
+
+# Unified prediction request that handles both annual and quarterly
+class UnifiedPredictionRequest(BaseModel):
+    """Unified prediction request for both annual and quarterly models"""
+    stock_symbol: str = Field(..., min_length=1, max_length=10)
+    company_name: str = Field(..., min_length=1, max_length=200)
+    market_cap: float = Field(..., ge=0, description="Market capitalization in USD")
+    sector: str = Field(..., min_length=1, max_length=100, description="Company sector/industry")
+    reporting_year: str = Field(..., description="Reporting year (e.g., '2024')")
+    reporting_quarter: Optional[str] = Field(None, description="Reporting quarter (e.g., 'Q4')")
+    
+    # Prediction type - determines which model to use
+    prediction_type: str = Field(..., pattern="^(annual|quarterly)$", description="Type of prediction: 'annual' or 'quarterly'")
+    
+    # Annual model features (required when prediction_type='annual')
+    long_term_debt_to_total_capital: Optional[float] = Field(None, description="Long-term debt / total capital (%)")
+    total_debt_to_ebitda: Optional[float] = Field(None, description="Total debt / EBITDA")
+    net_income_margin: Optional[float] = Field(None, description="Net income margin (%)")
+    ebit_to_interest_expense: Optional[float] = Field(None, description="EBIT / interest expense")
+    return_on_assets: Optional[float] = Field(None, description="Return on assets (%)")
+    
+    # Quarterly model features (required when prediction_type='quarterly')
+    sga_margin: Optional[float] = Field(None, description="SG&A margin (%)")
+    return_on_capital: Optional[float] = Field(None, description="Return on capital (%)")
+    
+    @root_validator(skip_on_failure=True)
+    def validate_required_fields(cls, values):
+        """Validate that required fields are provided based on prediction_type"""
+        prediction_type = values.get('prediction_type')
+        
+        if prediction_type == 'annual':
+            required_fields = ['long_term_debt_to_total_capital', 'total_debt_to_ebitda', 
+                             'net_income_margin', 'ebit_to_interest_expense', 'return_on_assets']
+            for field in required_fields:
+                if values.get(field) is None:
+                    raise ValueError(f'{field} is required for annual predictions')
+        
+        elif prediction_type == 'quarterly':
+            quarterly_fields = ['total_debt_to_ebitda', 'sga_margin', 
+                              'long_term_debt_to_total_capital', 'return_on_capital']
+            for field in quarterly_fields:
+                if values.get(field) is None:
+                    raise ValueError(f'{field} is required for quarterly predictions')
+        
+        return values
 
 
 class PredictionResponse(BaseModel):
@@ -211,22 +298,29 @@ class JobStatusResponse(BaseModel):
 
 
 class PredictionUpdateRequest(BaseModel):
+    # Company basic info
     company_name: Optional[str] = Field(None, min_length=1, max_length=200)
     market_cap: Optional[float] = Field(None, ge=0, description="Market capitalization in USD")
     sector: Optional[str] = Field(None, min_length=1, max_length=100, description="Company sector/industry")
-    reporting_year: Optional[str] = Field(None, description="Reporting year (e.g., '2024')")
-    reporting_quarter: Optional[str] = Field(None, description="Reporting quarter (e.g., 'Q4')")
     
-    # Financial ratios (optional for update - if any provided, prediction will be recalculated)
-    long_term_debt_to_total_capital: Optional[float] = Field(None, description="Long-term debt / total capital (%)")
+    # Prediction update fields
+    prediction_type: Optional[str] = Field(None, description="Type of prediction to update: 'annual' or 'quarterly'")
+    reporting_year: Optional[str] = Field(None, description="Reporting year (e.g., '2024')")
+    reporting_quarter: Optional[str] = Field(None, description="Reporting quarter (e.g., 'Q1') - required for quarterly predictions")
+    
+    # Annual prediction financial ratios
+    long_term_debt_to_total_capital: Optional[float] = Field(None, description="Long-term debt / total capital")
     total_debt_to_ebitda: Optional[float] = Field(None, description="Total debt / EBITDA")
-    net_income_margin: Optional[float] = Field(None, description="Net income margin (%)")
+    net_income_margin: Optional[float] = Field(None, description="Net income margin")
     ebit_to_interest_expense: Optional[float] = Field(None, description="EBIT / interest expense")
-    return_on_assets: Optional[float] = Field(None, description="Return on assets (%)")
-
+    return_on_assets: Optional[float] = Field(None, description="Return on assets")
+    
+    # Quarterly prediction financial ratios
+    sga_margin: Optional[float] = Field(None, description="SG&A margin")
+    return_on_capital: Optional[float] = Field(None, description="Return on capital")
 
 class DatabaseResetRequest(BaseModel):
-    table_name: Optional[str] = Field(None, description="Specific table to reset: 'companies', 'users', 'otp_tokens', 'user_sessions' (if not provided, resets all tables)")
+    table_name: Optional[str] = Field(None, description="Specific table to reset: 'companies', 'annual_predictions', 'quarterly_predictions', 'users', 'otp_tokens', 'user_sessions' (if not provided, resets all tables)")
     confirm_reset: bool = Field(..., description="Confirmation flag to prevent accidental resets")
 
 
@@ -235,3 +329,19 @@ class DatabaseResetResponse(BaseModel):
     message: str
     tables_reset: List[str]
     affected_records: Optional[int] = None
+
+# Legacy prediction request for backward compatibility
+class PredictionRequest(BaseModel):
+    """Legacy schema for backward compatibility - defaults to annual prediction"""
+    stock_symbol: str = Field(..., min_length=1, max_length=10)
+    company_name: str = Field(..., min_length=1, max_length=200)
+    market_cap: float = Field(..., ge=0, description="Market capitalization in USD")
+    sector: str = Field(..., min_length=1, max_length=100, description="Company sector/industry")
+    reporting_year: Optional[str] = Field(None, description="Reporting year (e.g., '2024')")
+    reporting_quarter: Optional[str] = Field(None, description="Reporting quarter (e.g., 'Q4')")
+    
+    long_term_debt_to_total_capital: float = Field(..., description="Long-term debt / total capital (%)")
+    total_debt_to_ebitda: float = Field(..., description="Total debt / EBITDA")
+    net_income_margin: float = Field(..., description="Net income margin (%)")
+    ebit_to_interest_expense: float = Field(..., description="EBIT / interest expense")
+    return_on_assets: float = Field(..., description="Return on assets (%)")

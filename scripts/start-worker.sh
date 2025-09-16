@@ -1,12 +1,15 @@
 #!/bin/bash
 
-# Celery Worker Startup Script for Railway
-# This will be used for the background worker service
+# Celery Worker Startup Script 
+# This is optional - only needed for background jobs
 
 echo "🔄 Starting Celery Worker for Background Jobs..."
 
+# Change to backend directory to fix import paths
+cd "$(dirname "$0")/.."
+
 # Set environment variables
-export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+export PYTHONPATH="$(pwd):${PYTHONPATH}"
 
 # Start Celery worker with production settings
 exec celery -A src.celery_app worker \
