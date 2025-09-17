@@ -6,7 +6,8 @@ from ..schemas import (
     QuarterlyPredictionRequest, AnnualPredictionRequest,
     UnifiedPredictionRequest, CompanyWithPredictionsResponse,
     BulkPredictionResponse, BulkPredictionItem, PredictionUpdateRequest,
-    BulkJobResponse, JobStatusResponse
+    BulkJobResponse, JobStatusResponse,
+    QuarterlyBulkPredictionResponse, QuarterlyBulkPredictionItem, QuarterlyBulkJobResponse
 )
 from ..services import CompanyService
 from ..ml_service import ml_model
@@ -1388,3 +1389,315 @@ async def predict_default_rate_legacy(
     db: Session = Depends(get_db)
 ):
     return await predict_annual_default_rate(request, current_user, db)
+
+@router.post("/quarterly-bulk-predict", response_model=QuarterlyBulkPredictionResponse)
+async def quarterly_bulk_predict_from_file(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_verified_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Dedicated quarterly bulk prediction endpoint.
+    
+    Supports 1000-5000 companies at once for quarterly predictions.
+    
+    Expected columns:
+    - stock_symbol, company_name, reporting_year, reporting_quarter
+    - total_debt_to_ebitda, sga_margin, long_term_debt_to_total_capital, return_on_capital
+    - Optional: market_cap, sector
+    """
+    start_time = time.time()
+    
+    try:
+        if not file.filename.endswith(('.csv', '.xlsx', '.xls')):
+            raise HTTPException(
+                status_code=400,
+                detail="File must be CSV (.csv) or Excel (.xlsx, .xls)"
+            )
+        
+        content = await file.read()
+        
+        try:
+            if file.filename.endswith('.csv'):
+                df = pd.read_csv(io.BytesIO(content))
+            else:
+                df = pd.read_excel(io.BytesIO(content))
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Error reading file: {str(e)}"
+            )
+        
+        if df.empty:
+            raise HTTPException(
+                status_code=400,
+                detail="File contains no data"
+            )
+        
+        if len(df) > 5000:
+            raise HTTPException(
+                status_code=400,
+                detail="File too large. Maximum 5000 companies per upload."
+            )
+        
+        if len(df) < 1:
+            raise HTTPException(
+                status_code=400,
+                detail="File must contain at least 1 company"
+            )
+        
+        # Validate required columns for quarterly predictions
+        required_columns = [
+            'stock_symbol', 'company_name', 'reporting_year', 'reporting_quarter',
+            'total_debt_to_ebitda', 'sga_margin', 'long_term_debt_to_total_capital', 'return_on_capital'
+        ]
+        
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Missing required columns: {', '.join(missing_columns)}"
+            )
+        
+        company_service = CompanyService(db)
+        results = []
+        processed_count = 0
+        error_count = 0
+        skipped_count = 0
+        
+        # Process each row
+        for index, row in df.iterrows():
+            try:
+                # Validate required fields
+                stock_symbol = str(row['stock_symbol']).strip()
+                company_name = str(row['company_name']).strip()
+                reporting_year = str(row['reporting_year']).strip()
+                reporting_quarter = str(row['reporting_quarter']).strip()
+                
+                if not all([stock_symbol, company_name, reporting_year, reporting_quarter]):
+                    results.append(QuarterlyBulkPredictionItem(
+                        stock_symbol=stock_symbol,
+                        company_name=company_name,
+                        reporting_year=reporting_year,
+                        reporting_quarter=reporting_quarter,
+                        success=False,
+                        error="Missing required fields"
+                    ))
+                    error_count += 1
+                    continue
+                
+                # Get or create company
+                company = company_service.get_company_by_symbol(stock_symbol)
+                if not company:
+                    market_cap = safe_float(row.get('market_cap'))
+                    sector = str(row.get('sector', '')).strip() or None
+                    
+                    company = company_service.create_company(
+                        symbol=stock_symbol,
+                        name=company_name,
+                        market_cap=market_cap,
+                        sector=sector
+                    )
+                
+                # Check if prediction already exists
+                existing_prediction = company_service.get_quarterly_prediction(
+                    company.id, reporting_year, reporting_quarter
+                )
+                
+                if existing_prediction:
+                    results.append(QuarterlyBulkPredictionItem(
+                        stock_symbol=stock_symbol,
+                        company_name=company_name,
+                        reporting_year=reporting_year,
+                        reporting_quarter=reporting_quarter,
+                        success=False,
+                        error=f"Quarterly prediction for {stock_symbol} Q{reporting_quarter} {reporting_year} already exists"
+                    ))
+                    skipped_count += 1
+                    continue
+                
+                # Prepare financial ratios for quarterly prediction
+                financial_ratios = {
+                    "total_debt_to_ebitda": safe_float(row['total_debt_to_ebitda']),
+                    "sga_margin": safe_float(row['sga_margin']),
+                    "long_term_debt_to_total_capital": safe_float(row['long_term_debt_to_total_capital']),
+                    "return_on_capital": safe_float(row['return_on_capital'])
+                }
+                
+                # Validate financial ratios
+                missing_ratios = [k for k, v in financial_ratios.items() if v is None]
+                if missing_ratios:
+                    results.append(QuarterlyBulkPredictionItem(
+                        stock_symbol=stock_symbol,
+                        company_name=company_name,
+                        reporting_year=reporting_year,
+                        reporting_quarter=reporting_quarter,
+                        success=False,
+                        error=f"Missing financial ratios: {', '.join(missing_ratios)}"
+                    ))
+                    error_count += 1
+                    continue
+                
+                # Get prediction from quarterly ML model
+                prediction_result = quarterly_ml_model.predict_default_probability(financial_ratios)
+                
+                if "error" in prediction_result:
+                    results.append(QuarterlyBulkPredictionItem(
+                        stock_symbol=stock_symbol,
+                        company_name=company_name,
+                        reporting_year=reporting_year,
+                        reporting_quarter=reporting_quarter,
+                        success=False,
+                        error=f"Quarterly prediction failed: {prediction_result['error']}"
+                    ))
+                    error_count += 1
+                    continue
+                
+                # Save quarterly prediction to database
+                prediction = company_service.create_quarterly_prediction(
+                    company=company,
+                    financial_data=financial_ratios,
+                    prediction_results=prediction_result,
+                    reporting_year=reporting_year,
+                    reporting_quarter=reporting_quarter
+                )
+                
+                results.append(QuarterlyBulkPredictionItem(
+                    stock_symbol=stock_symbol,
+                    company_name=company_name,
+                    reporting_year=reporting_year,
+                    reporting_quarter=reporting_quarter,
+                    success=True,
+                    prediction_id=str(prediction.id),
+                    default_probability=prediction_result["ensemble_probability"],
+                    risk_level=prediction_result["risk_level"],
+                    confidence=prediction_result["confidence"],
+                    financial_ratios=financial_ratios
+                ))
+                processed_count += 1
+                
+            except Exception as e:
+                results.append(QuarterlyBulkPredictionItem(
+                    stock_symbol=row.get('stock_symbol', 'Unknown'),
+                    company_name=row.get('company_name', 'Unknown'),
+                    reporting_year=row.get('reporting_year', 'Unknown'),
+                    reporting_quarter=row.get('reporting_quarter', 'Unknown'),
+                    success=False,
+                    error=f"Processing error: {str(e)}"
+                ))
+                error_count += 1
+        
+        end_time = time.time()
+        processing_time = round(end_time - start_time, 2)
+        
+        return QuarterlyBulkPredictionResponse(
+            success=True,
+            message=f"Quarterly bulk prediction completed. Processed: {processed_count}, Errors: {error_count}, Skipped: {skipped_count}",
+            total_records=len(df),
+            processed_records=processed_count,
+            error_records=error_count,
+            skipped_records=skipped_count,
+            processing_time_seconds=processing_time,
+            results=results
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "Quarterly bulk prediction failed",
+                "details": str(e)
+            }
+        )
+
+@router.post("/quarterly-bulk-predict-async", response_model=QuarterlyBulkJobResponse)
+async def quarterly_bulk_predict_async(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_verified_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Submit a quarterly bulk prediction job that runs in the background.
+    Returns a job ID that can be used to check status and retrieve results.
+    
+    This endpoint is recommended for very large files (>1000 companies) to avoid timeouts.
+    For smaller files, use the synchronous /quarterly-bulk-predict endpoint.
+    
+    Expected columns:
+    - stock_symbol, company_name, reporting_year, reporting_quarter
+    - total_debt_to_ebitda, sga_margin, long_term_debt_to_total_capital, return_on_capital
+    - Optional: market_cap, sector
+    """
+    
+    if not file.filename.endswith(('.xlsx', '.xls', '.csv')):
+        raise HTTPException(
+            status_code=400,
+            detail="File must be Excel (.xlsx, .xls) or CSV (.csv) format"
+        )
+    
+    try:
+        contents = await file.read()
+        
+        if file.filename.endswith('.csv'):
+            df = pd.read_csv(io.StringIO(contents.decode('utf-8')))
+        else:
+            df = pd.read_excel(io.BytesIO(contents))
+        
+        if df.empty:
+            raise HTTPException(
+                status_code=400,
+                detail="File is empty"
+            )
+        
+        company_count = len(df)
+        
+        # Validate required columns for quarterly predictions
+        required_columns = [
+            'stock_symbol', 'company_name', 'reporting_year', 'reporting_quarter',
+            'total_debt_to_ebitda', 'sga_margin', 'long_term_debt_to_total_capital', 'return_on_capital'
+        ]
+        
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Missing required columns: {', '.join(missing_columns)}"
+            )
+        
+        file_content_b64 = base64.b64encode(contents).decode('utf-8')
+        
+        # Use quarterly task
+        from ..tasks import process_quarterly_bulk_task
+        task = process_quarterly_bulk_task.delay(file_content_b64, file.filename)
+        
+        if company_count <= 100:
+            estimated_time = f"{company_count * 2:.0f}-{company_count * 4:.0f} seconds"
+        elif company_count <= 1000:
+            estimated_time = f"{company_count * 1.5 / 60:.1f}-{company_count * 3 / 60:.1f} minutes"
+        else:
+            estimated_time = f"{company_count * 1 / 60:.1f}-{company_count * 2 / 60:.1f} minutes"
+        
+        return QuarterlyBulkJobResponse(
+            success=True,
+            message=f"Quarterly bulk prediction job submitted successfully. Processing {company_count} companies in background.",
+            job_id=task.id,
+            status="PENDING",
+            filename=file.filename,
+            estimated_processing_time=estimated_time
+        )
+        
+    except pd.errors.EmptyDataError:
+        raise HTTPException(
+            status_code=400,
+            detail="File is empty or contains no data"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "Quarterly bulk prediction job failed",
+                "details": str(e)
+            }
+        )

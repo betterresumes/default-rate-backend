@@ -380,10 +380,8 @@ def process_bulk_normalized_task(self, file_content_b64: str, original_filename:
             'market_cap': 1000000000,
             'sector': 'Unknown',
             'reporting_year': '2024',
+            'reporting_quarter': 'Q4',  # Default for both annual and quarterly
         }
-        
-        if prediction_type == "quarterly":
-            optional_columns['reporting_quarter'] = 'Q4'
         
         # Add missing optional columns
         for col, default_value in optional_columns.items():
@@ -430,6 +428,7 @@ def process_bulk_normalized_task(self, file_content_b64: str, original_filename:
                     sector = str(sector).strip()
                 
                 reporting_year = str(row.get('reporting_year', '2024')).strip()
+                reporting_quarter = str(row.get('reporting_quarter', 'Q4')).strip()
                 
                 # Create or get company
                 company = company_service.create_company(
@@ -459,7 +458,8 @@ def process_bulk_normalized_task(self, file_content_b64: str, original_filename:
                         company=company,
                         financial_data=ratios,
                         prediction_results=prediction_result,
-                        reporting_year=reporting_year
+                        reporting_year=reporting_year,
+                        reporting_quarter=reporting_quarter
                     )
                     
                     result_item = {
@@ -584,6 +584,223 @@ def process_bulk_normalized_task(self, file_content_b64: str, original_filename:
             "processing_time": time.time() - start_time,
             "error": error_msg,
             "prediction_type": prediction_type,
+            "filename": original_filename
+        }
+    
+    finally:
+        db.close()
+
+
+@celery_app.task(name="src.tasks.process_quarterly_bulk_task")
+def process_quarterly_bulk_task(file_content_b64: str, original_filename: str):
+    """
+    Process quarterly bulk prediction file in background
+    """
+    from .quarterly_ml_service import quarterly_ml_model
+    
+    start_time = time.time()
+    db = get_session_local()
+    
+    try:
+        # Update task status
+        current_task.update_state(
+            state='PROGRESS',
+            meta={'status': 'Processing quarterly file...', 'progress': 0}
+        )
+        
+        # Decode file content
+        file_content = base64.b64decode(file_content_b64)
+        
+        # Read file
+        if original_filename.endswith('.csv'):
+            df = pd.read_csv(io.StringIO(file_content.decode('utf-8')))
+        else:
+            df = pd.read_excel(io.BytesIO(file_content))
+        
+        total_companies = len(df)
+        company_service = CompanyService(db)
+        
+        results = []
+        successful_predictions = 0
+        failed_predictions = 0
+        
+        # Process each company
+        for index, row in df.iterrows():
+            try:
+                # Update progress
+                progress = int((index / total_companies) * 100)
+                current_task.update_state(
+                    state='PROGRESS',
+                    meta={
+                        'status': f'Processing company {index + 1}/{total_companies}',
+                        'progress': progress,
+                        'current_company': row.get('stock_symbol', 'Unknown')
+                    }
+                )
+                
+                # Extract and validate data
+                stock_symbol = str(row['stock_symbol']).strip()
+                company_name = str(row['company_name']).strip()
+                reporting_year = str(row['reporting_year']).strip()
+                reporting_quarter = str(row['reporting_quarter']).strip()
+                
+                if not all([stock_symbol, company_name, reporting_year, reporting_quarter]):
+                    results.append({
+                        "stock_symbol": stock_symbol,
+                        "company_name": company_name,
+                        "reporting_year": reporting_year,
+                        "reporting_quarter": reporting_quarter,
+                        "success": False,
+                        "error": "Missing required fields"
+                    })
+                    failed_predictions += 1
+                    continue
+                
+                # Get or create company
+                company = company_service.get_company_by_symbol(stock_symbol)
+                if not company:
+                    market_cap = safe_float(row.get('market_cap'))
+                    sector = str(row.get('sector', '')).strip() or None
+                    
+                    company = company_service.create_company(
+                        symbol=stock_symbol,
+                        name=company_name,
+                        market_cap=market_cap,
+                        sector=sector
+                    )
+                
+                # Check if prediction already exists
+                existing_prediction = company_service.get_quarterly_prediction(
+                    company.id, reporting_year, reporting_quarter
+                )
+                
+                if existing_prediction:
+                    results.append({
+                        "stock_symbol": stock_symbol,
+                        "company_name": company_name,
+                        "reporting_year": reporting_year,
+                        "reporting_quarter": reporting_quarter,
+                        "success": False,
+                        "error": f"Quarterly prediction for {stock_symbol} Q{reporting_quarter} {reporting_year} already exists"
+                    })
+                    failed_predictions += 1
+                    continue
+                
+                # Prepare financial ratios
+                financial_ratios = {
+                    "total_debt_to_ebitda": safe_float(row['total_debt_to_ebitda']),
+                    "sga_margin": safe_float(row['sga_margin']),
+                    "long_term_debt_to_total_capital": safe_float(row['long_term_debt_to_total_capital']),
+                    "return_on_capital": safe_float(row['return_on_capital'])
+                }
+                
+                # Validate financial ratios
+                missing_ratios = [k for k, v in financial_ratios.items() if v is None]
+                if missing_ratios:
+                    results.append({
+                        "stock_symbol": stock_symbol,
+                        "company_name": company_name,
+                        "reporting_year": reporting_year,
+                        "reporting_quarter": reporting_quarter,
+                        "success": False,
+                        "error": f"Missing financial ratios: {', '.join(missing_ratios)}"
+                    })
+                    failed_predictions += 1
+                    continue
+                
+                # Get quarterly prediction
+                prediction_result = quarterly_ml_model.predict_default_probability(financial_ratios)
+                
+                if "error" in prediction_result:
+                    results.append({
+                        "stock_symbol": stock_symbol,
+                        "company_name": company_name,
+                        "reporting_year": reporting_year,
+                        "reporting_quarter": reporting_quarter,
+                        "success": False,
+                        "error": f"Quarterly prediction failed: {prediction_result['error']}"
+                    })
+                    failed_predictions += 1
+                    continue
+                
+                # Save to database
+                prediction = company_service.create_quarterly_prediction(
+                    company=company,
+                    financial_data=financial_ratios,
+                    prediction_results=prediction_result,
+                    reporting_year=reporting_year,
+                    reporting_quarter=reporting_quarter
+                )
+                
+                results.append({
+                    "stock_symbol": stock_symbol,
+                    "company_name": company_name,
+                    "reporting_year": reporting_year,
+                    "reporting_quarter": reporting_quarter,
+                    "success": True,
+                    "prediction_id": str(prediction.id),
+                    "default_probability": prediction_result["ensemble_probability"],
+                    "risk_level": prediction_result["risk_level"],
+                    "confidence": prediction_result["confidence"]
+                })
+                successful_predictions += 1
+                
+            except Exception as e:
+                results.append({
+                    "stock_symbol": row.get('stock_symbol', 'Unknown'),
+                    "company_name": row.get('company_name', 'Unknown'),
+                    "reporting_year": row.get('reporting_year', 'Unknown'),
+                    "reporting_quarter": row.get('reporting_quarter', 'Unknown'),
+                    "success": False,
+                    "error": f"Processing error: {str(e)}"
+                })
+                failed_predictions += 1
+        
+        # Final status update
+        current_task.update_state(
+            state='SUCCESS',
+            meta={
+                'status': 'Quarterly bulk processing completed',
+                'progress': 100,
+                'total_processed': total_companies,
+                'successful_predictions': successful_predictions,
+                'failed_predictions': failed_predictions,
+                'processing_time': time.time() - start_time
+            }
+        )
+        
+        return {
+            "success": True,
+            "message": f"Quarterly bulk processing completed. Success: {successful_predictions}, Failed: {failed_predictions}",
+            "total_processed": total_companies,
+            "successful_predictions": successful_predictions,
+            "failed_predictions": failed_predictions,
+            "results": results,
+            "processing_time": time.time() - start_time,
+            "prediction_type": "quarterly",
+            "filename": original_filename
+        }
+        
+    except Exception as e:
+        error_msg = f"Quarterly bulk processing failed: {str(e)}"
+        print(f"Error in quarterly bulk task: {error_msg}")
+        print(f"Traceback: {traceback.format_exc()}")
+        
+        current_task.update_state(
+            state='FAILURE',
+            meta={'error': error_msg}
+        )
+        
+        return {
+            "success": False,
+            "message": error_msg,
+            "total_processed": 0,
+            "successful_predictions": 0,
+            "failed_predictions": 0,
+            "results": [],
+            "processing_time": time.time() - start_time,
+            "error": error_msg,
+            "prediction_type": "quarterly",
             "filename": original_filename
         }
     

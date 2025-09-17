@@ -101,7 +101,14 @@ class CompanyBase(BaseModel):
 
 class CompanyCreate(CompanyBase):
     """Schema for creating a new company"""
-    pass
+    # Optional fields for bulk upload with predictions
+    reporting_year: Optional[str] = Field(None, description="Reporting year (e.g., '2024')")
+    reporting_quarter: Optional[str] = Field(None, description="Reporting quarter (e.g., 'Q4')")
+    long_term_debt_to_total_capital: Optional[float] = Field(None, description="Long-term debt / total capital (%)")
+    total_debt_to_ebitda: Optional[float] = Field(None, description="Total debt / EBITDA")
+    net_income_margin: Optional[float] = Field(None, description="Net income margin (%)")
+    ebit_to_interest_expense: Optional[float] = Field(None, description="EBIT / interest expense")
+    return_on_assets: Optional[float] = Field(None, description="Return on assets (%)")
 
 class Company(CompanyBase):
     id: UUID
@@ -345,3 +352,37 @@ class PredictionRequest(BaseModel):
     net_income_margin: float = Field(..., description="Net income margin (%)")
     ebit_to_interest_expense: float = Field(..., description="EBIT / interest expense")
     return_on_assets: float = Field(..., description="Return on assets (%)")
+
+# Quarterly-specific bulk schemas
+class QuarterlyBulkPredictionItem(BaseModel):
+    stock_symbol: str
+    company_name: str
+    reporting_year: str
+    reporting_quarter: str
+    sector: Optional[str] = None
+    market_cap: Optional[float] = None
+    success: bool
+    prediction_id: Optional[str] = None
+    default_probability: Optional[float] = None
+    risk_level: Optional[str] = None
+    confidence: Optional[float] = None
+    error: Optional[str] = None
+    financial_ratios: Optional[dict] = None
+
+class QuarterlyBulkPredictionResponse(BaseModel):
+    success: bool
+    message: str
+    total_records: int
+    processed_records: int
+    error_records: int
+    skipped_records: int
+    processing_time_seconds: float
+    results: List[QuarterlyBulkPredictionItem]
+
+class QuarterlyBulkJobResponse(BaseModel):
+    success: bool
+    message: str
+    job_id: str
+    status: str
+    filename: str
+    estimated_processing_time: str

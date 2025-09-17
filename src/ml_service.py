@@ -32,16 +32,22 @@ class MLModelService:
 
     def binned_runscoring(self, df: pd.DataFrame, value_col: str, scoring_info: Dict) -> pd.DataFrame:
         """Apply binned scoring to a column based on scoring information"""
-        # Replace 'NM' with NaN and convert to numeric
-        df[value_col] = pd.to_numeric(df[value_col].replace('NM', np.nan), errors='coerce')
+        # Handle None values first, then replace 'NM' with NaN and convert to numeric
+        df[value_col] = df[value_col].replace([None, 'NM', 'N/A', ''], np.nan)
+        df[value_col] = pd.to_numeric(df[value_col], errors='coerce')
 
         intervals = scoring_info[value_col]['intervals']
         rates = scoring_info[value_col]['rates']
 
         # Apply mapping function to column
         def assign_rate(x):
-            if pd.isna(x):
-                return rates[intervals.index("Missing")]
+            if pd.isna(x) or x is None:
+                # Find "Missing" category in intervals
+                if "Missing" in intervals:
+                    return rates[intervals.index("Missing")]
+                else:
+                    # If no "Missing" category, use first rate as default
+                    return rates[0] if rates else 0.0
             for idx, iv in enumerate(intervals):
                 if iv == "Missing":
                     continue
@@ -99,10 +105,10 @@ class MLModelService:
                 'return_on_assets': 'return on assets'
             }
 
-            # Check for missing fields
+            # Check for missing fields - only check if key exists, allow None/NaN values
             missing_fields = []
             for field in required_fields.keys():
-                if field not in financial_ratios or financial_ratios[field] is None:
+                if field not in financial_ratios:
                     missing_fields.append(field)
             
             if missing_fields:
@@ -115,19 +121,19 @@ class MLModelService:
                     "predicted_at": datetime.utcnow().isoformat()
                 }
 
-            # Extract values using ONLY the 5 user inputs - NO defaults needed!
+            # Extract values - allow None/NaN values, they will be handled by binned_runscoring
             values = [
-                financial_ratios['long_term_debt_to_total_capital'],     # User input only
-                financial_ratios['total_debt_to_ebitda'],                # User input only
-                financial_ratios['net_income_margin'],                   # User input only
-                financial_ratios['ebit_to_interest_expense'],            # User input only
-                financial_ratios['return_on_assets']                     # User input only
+                financial_ratios['long_term_debt_to_total_capital'],     # Can be None/NaN
+                financial_ratios['total_debt_to_ebitda'],                # Can be None/NaN
+                financial_ratios['net_income_margin'],                   # Can be None/NaN
+                financial_ratios['ebit_to_interest_expense'],            # Can be None/NaN
+                financial_ratios['return_on_assets']                     # Can be None/NaN
             ]
 
-            # Create DataFrame with only the 5 user values
+            # Create DataFrame with the 5 user values (including None/NaN)
             df = pd.DataFrame([values], columns=single_variables)
             
-            # Apply binned scoring to each variable
+            # Apply binned scoring to each variable (handles None/NaN internally)
             for value_col in single_variables:
                 df = self.binned_runscoring(df, value_col, self.scoring_info)
 

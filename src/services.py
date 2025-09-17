@@ -2,13 +2,6 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import and_, or_, desc
 from .database import Company, User, OTPToken, UserSession, AnnualPrediction, QuarterlyPrediction
 from .schemas import CompanyCreate, PredictionRequest
-from typing import Optional, List
-from datetime import datetime, timedelta
-
-from sqlalchemy.orm import Session, joinedload, selectinload
-from sqlalchemy import and_, or_, desc
-from .database import Company, User, OTPToken, UserSession, AnnualPrediction, QuarterlyPrediction
-from .schemas import CompanyCreate, PredictionRequest
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 
@@ -102,8 +95,78 @@ class CompanyService:
         ).all()
 
     def create_company(self, symbol: str, name: str, market_cap: float, sector: str):
-        """Create a new company (for router compatibility)"""
-        return self.create_or_get_company(symbol, name, market_cap, sector)
+        """Create or update company"""
+        return self.get_or_create_company(symbol, name, market_cap, sector)
+    
+    def get_or_create_company(self, symbol: str, name: str, market_cap: float, sector: str):
+        """Get existing company or create new one"""
+        existing_company = self.db.query(Company).filter(Company.symbol == symbol.upper()).first()
+        
+        if existing_company:
+            # Update existing company
+            existing_company.name = name
+            existing_company.market_cap = market_cap
+            existing_company.sector = sector
+            existing_company.updated_at = datetime.utcnow()
+            self.db.commit()
+            self.db.refresh(existing_company)
+            return existing_company
+        else:
+            # Create new company
+            company = Company(
+                symbol=symbol.upper(),
+                name=name,
+                market_cap=market_cap,
+                sector=sector
+            )
+            self.db.add(company)
+            self.db.commit()
+            self.db.refresh(company)
+            return company
+    
+    def upsert_company(self, company_data, prediction_result):
+        """Create or update company with annual prediction"""
+        # Create/update company
+        company = self.get_or_create_company(
+            symbol=company_data.symbol,
+            name=company_data.name,
+            market_cap=company_data.market_cap,
+            sector=company_data.sector
+        )
+        
+        # Extract financial data and prediction data
+        financial_data = {
+            'long_term_debt_to_total_capital': getattr(company_data, 'long_term_debt_to_total_capital', None),
+            'total_debt_to_ebitda': getattr(company_data, 'total_debt_to_ebitda', None),
+            'net_income_margin': getattr(company_data, 'net_income_margin', None),
+            'ebit_to_interest_expense': getattr(company_data, 'ebit_to_interest_expense', None),
+            'return_on_assets': getattr(company_data, 'return_on_assets', None)
+        }
+        
+        reporting_year = getattr(company_data, 'reporting_year', None)
+        reporting_quarter = getattr(company_data, 'reporting_quarter', None)
+        
+        # Create annual prediction
+        annual_prediction = self.create_annual_prediction(
+            company=company,
+            financial_data=financial_data,
+            prediction_results=prediction_result,
+            reporting_year=reporting_year,
+            reporting_quarter=reporting_quarter
+        )
+        
+        # Add prediction attributes to company object for backward compatibility
+        company.probability = annual_prediction.probability
+        company.risk_level = annual_prediction.risk_level
+        company.confidence = annual_prediction.confidence
+        company.predicted_at = annual_prediction.predicted_at
+        company.long_term_debt_to_total_capital = annual_prediction.long_term_debt_to_total_capital
+        company.total_debt_to_ebitda = annual_prediction.total_debt_to_ebitda
+        company.net_income_margin = annual_prediction.net_income_margin
+        company.ebit_to_interest_expense = annual_prediction.ebit_to_interest_expense
+        company.return_on_assets = annual_prediction.return_on_assets
+        
+        return company
 
     def get_company_by_symbol_and_type(self, symbol: str, prediction_type: str):
         """Get company by symbol if it has the specified prediction type"""

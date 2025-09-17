@@ -82,11 +82,11 @@ class AnnualPrediction(Base):
     reporting_year = Column(String, nullable=True)
     reporting_quarter = Column(String, nullable=True)
     
-    long_term_debt_to_total_capital = Column(Numeric(precision=10, scale=4), nullable=False)
-    total_debt_to_ebitda = Column(Numeric(precision=10, scale=4), nullable=False)
-    net_income_margin = Column(Numeric(precision=10, scale=4), nullable=False)
-    ebit_to_interest_expense = Column(Numeric(precision=10, scale=4), nullable=False)
-    return_on_assets = Column(Numeric(precision=10, scale=4), nullable=False)
+    long_term_debt_to_total_capital = Column(Numeric(precision=10, scale=4), nullable=True)
+    total_debt_to_ebitda = Column(Numeric(precision=10, scale=4), nullable=True)
+    net_income_margin = Column(Numeric(precision=10, scale=4), nullable=True)
+    ebit_to_interest_expense = Column(Numeric(precision=10, scale=4), nullable=True)
+    return_on_assets = Column(Numeric(precision=10, scale=4), nullable=True)
     
     probability = Column(Numeric(precision=5, scale=4), nullable=False)
     risk_level = Column(String, nullable=False)
