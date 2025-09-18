@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Financial Default Risk Prediction Platform</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.6.1/mermaid.min.js"></script>
+    <style>
+        @media print {
+            .page-break { page-break-before: always; }
+            body { font-size: 12px; line-height: 1.4; }
+            .diagram-container { page-break-inside: avoid; margin: 20px 0; }
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            color: #000;
+            background: white;
+        }
+        
+        h1 { 
+            border-bottom: 3px solid #000; 
+            padding-bottom: 10px;
+            font-size: 2.5em;
+            margin-bottom: 30px;
+        }
+        
+        h2 { 
+            border-left: 4px solid #000; 
+            padding-left: 15px;
+            margin-top: 40px;
+            font-size: 1.8em;
+        }
+        
+        h3 { 
+            margin-top: 30px;
+            font-size: 1.4em;
+        }
+        
+        h4 { 
+            margin-top: 25px;
+            font-size: 1.2em;
+        }
+        
+        .summary-box {
+            background: white;
+            border: 1px solid #000;
+            border-radius: 8px;
+            padding: 25px;
+            margin: 20px 0;
+            box-shadow: 0 2px 8px #00000010;
+        }
+        
+        .tech-stack {
+            background: #f5f5f5;
+            border-left: 4px solid #000;
+            padding: 15px;
+            margin: 15px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 0.95em;
+        }
+        
+        .architecture-text {
+            background: #fafafa;
+            border: 1px solid #ddd;
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            line-height: 1.8;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            box-shadow: 0 2px 8px #00000010;
+        }
+        
+        th, td {
+            border: 1px solid #000;
+            padding: 12px;
+            text-align: left;
+        }
+        
+        th {
+            background: #f0f0f0;
+            color: #000;
+            font-weight: bold;
+        }
+        
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        
+        tr:hover {
+            background-color: #f0f7ff;
+        }
+        
+        .role-hierarchy {
+            background: #fff8e1;
+            border: 1px solid #000;
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 5px;
+        }
+        
+        .code-block {
+            background: #f8f8f8;
+            border: 1px solid #000;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            overflow-x: auto;
+            font-size: 0.9em;
+        }
+        
+        .api-endpoint {
+            background: #e8f5e8;
+            border-left: 4px solid #000;
+            padding: 15px;
+            margin: 15px 0;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .diagram-container {
+            margin: 30px 0;
+            padding: 20px;
+            border: 2px solid #000;
+            border-radius: 8px;
+            background: #fafafa;
+            text-align: center;
+        }
+        
+        .diagram-title {
+            font-size: 1.3em;
+            font-weight: bold;
+            margin-bottom: 15px;
+        }
+        
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        
+        .feature-card {
+            background: white;
+            border: 1px solid #000;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px #00000010;
+        }
+        
+        .feature-card h4 {
+            margin-top: 0;
+            display: flex;
+            align-items: center;
+        }
+        
+        .emoji {
+            margin-right: 8px;
+            font-size: 1.2em;
+        }
+        
+        ul {
+            padding-left: 20px;
+        }
+        
+        li {
+            margin: 8px 0;
+        }
+        
+        .highlight {
+            background: #f0f0f0;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>🏗️ Financial Default Risk Prediction Platform</h1>
+    
+    <div class="summary-box">
+        <h2>📋 Executive Summary</h2>
+        
+        <p><strong>What We're Building:</strong> A Multi-Tenant Financial Default Risk Prediction Platform that enables organizations to predict corporate default risk using machine learning, manage financial data for multiple companies, and collaborate within organizations with role-based access.</p>
+        
+        <h3>🎯 Core Value Proposition</h3>
+        <ul>
+            <li><span class="highlight">🤖 ML-Powered Predictions</span> - Annual & quarterly default risk analysis with confidence scores</li>
+            <li><span class="highlight">🏢 Multi-Tenant Organizations</span> - Complete data isolation with shared global datasets</li>
+            <li><span class="highlight">👥 Team Collaboration</span> - Invitation-based system with role management</li>
+            <li><span class="highlight">📊 Bulk Processing</span> - Excel file uploads with async processing</li>
+            <li><span class="highlight">🔒 Enterprise Security</span> - JWT authentication with organization-scoped access control</li>
+        </ul>
+        
+        <h3>💻 Technology Stack</h3>
+        <div class="tech-stack">
+Backend: FastAPI (Python) + PostgreSQL + SQLAlchemy ORM<br>
+Caching: Redis (sessions, background jobs)<br>
+Background Processing: Celery with Redis broker<br>
+Authentication: JWT tokens with custom role-based access<br>
+Email: Resend API for transactional emails<br>
+ML: Custom models for default prediction
+        </div>
+    </div>
+    
+    <h3>Key User Journeys</h3>
+    
+    <div class="feature-grid">
+        <div class="feature-card">
+            <h4><span class="emoji">1️⃣</span>New User → Organization Setup</h4>
+            <p><code>Registration → Email Verification → Create Organization → Become Admin</code></p>
+        </div>
+        
+        <div class="feature-card">
+            <h4><span class="emoji">2️⃣</span>Team Invitation Process</h4>
+            <p><code>Admin Sends Invite → Email Notification → User Accepts → Joins Organization</code></p>
+        </div>
+        
+        <div class="feature-card">
+            <h4><span class="emoji">3️⃣</span>Financial Prediction Creation</h4>
+            <p><code>Select Company → Input Financial Ratios → ML Processing → Risk Analysis</code></p>
+        </div>
+        
+        <div class="feature-card">
+            <h4><span class="emoji">4️⃣</span>Bulk Data Processing</h4>
+            <p><code>Upload Excel → Async Processing → Progress Tracking → Results Download</code></p>
+        </div>
+    </div>
+
+    <div class="page-break"></div>
+    
+    <h2>📊 API Endpoints Overview</h2>
+    
+    <h3>🔒 Authentication APIs</h3>
+    <div class="api-endpoint">
+POST /api/register-simple     # User registration<br>
+POST /api/login              # User authentication<br>
+GET  /api/me                 # Current user profile
+    </div>
+    
+    <h3>🏢 Organization Management</h3>
+    <div class="api-endpoint">
+POST /api/v1/organizations/                    # Create organization<br>
+GET  /api/v1/organizations/me                  # Get my organization<br>
+GET  /api/v1/organizations/{id}/members        # List team members<br>
+POST /api/v1/organizations/{id}/invitations/   # Send invitation<br>
+GET  /api/v1/organizations/{id}/invitations/   # List invitations
+    </div>
+    
+    <h3>📧 Invitation System</h3>
+    <div class="api-endpoint">
+POST /api/invitations/{token}/accept           # Accept invitation<br>
+GET  /api/invitations/{token}                  # Get invitation details
+    </div>
+    
+    <h3>🏢 Company Management</h3>
+    <div class="api-endpoint">
+GET  /api/v1/companies/                        # List accessible companies<br>
+POST /api/v1/companies/                        # Create new company<br>
+GET  /api/v1/companies/{id}                    # Get company details
+    </div>
+    
+    <h3>📈 Prediction APIs</h3>
+    <div class="api-endpoint">
+POST /api/v1/predictions/predict-annual        # Create annual prediction<br>
+POST /api/v1/predictions/predict-quarterly     # Create quarterly prediction<br>
+POST /api/v1/predictions/bulk-predict-async    # Bulk processing<br>
+GET  /api/v1/predictions/job-status/{job_id}   # Check processing status<br>
+GET  /api/v1/predictions/summary               # Analytics dashboard
+    </div>
+
+    <div class="page-break"></div>
+    
+    <h2>🚀 Key Features & Benefits</h2>
+    
+    <div class="feature-grid">
+        <div class="feature-card">
+            <h4><span class="emoji">🤖</span>Advanced ML Capabilities</h4>
+            <ul>
+                <li><strong>Dual Model System</strong>: Annual and Quarterly prediction models</li>
+                <li><strong>Ensemble Predictions</strong>: Multiple algorithms for higher accuracy</li>
+                <li><strong>Risk Categorization</strong>: Automatic risk level assignment (Very Low → Very High)</li>
+                <li><strong>Confidence Scoring</strong>: Model certainty indicators</li>
+                <li><strong>Feature Importance</strong>: Understanding key risk factors</li>
+            </ul>
+        </div>
+        
+        <div class="feature-card">
+            <h4><span class="emoji">🏢</span>Enterprise Multi-Tenancy</h4>
+            <ul>
+                <li><strong>Complete Data Isolation</strong>: Organization-scoped data access</li>
+                <li><strong>Global Data Sharing</strong>: Public companies visible across organizations</li>
+                <li><strong>Flexible Team Management</strong>: Admin and user roles with granular permissions</li>
+                <li><strong>Scalable Architecture</strong>: Support for unlimited organizations and users</li>
+            </ul>
+        </div>
+        
+        <div class="feature-card">
+            <h4><span class="emoji">📊</span>Bulk Processing & Analytics</h4>
+            <ul>
+                <li><strong>Excel Import</strong>: Async processing of large financial datasets</li>
+                <li><strong>Progress Tracking</strong>: Real-time job status and completion estimates</li>
+                <li><strong>Batch Predictions</strong>: Process hundreds of companies simultaneously</li>
+                <li><strong>Analytics Dashboard</strong>: Risk distribution, trends, and insights</li>
+            </ul>
+        </div>
+        
+        <div class="feature-card">
+            <h4><span class="emoji">🔒</span>Security & Compliance</h4>
+            <ul>
+                <li><strong>JWT Authentication</strong>: Secure token-based authentication</li>
+                <li><strong>Role-Based Access Control</strong>: Granular permission management</li>
+                <li><strong>Data Validation</strong>: Comprehensive input validation and sanitization</li>
+                <li><strong>Audit Trails</strong>: Complete activity logging and tracking</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="page-break"></div>
+    
+    <h2>🏗️ System Architecture Overview</h2>
+    
+    <h3>High-Level Architecture</h3>
+    <div class="architecture-text">
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   Client Layer   │    │   API Gateway    │    │ Business Logic  │
+│                 │    │                  │    │                 │
+│ • Web Frontend  │───▶│ • FastAPI Server │───▶│ • Organization  │
+│ • Mobile App    │    │ • Authentication │    │ • Prediction    │
+│ • API Clients   │    │ • CORS Middleware│    │ • ML Service    │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+                                │                        │
+                                ▼                        ▼
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   Data Layer    │    │Background Process│    │  External APIs  │
+│                 │    │                  │    │                 │
+│ • PostgreSQL    │    │ • Celery Workers │    │ • Resend Email  │
+│ • Redis Cache   │    │ • Task Queue     │    │ • ML Models     │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+    </div>
+    
+    <h3>Component Responsibilities</h3>
+    <ul>
+        <li><strong>FastAPI Server</strong>: RESTful APIs, request validation, authentication middleware</li>
+        <li><strong>Organization Service</strong>: Multi-tenant data management, team collaboration</li>
+        <li><strong>Prediction Service</strong>: Financial data processing, ML model integration</li>
+        <li><strong>Background Processing</strong>: Bulk data uploads, email notifications</li>
+        <li><strong>PostgreSQL</strong>: Primary data storage with proper indexing</li>
+        <li><strong>Redis</strong>: Session management, job queues, caching layer</li>
+    </ul>
+
+    <div class="page-break"></div>
+    
+    <h2>🔐 User Roles & Permissions Matrix</h2>
+    
+    <div class="role-hierarchy">
+        <h3>Role Hierarchy</h3>
+        <div class="code-block">
+Super Admin (Global)
+├── Full system access
+├── Can manage any organization
+└── Global company data management
+
+Organization Admin
+├── Full organization access
+├── Team member management
+├── Organization data control
+└── Invitation management
+
+Organization User  
+├── Organization data access
+├── Can create predictions
+├── Limited admin functions
+└── Collaborative access
+
+No Organization User
+├── Global data view only
+├── Can create own organization
+├── Limited functionality
+└── Personal workspace
+        </div>
+    </div>
+    
+    <h3>Detailed Permission Matrix</h3>
+    <table>
+        <thead>
+            <tr>
+                <th><strong>Action</strong></th>
+                <th><strong>Super Admin</strong></th>
+                <th><strong>Org Admin</strong></th>
+                <th><strong>Org User</strong></th>
+                <th><strong>No Org User</strong></th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr><td colspan="5" style="background:#f0f0f0; font-weight:bold;">🏢 Organizations</td></tr>
+            <tr>
+                <td>Create Organization</td>
+                <td>✅ All</td>
+                <td>✅ Own</td>
+                <td>✅ New</td>
+                <td>✅ First</td>
+            </tr>
+            <tr>
+                <td>View All Organizations</td>
+                <td>✅</td>
+                <td>❌</td>
+                <td>❌</td>
+                <td>❌</td>
+            </tr>
+            <tr>
+                <td>Delete Organization</td>
+                <td>✅ Any</td>
+                <td>✅ Own</td>
+                <td>❌</td>
+                <td>❌</td>
+            </tr>
+            <tr><td colspan="5" style="background:#f0f0f0; font-weight:bold;">👥 Team Management</td></tr>
+            <tr>
+                <td>Send Invitations</td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>❌</td>
+                <td>❌</td>
+            </tr>
+            <tr>
+                <td>Remove Members</td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>❌</td>
+                <td>❌</td>
+            </tr>
+            <tr>
+                <td>Manage Roles</td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>❌</td>
+                <td>❌</td>
+            </tr>
+            <tr><td colspan="5" style="background:#f0f0f0; font-weight:bold;">🏢 Companies</td></tr>
+            <tr>
+                <td>View Global Companies</td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>✅</td>
+            </tr>
+            <tr>
+                <td>View Org Companies</td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>❌</td>
+            </tr>
+            <tr>
+                <td>Create Global Companies</td>
+                <td>✅</td>
+                <td>❌</td>
+                <td>❌</td>
+                <td>❌</td>
+            </tr>
+            <tr>
+                <td>Create Org Companies</td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>❌</td>
+            </tr>
+            <tr><td colspan="5" style="background:#f0f0f0; font-weight:bold;">📈 Predictions</td></tr>
+            <tr>
+                <td>View Global Predictions</td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>✅</td>
+            </tr>
+            <tr>
+                <td>View Org Predictions</td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>❌</td>
+            </tr>
+            <tr>
+                <td>Create Predictions</td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>❌</td>
+            </tr>
+            <tr>
+                <td>Bulk Processing</td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>❌</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="page-break"></div>
+    
+    <h2>🗃️ Database Schema & Data Model</h2>
+    
+    <h3>Core Entity Relationships</h3>
+    <div class="code-block">
+Organizations (1) ──── (N) Users
+     │                     │
+     │                     │
+     ├── (1) ──── (N) Invitations
+     │                     │
+     └── (1) ──── (N) Companies ──── (N) Predictions
+                             │
+                             └── Annual & Quarterly Types
+    </div>
+    
+    <h3>Key Tables Structure</h3>
+    
+    <h4>🏢 organizations</h4>
+    <div class="code-block">
+id: UUID (PK)
+name: VARCHAR(255) -- "HDFC Bank", "ICICI Bank" 
+slug: VARCHAR(100) UNIQUE -- "hdfc-bank"
+domain: VARCHAR(255) -- "hdfc.com"
+is_active: BOOLEAN DEFAULT true
+max_users: INTEGER DEFAULT 100
+created_by: UUID → users.id
+created_at, updated_at: TIMESTAMP
+    </div>
+    
+    <h4>👤 users</h4>
+    <div class="code-block">
+id: UUID (PK)
+email: VARCHAR(255) UNIQUE INDEXED
+username: VARCHAR(100) UNIQUE INDEXED  
+organization_id: UUID → organizations.id INDEXED
+organization_role: ENUM('admin', 'user')
+global_role: ENUM('super_admin', 'user')
+is_active: BOOLEAN DEFAULT true
+created_at, updated_at: TIMESTAMP
+    </div>
+    
+    <h4>🏢 companies</h4>
+    <div class="code-block">
+id: UUID (PK)
+symbol: VARCHAR(20) UNIQUE INDEXED -- "RELIANCE", "TCS"
+name: VARCHAR(255) -- "Reliance Industries"
+market_cap: DECIMAL(20,2)
+sector: VARCHAR(100) -- "Energy", "Technology"
+organization_id: UUID → organizations.id INDEXED
+is_global: BOOLEAN DEFAULT false INDEXED
+    </div>
+    
+    <h4>📈 predictions (Annual & Quarterly)</h4>
+    <div class="code-block">
+-- Common fields
+id: UUID (PK)
+company_id: UUID → companies.id
+organization_id: UUID → organizations.id INDEXED
+reporting_year: VARCHAR(4) -- "2024"
+reporting_quarter: VARCHAR(2) -- "Q1", "Q2", "Q3", "Q4"
+
+-- ML Results
+probability: DECIMAL(5,4) -- 0.0 to 1.0
+risk_level: VARCHAR(20) -- "Low", "Medium", "High"
+confidence: DECIMAL(5,4)
+predicted_at: TIMESTAMP
+created_by: UUID → users.id
+    </div>
+    
+    <h3>Data Access Rules</h3>
+    <ul>
+        <li><strong>Global Companies</strong> (<code>is_global=true</code>): Visible to all organizations</li>
+        <li><strong>Organization Companies</strong> (<code>organization_id=specific</code>): Only visible to that organization</li>
+        <li><strong>Personal Companies</strong> (<code>organization_id=null</code>): Creator only access</li>
+        <li><strong>Predictions</strong>: Follow parent company access rules</li>
+    </ul>
+
+    <div class="page-break"></div>
+    
+    <h2>🔄 Complete User Flow Workflows</h2>
+    
+    <div class="diagram-container">
+        <div class="diagram-title">Complete User Flow & Application Architecture</div>
+        <div class="mermaid">
+graph TD
+    %% User Registration & Organization Setup Flow
+    START([👤 New User]) --> REG[📝 Register Account]
+    REG --> VERIFY{📧 Email Verified?}
+    VERIFY -->|Yes| LOGIN[🔑 Login Success]
+    VERIFY -->|No| EMAIL_VERIFY[📧 Verify Email]
+    EMAIL_VERIFY --> LOGIN
+    
+    LOGIN --> ORG_CHECK{🏢 Has Organization?}
+    
+    %% No Organization Path
+    ORG_CHECK -->|No| CREATE_ORG[🏗️ Create Organization]
+    CREATE_ORG --> ORG_ADMIN[👑 Become Org Admin]
+    
+    %% Has Organization Path  
+    ORG_CHECK -->|Yes| ORG_USER[👥 Access Organization]
+    ORG_ADMIN --> INVITE_TEAM[📧 Invite Team Members]
+    
+    %% Team Invitation Flow
+    INVITE_TEAM --> SEND_INVITE[📤 Send Invitation Email]
+    SEND_INVITE --> NEW_MEMBER[👤 New Member]
+    NEW_MEMBER --> ACCEPT_INVITE{✅ Accept Invitation?}
+    ACCEPT_INVITE -->|Yes| JOIN_ORG[🤝 Join Organization]
+    ACCEPT_INVITE -->|No| EXPIRE[⏰ Invitation Expires]
+    JOIN_ORG --> ORG_USER
+    
+    %% Main Application Features
+    ORG_USER --> DASHBOARD[📊 Organization Dashboard]
+    ORG_ADMIN --> DASHBOARD
+    
+    DASHBOARD --> COMPANIES[🏢 Manage Companies]
+    DASHBOARD --> PREDICTIONS[📈 Financial Predictions]
+    DASHBOARD --> TEAM_MGMT[👥 Team Management]
+    
+    %% Company Management
+    COMPANIES --> VIEW_GLOBAL[🌐 View Global Companies]
+    COMPANIES --> CREATE_COMPANY[➕ Create Company]
+    COMPANIES --> ORG_COMPANIES[🏢 Organization Companies]
+    
+    %% Prediction Workflows
+    PREDICTIONS --> ANNUAL_PRED[📅 Annual Prediction]
+    PREDICTIONS --> QUARTERLY_PRED[📊 Quarterly Prediction] 
+    PREDICTIONS --> BULK_PROCESS[📋 Bulk Processing]
+    
+    %% Annual Prediction Flow
+    ANNUAL_PRED --> SELECT_COMPANY[🎯 Select Company]
+    SELECT_COMPANY --> INPUT_RATIOS[📊 Input Financial Ratios]
+    INPUT_RATIOS --> ML_ANNUAL[🤖 ML Processing - Annual Model]
+    ML_ANNUAL --> ANNUAL_RESULT[📈 Risk Analysis Result]
+    
+    %% Quarterly Prediction Flow  
+    QUARTERLY_PRED --> SELECT_COMPANY2[🎯 Select Company]
+    SELECT_COMPANY2 --> INPUT_RATIOS2[📊 Input Financial Ratios]
+    INPUT_RATIOS2 --> ML_QUARTERLY[🤖 ML Processing - Quarterly Model]
+    ML_QUARTERLY --> QUARTERLY_RESULT[📊 Ensemble Prediction Result]
+    
+    %% Bulk Processing Flow
+    BULK_PROCESS --> UPLOAD_EXCEL[📤 Upload Excel File]
+    UPLOAD_EXCEL --> VALIDATE_FILE{✅ File Valid?}
+    VALIDATE_FILE -->|No| FILE_ERROR[❌ Validation Error]
+    VALIDATE_FILE -->|Yes| QUEUE_JOB[⏳ Queue Background Job]
+    QUEUE_JOB --> CELERY_PROCESS[⚙️ Celery Worker Processing]
+    CELERY_PROCESS --> PROGRESS_UPDATE[📊 Progress Updates]
+    PROGRESS_UPDATE --> JOB_COMPLETE[✅ Job Complete]
+    JOB_COMPLETE --> DOWNLOAD_RESULTS[⬇️ Download Results]
+    
+    %% Team Management (Admin Only)
+    TEAM_MGMT --> VIEW_MEMBERS[👥 View Team Members]
+    TEAM_MGMT --> MANAGE_ROLES[👑 Manage Roles]
+    TEAM_MGMT --> REMOVE_MEMBERS[❌ Remove Members]
+    
+    %% Data Access Rules
+    VIEW_GLOBAL --> GLOBAL_DATA[(🌐 Global Companies<br/>Visible to All)]
+    ORG_COMPANIES --> ORG_DATA[(🏢 Organization Data<br/>Org Members Only)]
+    ANNUAL_RESULT --> SAVE_PREDICTION[(💾 Save to Database<br/>Organization Scoped)]
+    QUARTERLY_RESULT --> SAVE_PREDICTION
+    
+    %% Styling
+    classDef startEnd fill:#e1f5fe,stroke:#01579b,stroke-width:3px
+    classDef process fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef decision fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef mlProcess fill:#e8f5e8,stroke:#1b5e20,stroke-width:3px
+    classDef dataStore fill:#fce4ec,stroke:#880e4f,stroke-width:2px
+    
+    class START,NEW_MEMBER startEnd
+    class REG,LOGIN,CREATE_ORG,INVITE_TEAM,DASHBOARD,COMPANIES,PREDICTIONS process
+    class VERIFY,ORG_CHECK,ACCEPT_INVITE,VALIDATE_FILE decision
+    class ML_ANNUAL,ML_QUARTERLY,CELERY_PROCESS mlProcess
+    class GLOBAL_DATA,ORG_DATA,SAVE_PREDICTION dataStore
+        </div>
+    </div>
+
+    <div class="page-break"></div>
+
+    <div class="diagram-container">
+        <div class="diagram-title">System Architecture & Multi-Tenant User Roles</div>
+        <div class="mermaid">
+graph TB
+    %% User Types & Roles
+    subgraph USERS["👥 User Types & Access Levels"]
+        SUPER_ADMIN[👑 Super Admin<br/>🔓 Global System Access<br/>🏢 All Organizations<br/>🌐 Global Data Management]
+        
+        subgraph ORG_A["🏢 Organization A - HDFC Bank"]
+            ADMIN_A[👑 Org Admin<br/>📧 Send Invitations<br/>👥 Manage Team<br/>🏢 Full Org Access]
+            USER_A[👤 Org User<br/>📊 Create Predictions<br/>🏢 View Org Data<br/>🤝 Collaborate]
+        end
+        
+        subgraph ORG_B["🏢 Organization B - ICICI Bank"]  
+            ADMIN_B[👑 Org Admin<br/>📧 Send Invitations<br/>👥 Manage Team<br/>🏢 Full Org Access]
+            USER_B[👤 Org User<br/>📊 Create Predictions<br/>🏢 View Org Data<br/>🤝 Collaborate]
+        end
+        
+        NO_ORG_USER[👤 Independent User<br/>🌐 Global Data Only<br/>🏗️ Can Create Org<br/>🔒 Limited Access]
+    end
+    
+    %% Application Layer
+    subgraph APP_LAYER["🖥️ Application Layer"]
+        subgraph CLIENT["📱 Client Applications"]
+            WEB[🌐 Web Frontend]
+            MOBILE[📱 Mobile App]  
+            API_CLIENT[🔌 API Clients]
+        end
+        
+        subgraph API_GATEWAY["🚪 API Gateway & Middleware"]
+            FASTAPI[⚡ FastAPI Server<br/>📝 Request Validation<br/>🔒 JWT Authentication]
+            AUTH_MIDDLEWARE[🛡️ Auth Middleware<br/>👤 User Context<br/>🏢 Organization Scope]
+            CORS[🔗 CORS Protection<br/>🌐 Cross-Origin Control]
+        end
+    end
+    
+    %% Business Logic Layer
+    subgraph BUSINESS_LOGIC["🧠 Business Logic Layer"]
+        ORG_SERVICE[🏢 Organization Service<br/>👥 Team Management<br/>📧 Invitations<br/>🔒 Multi-Tenant Logic]
+        
+        PREDICTION_SERVICE[📊 Prediction Service<br/>🤖 ML Integration<br/>📈 Risk Analysis<br/>💾 Data Processing]
+        
+        ML_SERVICE[🤖 ML Service<br/>📅 Annual Models<br/>📊 Quarterly Models<br/>🎯 Ensemble Predictions]
+        
+        EMAIL_SERVICE[📧 Email Service<br/>📤 Transactional Emails<br/>🔗 Invitation Links<br/>📨 Notifications]
+    end
+    
+    %% Data Layer  
+    subgraph DATA_LAYER["💾 Data Layer & Storage"]
+        subgraph POSTGRESQL["🐘 PostgreSQL Database"]
+            subgraph GLOBAL_DATA["🌐 Global Data (Shared)"]
+                GLOBAL_COMPANIES[(🏢 Global Companies<br/>📊 Market Data<br/>👁️ Visible to All)]
+            end
+            
+            subgraph ORG_A_DATA["🏢 Organization A Data"]
+                ORG_A_COMPANIES[(🏢 Org A Companies<br/>📈 Org A Predictions<br/>👥 Team Members)]
+            end
+            
+            subgraph ORG_B_DATA["🏢 Organization B Data"]  
+                ORG_B_COMPANIES[(🏢 Org B Companies<br/>📈 Org B Predictions<br/>👥 Team Members)]
+            end
+            
+            USERS_TABLE[(👤 Users Table<br/>🔐 Authentication<br/>🏢 Organization Links)]
+            INVITATIONS_TABLE[(📧 Invitations<br/>🔗 Tokens<br/>⏰ Expiration)]
+        end
+        
+        REDIS[(🔴 Redis Cache<br/>🎫 Session Management<br/>⚙️ Background Jobs<br/>📊 Progress Tracking)]
+    end
+    
+    %% Background Processing
+    subgraph BACKGROUND["⚙️ Background Processing"]
+        CELERY_WORKERS[👷 Celery Workers<br/>📊 Bulk Processing<br/>📧 Email Queue<br/>📈 ML Predictions]
+        TASK_QUEUE[📋 Task Queue<br/>⏳ Job Management<br/>📊 Progress Updates]
+    end
+    
+    %% External Services
+    subgraph EXTERNAL["🌐 External Services"]
+        RESEND_API[📧 Resend API<br/>📤 Email Delivery<br/>📨 Templates]
+        ML_MODELS[🤖 ML Models<br/>📅 Annual Prediction<br/>📊 Quarterly Prediction]
+    end
+    
+    %% User Access Connections
+    SUPER_ADMIN -.->|Full Access| GLOBAL_DATA
+    SUPER_ADMIN -.->|Admin Access| ORG_A_DATA  
+    SUPER_ADMIN -.->|Admin Access| ORG_B_DATA
+    
+    ADMIN_A -.->|Read Access| GLOBAL_DATA
+    ADMIN_A -.->|Full Access| ORG_A_DATA
+    USER_A -.->|Read Access| GLOBAL_DATA  
+    USER_A -.->|User Access| ORG_A_DATA
+    
+    ADMIN_B -.->|Read Access| GLOBAL_DATA
+    ADMIN_B -.->|Full Access| ORG_B_DATA
+    USER_B -.->|Read Access| GLOBAL_DATA
+    USER_B -.->|User Access| ORG_B_DATA
+    
+    NO_ORG_USER -.->|Read Only| GLOBAL_DATA
+    
+    %% Application Flow Connections
+    CLIENT --> FASTAPI
+    FASTAPI --> AUTH_MIDDLEWARE
+    AUTH_MIDDLEWARE --> ORG_SERVICE
+    AUTH_MIDDLEWARE --> PREDICTION_SERVICE
+    
+    ORG_SERVICE --> USERS_TABLE
+    ORG_SERVICE --> INVITATIONS_TABLE
+    ORG_SERVICE --> EMAIL_SERVICE
+    
+    PREDICTION_SERVICE --> ML_SERVICE
+    PREDICTION_SERVICE --> ORG_A_DATA
+    PREDICTION_SERVICE --> ORG_B_DATA
+    PREDICTION_SERVICE --> GLOBAL_DATA
+    
+    ML_SERVICE --> ML_MODELS
+    EMAIL_SERVICE --> RESEND_API
+    
+    %% Background Processing Connections
+    PREDICTION_SERVICE --> CELERY_WORKERS
+    ORG_SERVICE --> CELERY_WORKERS  
+    CELERY_WORKERS --> TASK_QUEUE
+    TASK_QUEUE --> REDIS
+    AUTH_MIDDLEWARE --> REDIS
+    
+    %% Styling
+    classDef userRole fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef systemLayer fill:#f1f8e9,stroke:#33691e,stroke-width:2px  
+    classDef dataStore fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    classDef external fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef globalData fill:#e8f5e8,stroke:#2e7d32,stroke-width:3px
+    classDef orgData fill:#fff8e1,stroke:#f9a825,stroke-width:2px
+    
+    class SUPER_ADMIN,ADMIN_A,ADMIN_B,USER_A,USER_B,NO_ORG_USER userRole
+    class FASTAPI,ORG_SERVICE,PREDICTION_SERVICE,ML_SERVICE,EMAIL_SERVICE systemLayer
+    class POSTGRESQL,REDIS,USERS_TABLE,INVITATIONS_TABLE,CELERY_WORKERS dataStore  
+    class RESEND_API,ML_MODELS external
+    class GLOBAL_COMPANIES,GLOBAL_DATA globalData
+    class ORG_A_COMPANIES,ORG_B_COMPANIES,ORG_A_DATA,ORG_B_DATA orgData
+        </div>
+    </div>
+
+    <script>
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'default',
+            themeVariables: {
+                primaryColor: '#000000',
+                primaryTextColor: '#ffffff',
+                primaryBorderColor: '#000000',
+                lineColor: '#000000',
+                sectionBkgColor: '#f5f5f5',
+                altSectionBkgColor: '#ffffff',
+                gridColor: '#000000',
+                secondaryColor: '#f5f5f5',
+                tertiaryColor: '#f5f5f5'
+            },
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true,
+                curve: 'basis'
+            },
+            securityLevel: 'loose'
+        });
+        
+        // Function to trigger print
+        function printPDF() {
+            window.print();
+        }
+        
+        // Add print button for user convenience
+        document.addEventListener('DOMContentLoaded', function() {
+            const printBtn = document.createElement('button');
+            printBtn.innerHTML = '🖨️ Print PDF';
+            printBtn.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: #000000;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 5px;
+                cursor: pointer;
+                font-weight: bold;
+                box-shadow: 0 2px 8px #00000030;
+                z-index: 1000;
+            `;
+            printBtn.onclick = printPDF;
+            document.body.appendChild(printBtn);
+        });
+    </script>
+    
+</body>
+</html>
