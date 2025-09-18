@@ -7,15 +7,15 @@ from datetime import datetime
 
 from ...core.database import get_db, User, Organization, Tenant
 from ...schemas.schemas import (
-    UserResponse, UserUpdate, UserListResponse,
+    UserCreate, UserResponse, UserUpdate, UserListResponse,
     UserRoleUpdate, UserRoleUpdateResponse
 )
-from .auth_multi_tenant import (
-    require_super_admin, require_tenant_admin, require_org_admin,
-    get_current_active_user
+from .auth_multi_tenant import get_current_active_user
+from .auth_admin import (
+    require_super_admin, require_tenant_admin, require_org_admin
 )
 
-router = APIRouter(prefix="/users", tags=["User Management"])
+router = APIRouter(tags=["User Management"])
 
 @router.get("/profile", response_model=UserResponse)
 async def get_current_user_profile(
@@ -55,6 +55,195 @@ async def update_current_user_profile(
     db.refresh(current_user)
     
     return UserResponse.from_orm(current_user)
+
+@router.get("/me", response_model=UserResponse)
+async def get_current_user_profile_me(
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get current user profile information (alternative endpoint)."""
+    return UserResponse.from_orm(current_user)
+
+@router.post("", response_model=UserResponse)
+async def create_user(
+    user_data: UserCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Create a new user (Admin only)."""
+    
+    # Only super admin, tenant admin, or org admin can create users
+    if current_user.global_role not in ["super_admin", "tenant_admin"]:
+        if current_user.organization_role != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only admins can create users"
+            )
+    
+    # Check if email already exists
+    existing_user = db.query(User).filter(User.email == user_data.email.lower()).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+    
+    # Check if username already exists
+    if user_data.username:
+        existing_username = db.query(User).filter(User.username == user_data.username).first()
+        if existing_username:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Username already taken"
+            )
+    
+    # Determine organization and tenant based on current user's role
+    if current_user.global_role == "super_admin":
+        # Super admin can create users for any organization/tenant
+        organization_id = user_data.organization_id if hasattr(user_data, 'organization_id') else None
+        tenant_id = user_data.tenant_id if hasattr(user_data, 'tenant_id') else None
+    elif current_user.global_role == "tenant_admin":
+        # Tenant admin can only create users within their tenant
+        organization_id = user_data.organization_id if hasattr(user_data, 'organization_id') else None
+        tenant_id = current_user.tenant_id
+        
+        # Validate organization belongs to their tenant if specified
+        if organization_id:
+            org = db.query(Organization).filter(Organization.id == organization_id).first()
+            if not org or org.tenant_id != tenant_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Cannot create user for organization outside your tenant"
+                )
+    else:
+        # Org admin can only create users within their organization
+        organization_id = current_user.organization_id
+        tenant_id = current_user.tenant_id
+    
+    # Hash password
+    from .auth_multi_tenant import AuthManager
+    hashed_password = AuthManager.get_password_hash(user_data.password)
+    
+    # Create new user
+    try:
+        # Validate requested global role
+        valid_global_roles = ["user", "tenant_admin", "super_admin"]
+        requested_global_role = getattr(user_data, 'global_role', "user")
+        
+        if requested_global_role not in valid_global_roles:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid global_role '{requested_global_role}'. Valid roles: {valid_global_roles}"
+            )
+        
+        # Determine global role based on permissions
+        if current_user.global_role == "super_admin":
+            # Super admin can assign any global role
+            global_role = requested_global_role
+        elif current_user.global_role == "tenant_admin":
+            # Tenant admin can assign user or tenant_admin roles (but not super_admin)
+            allowed_roles = ["user", "tenant_admin"]
+            if requested_global_role not in allowed_roles:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Tenant admin can only assign roles: {allowed_roles}. Cannot assign '{requested_global_role}'"
+                )
+            global_role = requested_global_role
+        else:
+            # Org admin can only create regular users
+            if requested_global_role != "user":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Organization admin can only create users with 'user' global role"
+                )
+            global_role = "user"
+        
+        # Determine organization role
+        # Only assign org role if user is being added to an organization
+        if organization_id:
+            valid_org_roles = ["member", "admin"]
+            requested_org_role = getattr(user_data, 'organization_role', "member")
+            
+            if requested_org_role not in valid_org_roles:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid organization_role '{requested_org_role}'. Valid roles: {valid_org_roles}"
+                )
+            org_role = requested_org_role
+        else:
+            # No organization = no organization role
+            org_role = None
+        
+        new_user = User(
+            id=uuid.uuid4(),
+            email=user_data.email.lower(),
+            username=user_data.username,
+            hashed_password=hashed_password,  # Correct field name
+            full_name=f"{user_data.first_name or ''} {user_data.last_name or ''}".strip() or None,  # Combine names
+            organization_id=organization_id,
+            tenant_id=tenant_id,
+            global_role=global_role,
+            organization_role=org_role,
+            is_active=True,
+            created_at=datetime.utcnow()
+        )
+        
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        
+        return UserResponse.from_orm(new_user)
+        
+    except Exception as e:
+        db.rollback()
+        
+        # Handle specific database errors gracefully
+        error_str = str(e).lower()
+        if "duplicate key" in error_str:
+            if "email" in error_str:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Email '{user_data.email}' is already registered. Please use a different email."
+                )
+            elif "username" in error_str:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Username '{user_data.username}' is already taken. Please choose a different username."
+                )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="A user with this information already exists. Please check email and username."
+                )
+        elif "foreign key" in error_str:
+            if "organization" in error_str:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid organization ID. Organization may not exist or be accessible."
+                )
+            elif "tenant" in error_str:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid tenant ID. Tenant may not exist or be accessible."
+                )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid reference data provided. Please check organization and tenant IDs."
+                )
+        elif "violates" in error_str and "constraint" in error_str:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid data provided. Please check all required fields and try again."
+            )
+        else:
+            # Log the actual error for debugging but return user-friendly message
+            import logging
+            logging.error(f"User creation error: {str(e)}")
+            
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create user. Please check your data and try again."
+            )
 
 @router.get("", response_model=UserListResponse)
 async def list_users(
@@ -194,6 +383,73 @@ async def get_user(
     
     return UserResponse.from_orm(user)
 
+@router.put("/{user_id}", response_model=UserResponse)
+async def update_user(
+    user_id: str,
+    user_update: UserUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Update user information (Admin only)."""
+    
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Check permissions - only admins can update other users
+    if str(user.id) != str(current_user.id):
+        if current_user.global_role not in ["super_admin", "tenant_admin"]:
+            if current_user.organization_role != "admin":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Only admins can update other users"
+                )
+        
+        # Tenant admin can only update users in their tenant
+        if current_user.global_role == "tenant_admin":
+            if user.organization_id:
+                org = db.query(Organization).filter(Organization.id == user.organization_id).first()
+                if not org or org.tenant_id != current_user.tenant_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Cannot update user from different tenant"
+                    )
+        
+        # Org admin can only update users in their organization
+        elif current_user.organization_role == "admin":
+            if str(user.organization_id) != str(current_user.organization_id):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Cannot update user from different organization"
+                )
+    
+    # Apply updates
+    update_data = user_update.dict(exclude_unset=True, exclude={"email"})  # Email cannot be changed
+    
+    # Check username uniqueness if being updated
+    if "username" in update_data and update_data["username"]:
+        existing_username = db.query(User).filter(
+            and_(User.username == update_data["username"], User.id != user_id)
+        ).first()
+        if existing_username:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Username already taken"
+            )
+    
+    for field, value in update_data.items():
+        setattr(user, field, value)
+    
+    user.updated_at = datetime.utcnow()
+    
+    db.commit()
+    db.refresh(user)
+    
+    return UserResponse.from_orm(user)
+
 @router.put("/{user_id}/role", response_model=UserRoleUpdateResponse)
 async def update_user_role(
     user_id: str,
@@ -267,10 +523,10 @@ async def update_user_role(
             )
         
         # Validate organization role value
-        if role_update.organization_role not in ["user", "member", "admin"]:
+        if role_update.organization_role not in ["member", "admin"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid organization role"
+                detail="Invalid organization role. Valid roles: member, admin"
             )
         
         # User must belong to an organization to have org role
@@ -360,7 +616,7 @@ async def remove_user(
             org_name = org.name if org else "Unknown"
         
         user.organization_id = None
-        user.organization_role = "user"
+        user.organization_role = None  # No org role when not in organization
         user.updated_at = datetime.utcnow()
         
         db.commit()

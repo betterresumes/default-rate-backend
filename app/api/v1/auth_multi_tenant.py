@@ -16,14 +16,14 @@ from ...schemas.schemas import (
 )
 from ...utils.tenant_utils import is_email_whitelisted, get_organization_by_token
 
-router = APIRouter(prefix="/auth", tags=["Authentication"])
+router = APIRouter(tags=["User Authentication"])
 
 # Configuration
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-here-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=5)
 security = HTTPBearer()
 
 class AuthManager:
@@ -90,35 +90,11 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
 
-def require_super_admin(current_user: User = Depends(get_current_active_user)) -> User:
-    """Require super admin role."""
-    if current_user.global_role != "super_admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Super admin privileges required"
-        )
-    return current_user
+# =============================================
+# USER AUTHENTICATION ENDPOINTS
+# =============================================
 
-def require_tenant_admin(current_user: User = Depends(get_current_active_user)) -> User:
-    """Require tenant admin role."""
-    if current_user.global_role not in ["super_admin", "tenant_admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Tenant admin privileges required"
-        )
-    return current_user
-
-def require_org_admin(current_user: User = Depends(get_current_active_user)) -> User:
-    """Require organization admin role."""
-    if (current_user.global_role not in ["super_admin", "tenant_admin"] and 
-        current_user.organization_role != "admin"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Organization admin privileges required"
-        )
-    return current_user
-
-@router.post("/register", response_model=UserResponse)
+@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
     """Register a new user (creates personal account but no organization access)."""
     
@@ -130,36 +106,102 @@ async def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
             detail="Email already registered"
         )
     
-    # Check username availability
-    if user_data.username:
-        existing_username = db.query(User).filter(User.username == user_data.username).first()
-        if existing_username:
+    # Handle full_name - accept both full_name and first_name/last_name formats
+    full_name = user_data.full_name
+    if user_data.first_name or user_data.last_name:
+        full_name = f"{user_data.first_name or ''} {user_data.last_name or ''}".strip()
+    
+    # Determine username - use provided username or generate from email
+    username = user_data.username or user_data.email.split("@")[0]
+    
+    # Sanitize username - remove invalid characters
+    import re
+    username = re.sub(r'[^a-zA-Z0-9_-]', '_', username)  # Replace invalid chars with underscore
+    if not username or len(username) < 2:
+        username = "user"  # Fallback if sanitization removes everything
+    
+    # Check username availability (always check, even for auto-generated ones)
+    existing_username = db.query(User).filter(User.username == username).first()
+    if existing_username:
+        if user_data.username:
+            # User provided username is taken
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Username already taken"
+                detail=f"Username '{user_data.username}' is already taken. Please choose a different username."
             )
+        else:
+            # Auto-generated username is taken, try to find available alternative
+            base_username = username
+            counter = 1
+            max_attempts = 100  # Prevent infinite loop
+            
+            while existing_username and counter <= max_attempts:
+                username = f"{base_username}_{counter}"
+                existing_username = db.query(User).filter(User.username == username).first()
+                counter += 1
+            
+            # If we still couldn't find an available username after max attempts
+            if existing_username:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Unable to generate a unique username from email '{user_data.email}'. Please provide a custom username."
+                )
     
     # Create new user account (no organization initially)
-    hashed_password = auth.get_password_hash(user_data.password)
+    hashed_password = pwd_context.hash(user_data.password)
     
-    new_user = User(
-        id=uuid.uuid4(),
-        email=user_data.email,
-        username=user_data.username or user_data.email.split("@")[0],
-        full_name=user_data.full_name,
-        hashed_password=hashed_password,
-        global_role="user",
-        organization_role="user",
-        is_active=True,
-        is_verified=True,  # Skip email verification for now
-        created_at=datetime.utcnow()
-    )
-    
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    
-    return UserResponse.from_orm(new_user)
+    try:
+        new_user = User(
+            id=uuid.uuid4(),
+            email=user_data.email,
+            username=username,  # Use the validated/generated username
+            full_name=full_name,
+            hashed_password=hashed_password,
+            global_role=user_data.global_role if hasattr(user_data, 'global_role') and user_data.global_role else "user",
+            organization_role=None,  # No org role initially - assigned when joining organization
+            is_active=True,
+            created_at=datetime.utcnow()
+        )
+        
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        
+        return UserResponse.from_orm(new_user)
+        
+    except Exception as e:
+        db.rollback()
+        # Check if it's a duplicate key error (just in case our earlier check missed something)
+        error_str = str(e).lower()
+        if "duplicate key" in error_str and "username" in error_str:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Username '{username}' is already taken. Please choose a different username."
+            )
+        elif "duplicate key" in error_str and "email" in error_str:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Email '{user_data.email}' is already registered. Please use a different email or try logging in."
+            )
+        elif "violates" in error_str and "constraint" in error_str:
+            # General constraint violation
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid data provided. Please check your input and try again."
+            )
+        else:
+            # Log the actual error for debugging (more detailed)
+            import logging
+            import traceback
+            
+            logging.error(f"User registration error: {str(e)}")
+            logging.error(f"Full traceback: {traceback.format_exc()}")
+            
+            # Return more specific error details for debugging
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Database error: {str(e)[:200]}..."  # Show first 200 chars of error
+            )
 
 @router.post("/login", response_model=Token)
 async def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
@@ -168,7 +210,7 @@ async def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
     # Find user by email
     user = db.query(User).filter(User.email == user_credentials.email).first()
     
-    if not user or not auth.verify_password(user_credentials.password, user.hashed_password):
+    if not user or not AuthManager.verify_password(user_credentials.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -187,7 +229,7 @@ async def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
     
     # Create access token
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = auth.create_access_token(
+    access_token = AuthManager.create_access_token(
         data={"sub": str(user.id)}, expires_delta=access_token_expires
     )
     
@@ -196,6 +238,10 @@ async def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
         "token_type": "bearer",
         "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60
     }
+
+# =============================================
+# ORGANIZATION MANAGEMENT ENDPOINTS
+# =============================================
 
 @router.post("/join", response_model=JoinOrganizationResponse)
 async def join_organization(
@@ -249,7 +295,7 @@ async def join_organization(
     
     # Join user to organization
     current_user.organization_id = organization.id
-    current_user.organization_role = organization.default_role or "user"
+    current_user.organization_role = organization.default_role or "member"
     current_user.joined_via_token = join_request.join_token
     current_user.whitelist_email = current_user.email
     current_user.updated_at = datetime.utcnow()
@@ -265,17 +311,16 @@ async def join_organization(
         user_role=current_user.organization_role
     )
 
-@router.get("/me", response_model=UserResponse)
-async def get_current_user_profile(current_user: User = Depends(get_current_active_user)):
-    """Get current user profile information."""
-    return UserResponse.from_orm(current_user)
+# =============================================
+# TOKEN MANAGEMENT ENDPOINTS
+# =============================================
 
 @router.post("/refresh", response_model=Token)
 async def refresh_token(current_user: User = Depends(get_current_active_user)):
     """Refresh the access token."""
     
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = auth.create_access_token(
+    access_token = AuthManager.create_access_token(
         data={"sub": str(current_user.id)}, expires_delta=access_token_expires
     )
     

@@ -1,0 +1,973 @@
+{
+	"info": {
+		"_postman_id": "multi-tenant-api-collection",
+		"name": "Multi-Tenant Financial Risk API",
+		"description": "Complete API collection for testing all endpoints in the multi-tenant financial risk prediction system\n\n## 📋 Collection Structure:\n\n### 🔐 Authentication Endpoints\n- **Public Endpoints**: Registration, Login, Organization Join, Token Refresh, Logout\n- **Access Level**: Public (no authentication required)\n\n### 🔐 Admin Authentication Endpoints  \n- **Admin Functions**: User Creation, Impersonation, Password Reset, Audit, Bulk Operations\n- **Access Level**: Admin roles only (Super/Tenant/Org Admin)\n\n### 🏢 Tenant Endpoints\n- **Tenant Management**: CRUD operations for tenants\n- **Access Level**: Super Admin only\n\n### 🏛️ Organization Endpoints\n- **Organization Management**: CRUD operations, user management, whitelist control\n- **Access Level**: Role-based (Super/Tenant/Org Admin)\n\n### 👥 User Endpoints\n- **User Management**: Profile management, role updates, account lifecycle\n- **Access Level**: Mixed (self-service + admin operations)\n\n## 🔑 Authentication Flow:\n1. Register or Login → Get access_token\n2. Use Bearer token in Authorization header\n3. Role-based access control applies automatically\n\n## 🛡️ Role Hierarchy:\n- **super_admin**: Full system access\n- **tenant_admin**: Tenant-scoped management\n- **org_admin**: Organization-scoped management  \n- **member**: Organization member\n- **user**: Basic user access",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000",
+			"type": "string"
+		},
+		{
+			"key": "access_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "tenant_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "org_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "user_id",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "🔐 AUTHENTICATION ENDPOINTS",
+			"description": "Public authentication endpoints - no authentication required",
+			"item": [
+				{
+					"name": "1. Register User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"test.user@example.com\",\n  \"password\": \"TestPassword123!\",\n  \"first_name\": \"Test\",\n  \"last_name\": \"User\",\n  \"organization_id\": null\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/register",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "register"]
+						},
+						"description": "**Purpose**: Self-registration for new users\n\n**Access**: Public (no authentication required)\n\n**Expected Response**: 201 Created\n\n**Body Parameters**:\n- `email` (string, required): Valid email address\n- `password` (string, required): Strong password\n- `first_name` (string, required): User's first name\n- `last_name` (string, required): User's last name\n- `organization_id` (string, optional): Organization to join (if applicable)\n\n**Notes**: \n- Creates user with default role 'user'\n- Password must meet security requirements\n- Email must be unique"
+					}
+				},
+				{
+					"name": "2. Login User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"test.user@example.com\",\n  \"password\": \"TestPassword123!\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/login",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "login"]
+						},
+						"description": "**Purpose**: Authenticate user and get JWT tokens\n\n**Access**: Public (no authentication required)\n\n**Expected Response**: 200 OK\n\n**Body Parameters**:\n- `email` (string, required): User's email\n- `password` (string, required): User's password\n\n**Response**:\n- `access_token`: JWT token for API access\n- `refresh_token`: Token for refreshing access token\n- `token_type`: Always 'bearer'\n- `user`: User information\n\n**Notes**: \n- Save the access_token for subsequent requests\n- Access token expires in 30 minutes\n- Use refresh token to get new access token"
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    pm.collectionVariables.set('access_token', jsonData.access_token);",
+									"    pm.collectionVariables.set('user_id', jsonData.user.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					]
+				},
+				{
+					"name": "3. Join Organization",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"newuser@example.com\",\n  \"password\": \"TestPassword123!\",\n  \"first_name\": \"New\",\n  \"last_name\": \"User\",\n  \"join_token\": \"org-join-token-here\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/join",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "join"]
+						},
+						"description": "**Purpose**: Register and automatically join an organization using invite token\n\n**Access**: Public (no authentication required)\n\n**Expected Response**: 201 Created\n\n**Body Parameters**:\n- `email` (string, required): Valid email address\n- `password` (string, required): Strong password\n- `first_name` (string, required): User's first name\n- `last_name` (string, required): User's last name\n- `join_token` (string, required): Organization invitation token\n\n**Notes**: \n- Creates user and adds to organization in one step\n- Join token must be valid and not expired\n- Email may need to be on organization whitelist"
+					}
+				},
+				{
+					"name": "4. Refresh Token",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"refresh_token\": \"your-refresh-token-here\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/refresh",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "refresh"]
+						},
+						"description": "**Purpose**: Get new access token using refresh token\n\n**Access**: Public (no authentication required)\n\n**Expected Response**: 200 OK\n\n**Body Parameters**:\n- `refresh_token` (string, required): Valid refresh token from login\n\n**Response**:\n- `access_token`: New JWT token for API access\n- `token_type`: Always 'bearer'\n\n**Notes**: \n- Use when access token expires\n- Refresh token has longer expiry than access token\n- Updates the access_token variable automatically"
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    pm.collectionVariables.set('access_token', jsonData.access_token);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					]
+				},
+				{
+					"name": "5. Logout User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/logout",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "logout"]
+						},
+						"description": "**Purpose**: Logout user and invalidate tokens\n\n**Access**: Requires authentication (Bearer token)\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {access_token}\n\n**Notes**: \n- Invalidates current session\n- Client should clear stored tokens\n- No body parameters required"
+					}
+				}
+			]
+		},
+		{
+			"name": "🔐 ADMIN AUTHENTICATION ENDPOINTS",
+			"description": "Admin-only authentication and management endpoints - Admin level access required",
+			"item": [
+				{
+					"name": "1. Admin Create User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"admin.created@example.com\",\n  \"password\": \"AdminPassword123!\",\n  \"first_name\": \"Admin\",\n  \"last_name\": \"Created\",\n  \"global_role\": \"user\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/admin/create-user",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "admin", "create-user"]
+						},
+						"description": "**Purpose**: Create a new user with role assignment (Admin only)\n\n**Access**: Super Admin, Tenant Admin, or Org Admin\n\n**Expected Response**: 201 Created\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Body Parameters**:\n- `email` (string, required): User's email address\n- `password` (string, required): User's password\n- `first_name` (string, required): User's first name\n- `last_name` (string, required): User's last name\n- `global_role` (string, optional): Global role (user, tenant_admin, super_admin)\n\n**Notes**: \n- Admins can create users with appropriate roles\n- Super admin can assign any role\n- Tenant admin can assign user/tenant_admin roles\n- Org admin can only assign user role"
+					}
+				},
+				{
+					"name": "2. Admin Impersonate User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/admin/impersonate/{{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "admin", "impersonate", "{{user_id}}"]
+						},
+						"description": "**Purpose**: Impersonate another user (Super Admin only)\n\n**Access**: Super Admin only\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {super_admin_token}\n\n**Path Parameters**:\n- `user_id` (UUID, required): User ID to impersonate\n\n**Response**:\n- `access_token`: JWT token for impersonated user\n- `token_type`: Bearer\n- `expires_in`: 30 minutes (shorter for security)\n- `impersonating`: Email of impersonated user\n- `impersonated_by`: Email of admin\n\n**Notes**: \n- ⚠️ **POWERFUL FEATURE** - Use with caution\n- Only super admins can impersonate\n- Shorter token expiry for security\n- All actions logged for audit trail"
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    pm.collectionVariables.set('access_token', jsonData.access_token);",
+									"    console.log('Now impersonating: ' + jsonData.impersonating);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					]
+				},
+				{
+					"name": "3. Admin Force Password Reset",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"new_password\": \"NewSecurePassword123!\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/admin/force-password-reset/{{user_id}}?new_password=NewSecurePassword123!",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "admin", "force-password-reset", "{{user_id}}"],
+							"query": [
+								{
+									"key": "new_password",
+									"value": "NewSecurePassword123!"
+								}
+							]
+						},
+						"description": "**Purpose**: Force password reset for a user (Admin only)\n\n**Access**: Super Admin, Tenant Admin, or Org Admin (scope-based)\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Path Parameters**:\n- `user_id` (UUID, required): User ID to reset password\n\n**Query Parameters**:\n- `new_password` (string, required): New password (min 8 chars)\n\n**Notes**: \n- Admins can reset passwords for users they manage\n- Super admin can reset any password\n- Tenant admin can reset passwords in their tenant\n- Org admin can reset passwords in their organization\n- Password must meet security requirements"
+					}
+				},
+				{
+					"name": "4. Admin Get User Login History",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/admin/audit/login-history/{{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "admin", "audit", "login-history", "{{user_id}}"]
+						},
+						"description": "**Purpose**: Get login history and audit information for a user\n\n**Access**: Super Admin, Tenant Admin, or Org Admin (scope-based)\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Path Parameters**:\n- `user_id` (UUID, required): User ID to get history\n\n**Response**:\n- `user_id`: User's ID\n- `email`: User's email\n- `last_login`: Last login timestamp\n- `created_at`: Account creation date\n- `is_active`: Account status\n- `organization_id`: Organization membership\n\n**Notes**: \n- Useful for user activity monitoring\n- Scope-based access control\n- Returns audit-relevant information"
+					}
+				},
+				{
+					"name": "5. Admin Bulk Activate Users",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_ids\": [\n    \"user-id-1\",\n    \"user-id-2\",\n    \"user-id-3\"\n  ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/admin/bulk-activate",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "admin", "bulk-activate"]
+						},
+						"description": "**Purpose**: Bulk activate multiple users at once (Admin only)\n\n**Access**: Super Admin, Tenant Admin, or Org Admin (scope-based)\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Body Parameters**:\n- `user_ids` (array, required): Array of user IDs to activate (max 100)\n\n**Response**:\n- `message`: Summary of operation\n- `activated_users`: Array of successfully activated users\n- `failed_users`: Array of failed activations with reasons\n- `processed_by`: Admin who performed the operation\n\n**Notes**: \n- Maximum 100 users per request\n- Scope-based permissions apply\n- Returns detailed success/failure report\n- Useful for batch user management"
+					}
+				}
+			]
+		},
+		{
+			"name": "🏢 TENANTS ENDPOINTS",
+			"description": "Tenant management - Super Admin access only",
+			"item": [
+				{
+					"name": "1. Create Tenant",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Acme Corporation\",\n  \"description\": \"Leading financial services company\",\n  \"domain\": \"acme-corp.com\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/tenants",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "tenants"]
+						},
+						"description": "**Purpose**: Create a new tenant organization\n\n**Access**: Super Admin only\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {super_admin_token}\n\n**Body Parameters**:\n- `name` (string, required): Tenant organization name\n- `description` (string, optional): Description of the tenant\n- `domain` (string, optional): Primary domain for the tenant\n\n**Notes**: \n- Only super admins can create tenants\n- Tenant name must be unique\n- Returns created tenant with generated ID"
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    pm.collectionVariables.set('tenant_id', jsonData.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					]
+				},
+				{
+					"name": "2. List All Tenants",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/tenants",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "tenants"]
+						},
+						"description": "**Purpose**: Get list of all tenants in the system\n\n**Access**: Super Admin only\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {super_admin_token}\n\n**Query Parameters**: None\n\n**Response**: Array of tenant objects\n\n**Notes**: \n- Only super admins can view all tenants\n- Returns complete tenant information\n- Useful for tenant management overview"
+					}
+				},
+				{
+					"name": "3. Get Tenant Details",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/tenants/{{tenant_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "tenants", "{{tenant_id}}"]
+						},
+						"description": "**Purpose**: Get detailed information about a specific tenant\n\n**Access**: Super Admin only\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {super_admin_token}\n\n**Path Parameters**:\n- `tenant_id` (UUID, required): ID of the tenant to retrieve\n\n**Notes**: \n- Returns detailed tenant information\n- 404 if tenant not found\n- Only super admins can access any tenant details"
+					}
+				},
+				{
+					"name": "4. Update Tenant",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Acme Corporation Updated\",\n  \"description\": \"Updated description for Acme Corp\",\n  \"domain\": \"acme-updated.com\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/tenants/{{tenant_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "tenants", "{{tenant_id}}"]
+						},
+						"description": "**Purpose**: Update tenant information\n\n**Access**: Super Admin only\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {super_admin_token}\n\n**Path Parameters**:\n- `tenant_id` (UUID, required): ID of the tenant to update\n\n**Body Parameters**:\n- `name` (string, optional): New tenant name\n- `description` (string, optional): New description\n- `domain` (string, optional): New primary domain\n\n**Notes**: \n- Only super admins can update tenants\n- Partial updates supported\n- Returns updated tenant information"
+					}
+				},
+				{
+					"name": "5. Delete Tenant",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/tenants/{{tenant_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "tenants", "{{tenant_id}}"]
+						},
+						"description": "**Purpose**: Delete a tenant and all associated data\n\n**Access**: Super Admin only\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {super_admin_token}\n\n**Path Parameters**:\n- `tenant_id` (UUID, required): ID of the tenant to delete\n\n**Notes**: \n- ⚠️ **DESTRUCTIVE OPERATION** - Deletes all tenant data\n- Only super admins can delete tenants\n- Cascades to organizations, users, and predictions\n- Use with extreme caution"
+					}
+				},
+				{
+					"name": "6. Get Tenant Statistics",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/tenants/{{tenant_id}}/stats",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "tenants", "{{tenant_id}}", "stats"]
+						},
+						"description": "**Purpose**: Get statistical information about a tenant\n\n**Access**: Super Admin only\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {super_admin_token}\n\n**Path Parameters**:\n- `tenant_id` (UUID, required): ID of the tenant\n\n**Response**: Statistical data including:\n- Number of organizations\n- Number of users\n- Number of predictions\n- Usage metrics\n\n**Notes**: \n- Useful for tenant analytics\n- Performance metrics included\n- Only super admins can access tenant stats"
+					}
+				}
+			]
+		},
+		{
+			"name": "🏛️ ORGANIZATIONS ENDPOINTS",
+			"description": "Organization management - Admin level access required",
+			"item": [
+				{
+					"name": "1. Create Organization",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Engineering Department\",\n  \"description\": \"Software engineering and development team\",\n  \"tenant_id\": \"{{tenant_id}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/organizations",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "organizations"]
+						},
+						"description": "**Purpose**: Create a new organization within a tenant\n\n**Access**: Super Admin, Tenant Admin, or Org Admin\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Body Parameters**:\n- `name` (string, required): Organization name\n- `description` (string, optional): Organization description\n- `tenant_id` (UUID, required): Parent tenant ID\n\n**Notes**: \n- Creates organization within specified tenant\n- Generates unique join token for invitations\n- Returns created organization with join token"
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    pm.collectionVariables.set('org_id', jsonData.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					]
+				},
+				{
+					"name": "2. List Organizations",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/organizations",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "organizations"]
+						},
+						"description": "**Purpose**: Get list of organizations based on user role\n\n**Access**: Role-based access control\n- Super Admin: All organizations\n- Tenant Admin: Organizations in their tenant\n- Org Admin: Organizations they manage\n- User: Organizations they belong to\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {token}\n\n**Query Parameters**: None\n\n**Notes**: \n- Results filtered by user permissions\n- Returns organization summaries\n- Includes user's role in each organization"
+					}
+				},
+				{
+					"name": "3. Get Organization Details",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/organizations/{{org_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "organizations", "{{org_id}}"]
+						},
+						"description": "**Purpose**: Get detailed information about a specific organization\n\n**Access**: Users with access to the organization\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {token}\n\n**Path Parameters**:\n- `org_id` (UUID, required): Organization ID\n\n**Notes**: \n- Returns detailed organization information\n- Includes join token for admins\n- 403 if user doesn't have access\n- 404 if organization not found"
+					}
+				},
+				{
+					"name": "4. Update Organization",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Engineering Department - Updated\",\n  \"description\": \"Updated description for engineering team\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/organizations/{{org_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "organizations", "{{org_id}}"]
+						},
+						"description": "**Purpose**: Update organization information\n\n**Access**: Organization admins only\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Path Parameters**:\n- `org_id` (UUID, required): Organization ID to update\n\n**Body Parameters**:\n- `name` (string, optional): New organization name\n- `description` (string, optional): New description\n\n**Notes**: \n- Only org admins can update organization\n- Partial updates supported\n- Returns updated organization information"
+					}
+				},
+				{
+					"name": "5. Delete Organization",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/organizations/{{org_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "organizations", "{{org_id}}"]
+						},
+						"description": "**Purpose**: Delete an organization and all associated data\n\n**Access**: Super Admin or Tenant Admin only\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Path Parameters**:\n- `org_id` (UUID, required): Organization ID to delete\n\n**Notes**: \n- ⚠️ **DESTRUCTIVE OPERATION** - Deletes all organization data\n- Removes all users from organization\n- Deletes all associated predictions\n- Only super/tenant admins can delete organizations"
+					}
+				},
+				{
+					"name": "6. Regenerate Join Token",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/organizations/{{org_id}}/regenerate-token",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "organizations", "{{org_id}}", "regenerate-token"]
+						},
+						"description": "**Purpose**: Generate a new join token for organization invitations\n\n**Access**: Organization admins only\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Path Parameters**:\n- `org_id` (UUID, required): Organization ID\n\n**Response**:\n- `join_token`: New invitation token\n- `expires_at`: Token expiration time\n\n**Notes**: \n- Invalidates previous join token\n- Use for sending organization invitations\n- Token has limited validity period"
+					}
+				},
+				{
+					"name": "7. Get Organization Users",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/organizations/{{org_id}}/users",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "organizations", "{{org_id}}", "users"]
+						},
+						"description": "**Purpose**: Get list of users in the organization\n\n**Access**: Organization members and admins\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {token}\n\n**Path Parameters**:\n- `org_id` (UUID, required): Organization ID\n\n**Response**: Array of user objects with roles\n\n**Notes**: \n- Shows all users in the organization\n- Includes user roles and status\n- Filtered based on viewer permissions"
+					}
+				},
+				{
+					"name": "8. Add Email to Whitelist",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"newuser@company.com\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/organizations/{{org_id}}/whitelist",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "organizations", "{{org_id}}", "whitelist"]
+						},
+						"description": "**Purpose**: Add an email to organization whitelist for join access\n\n**Access**: Organization admins only\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Path Parameters**:\n- `org_id` (UUID, required): Organization ID\n\n**Body Parameters**:\n- `email` (string, required): Email address to whitelist\n\n**Notes**: \n- Allows email to join organization via token\n- Email validation performed\n- Prevents duplicate entries"
+					}
+				},
+				{
+					"name": "9. Get Organization Whitelist",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/organizations/{{org_id}}/whitelist",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "organizations", "{{org_id}}", "whitelist"]
+						},
+						"description": "**Purpose**: Get list of whitelisted emails for the organization\n\n**Access**: Organization admins only\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Path Parameters**:\n- `org_id` (UUID, required): Organization ID\n\n**Response**: Array of whitelisted email addresses\n\n**Notes**: \n- Shows all emails allowed to join organization\n- Admin-only access for privacy\n- Useful for managing organization access"
+					}
+				},
+				{
+					"name": "10. Remove Email from Whitelist",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/organizations/{{org_id}}/whitelist/newuser@company.com",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "organizations", "{{org_id}}", "whitelist", "newuser@company.com"]
+						},
+						"description": "**Purpose**: Remove an email from organization whitelist\n\n**Access**: Organization admins only\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Path Parameters**:\n- `org_id` (UUID, required): Organization ID\n- `email` (string, required): Email address to remove\n\n**Notes**: \n- Removes email from join whitelist\n- Email will no longer be able to join via token\n- 404 if email not in whitelist"
+					}
+				}
+			]
+		},
+		{
+			"name": "👥 USERS ENDPOINTS",
+			"description": "User management - Admin level access for CRUD operations",
+			"item": [
+				{
+					"name": "1. Create User (Admin)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"admin.created@example.com\",\n  \"password\": \"AdminPassword123!\",\n  \"first_name\": \"Admin\",\n  \"last_name\": \"Created\",\n  \"role\": \"user\",\n  \"organization_id\": \"{{org_id}}\",\n  \"tenant_id\": \"{{tenant_id}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/users",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "users"]
+						},
+						"description": "**Purpose**: Create a new user (Admin operation)\n\n**Access**: Admins only (Super/Tenant/Org Admin)\n\n**Expected Response**: 201 Created\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Body Parameters**:\n- `email` (string, required): User's email address\n- `password` (string, required): User's password\n- `first_name` (string, required): User's first name\n- `last_name` (string, required): User's last name\n- `role` (string, optional): User role (default: 'user')\n- `organization_id` (UUID, optional): Organization assignment\n- `tenant_id` (UUID, optional): Tenant assignment\n\n**Notes**: \n- Different from public registration\n- Allows setting initial role and assignments\n- Admin-controlled user creation"
+					}
+				},
+				{
+					"name": "2. List Users",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/users",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "users"]
+						},
+						"description": "**Purpose**: Get list of users based on role-based access\n\n**Access**: Role-based filtering\n- Super Admin: All users\n- Tenant Admin: Users in their tenant\n- Org Admin: Users in their organizations\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {token}\n\n**Query Parameters**: None (filtering automatic)\n\n**Notes**: \n- Results filtered by user permissions\n- Returns user summaries (no sensitive data)\n- Includes role and organization info"
+					}
+				},
+				{
+					"name": "3. Get User Details",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/users/{{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "users", "{{user_id}}"]
+						},
+						"description": "**Purpose**: Get detailed information about a specific user\n\n**Access**: Permission-based access\n- Admins: Users they manage\n- Users: Their own profile only\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {token}\n\n**Path Parameters**:\n- `user_id` (UUID, required): User ID to retrieve\n\n**Notes**: \n- Returns detailed user information\n- 403 if insufficient permissions\n- 404 if user not found"
+					}
+				},
+				{
+					"name": "4. Update User (Admin)",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"first_name\": \"Updated\",\n  \"last_name\": \"Name\",\n  \"email\": \"updated.email@example.com\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/users/{{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "users", "{{user_id}}"]
+						},
+						"description": "**Purpose**: Update user information (Admin or self)\n\n**Access**: \n- Admins: Users they manage\n- Users: Their own profile only\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {token}\n\n**Path Parameters**:\n- `user_id` (UUID, required): User ID to update\n\n**Body Parameters**:\n- `first_name` (string, optional): New first name\n- `last_name` (string, optional): New last name\n- `email` (string, optional): New email address\n\n**Notes**: \n- Partial updates supported\n- Email uniqueness validated\n- Self-update or admin permissions required"
+					}
+				},
+				{
+					"name": "5. Delete User",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/users/{{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "users", "{{user_id}}"]
+						},
+						"description": "**Purpose**: Delete a user account\n\n**Access**: Admins only\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Path Parameters**:\n- `user_id` (UUID, required): User ID to delete\n\n**Notes**: \n- ⚠️ **DESTRUCTIVE OPERATION** - Deletes user account\n- Admin permissions required\n- Cannot delete own account\n- Removes user from all organizations"
+					}
+				},
+				{
+					"name": "6. Activate User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/users/{{user_id}}/activate",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "users", "{{user_id}}", "activate"]
+						},
+						"description": "**Purpose**: Activate a user account\n\n**Access**: Admins only\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Path Parameters**:\n- `user_id` (UUID, required): User ID to activate\n\n**Notes**: \n- Enables user account for login\n- Admin permissions required\n- User can access system after activation"
+					}
+				},
+				{
+					"name": "7. Deactivate User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/users/{{user_id}}/deactivate",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "users", "{{user_id}}", "deactivate"]
+						},
+						"description": "**Purpose**: Deactivate a user account\n\n**Access**: Admins only\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Path Parameters**:\n- `user_id` (UUID, required): User ID to deactivate\n\n**Notes**: \n- Disables user account login\n- Admin permissions required\n- User cannot access system when deactivated\n- Reversible with activate endpoint"
+					}
+				},
+				{
+					"name": "8. Update User Role",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"role\": \"org_admin\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/users/{{user_id}}/role",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "users", "{{user_id}}", "role"]
+						},
+						"description": "**Purpose**: Update a user's role\n\n**Access**: Admins only (higher role required)\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Path Parameters**:\n- `user_id` (UUID, required): User ID to update role\n\n**Body Parameters**:\n- `role` (string, required): New role (user, org_admin, tenant_admin, super_admin)\n\n**Notes**: \n- Can only assign roles equal or lower than your own\n- Super admin can assign any role\n- Role hierarchy: super_admin > tenant_admin > org_admin > user"
+					}
+				},
+				{
+					"name": "9. Get Current User Profile",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/users/profile",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "users", "profile"]
+						},
+						"description": "**Purpose**: Get current user's profile information\n\n**Access**: Any authenticated user (self)\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {token}\n\n**Response**: Current user's profile data\n\n**Notes**: \n- Returns own profile information\n- Includes role and organization details\n- Safe endpoint for profile views"
+					}
+				},
+				{
+					"name": "10. Update Current User Profile",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"first_name\": \"Updated\",\n  \"last_name\": \"Profile\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/users/profile",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "users", "profile"]
+						},
+						"description": "**Purpose**: Update current user's own profile\n\n**Access**: Any authenticated user (self)\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {token}\n\n**Body Parameters**:\n- `first_name` (string, optional): New first name\n- `last_name` (string, optional): New last name\n- `email` (string, optional): New email address\n\n**Notes**: \n- Users can update their own profile\n- Partial updates supported\n- Email uniqueness validated\n- Cannot change role or organization assignments"
+					}
+				},
+				{
+					"name": "11. Get Me (Alternative Profile)",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/users/me",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "users", "me"]
+						},
+						"description": "**Purpose**: Alternative endpoint to get current user information\n\n**Access**: Any authenticated user (self)\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {token}\n\n**Response**: Current user's information\n\n**Notes**: \n- Identical to /profile endpoint\n- Alternative naming convention\n- Moved from auth module to users module\n- Returns same data as /profile"
+					}
+				}
+			]
+		}
+	],
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{access_token}}",
+				"type": "string"
+			}
+		]
+	}
+}

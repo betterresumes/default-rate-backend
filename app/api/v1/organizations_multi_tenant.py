@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from typing import List, Optional
 import uuid
+import logging
 from datetime import datetime
 
 from ...core.database import (
@@ -11,19 +12,23 @@ from ...core.database import (
 )
 from ...schemas.schemas import (
     OrganizationCreate, OrganizationUpdate, OrganizationResponse,
-    OrganizationListResponse, WhitelistCreate, WhitelistResponse,
+    OrganizationListResponse, OrganizationDetailedResponse, OrgAdminInfo,
+    WhitelistCreate, WhitelistResponse,
     WhitelistListResponse, UserResponse, UserListResponse
 )
-from .auth_multi_tenant import (
-    require_super_admin, require_tenant_admin, require_org_admin,
-    get_current_active_user
+from .auth_multi_tenant import get_current_active_user
+from .auth_admin import (
+    require_super_admin, require_tenant_admin, require_org_admin
 )
 from ...utils.tenant_utils import (
     create_organization_slug, generate_join_token, 
     validate_organization_domain, is_email_whitelisted
 )
 
-router = APIRouter(prefix="/organizations", tags=["Organization Management"])
+# Configure logger
+logger = logging.getLogger(__name__)
+
+router = APIRouter(tags=["Organization Management"])
 
 @router.post("", response_model=OrganizationResponse)
 async def create_organization(
@@ -70,14 +75,6 @@ async def create_organization(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot create organization for inactive tenant"
             )
-        
-        # Check tenant organization limit
-        org_count = db.query(Organization).filter(Organization.tenant_id == tenant_id).count()
-        if tenant.max_organizations and org_count >= tenant.max_organizations:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Tenant has reached maximum organizations limit ({tenant.max_organizations})"
-            )
     
     # Validate domain if provided
     if org_data.domain:
@@ -116,10 +113,10 @@ async def create_organization(
         domain=org_data.domain,
         description=org_data.description,
         logo_url=org_data.logo_url,
-        max_users=org_data.max_users or 100,
         join_token=join_token,
         join_enabled=True,
-        default_role=org_data.default_role or "user",
+        default_role=org_data.default_role or "member",
+        max_users=org_data.max_users or 500,
         is_active=True,
         created_by=current_user.id,
         created_at=datetime.utcnow(),
@@ -132,101 +129,197 @@ async def create_organization(
     
     return OrganizationResponse.from_orm(new_organization)
 
-@router.get("", response_model=OrganizationListResponse)
+@router.get("/", response_model=OrganizationListResponse)
 async def list_organizations(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=100),
-    search: Optional[str] = Query(None),
-    tenant_id: Optional[str] = Query(None),
-    is_active: Optional[bool] = Query(None),
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(10, ge=1, le=100, description="Items per page"),
+    search: Optional[str] = Query(None, description="Search in name, domain, or description"),
+    is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    tenant_id: Optional[str] = Query(None, description="Filter by tenant ID (Super Admin only)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """List organizations based on user role and permissions."""
+    """
+    List organizations with role-based access control and pagination.
     
-    query = db.query(Organization)
-    
-    # Apply role-based filtering
-    if current_user.global_role == "super_admin":
-        # Super admin can see all organizations
-        if tenant_id:
-            query = query.filter(Organization.tenant_id == tenant_id)
-    elif current_user.global_role == "tenant_admin":
-        # Tenant admin can only see their tenant's organizations
-        if not current_user.tenant_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Tenant admin must belong to a tenant"
+    - **Super Admin**: Can see all organizations, optionally filter by tenant
+    - **Tenant Admin**: Can see only their tenant's organizations
+    - **Org Admin/Member**: Can see only their own organization
+    """
+    try:
+        # Calculate pagination
+        skip = (page - 1) * limit
+        
+        # Base query
+        query = db.query(Organization)
+        
+        # Apply role-based filtering
+        if current_user.global_role == "super_admin":
+            # Super admin can see all organizations
+            if tenant_id:
+                query = query.filter(Organization.tenant_id == tenant_id)
+        elif current_user.global_role == "tenant_admin":
+            # Tenant admin can only see their tenant's organizations
+            if not current_user.tenant_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Tenant admin must belong to a tenant"
+                )
+            query = query.filter(Organization.tenant_id == current_user.tenant_id)
+        else:
+            # Regular users can only see their own organization
+            if not current_user.organization_id:
+                return OrganizationListResponse(organizations=[], total=0, skip=skip, limit=limit)
+            query = query.filter(Organization.id == current_user.organization_id)
+        
+        # Apply search filter
+        if search:
+            query = query.filter(
+                or_(
+                    Organization.name.ilike(f"%{search}%"),
+                    Organization.domain.ilike(f"%{search}%"),
+                    Organization.description.ilike(f"%{search}%")
+                )
             )
-        query = query.filter(Organization.tenant_id == current_user.tenant_id)
-    else:
-        # Regular users can only see their own organization
-        if not current_user.organization_id:
-            return OrganizationListResponse(organizations=[], total=0, skip=skip, limit=limit)
-        query = query.filter(Organization.id == current_user.organization_id)
-    
-    # Apply search filter
-    if search:
-        query = query.filter(
-            or_(
-                Organization.name.ilike(f"%{search}%"),
-                Organization.domain.ilike(f"%{search}%"),
-                Organization.description.ilike(f"%{search}%")
-            )
+        
+        # Apply active filter
+        if is_active is not None:
+            query = query.filter(Organization.is_active == is_active)
+        
+        # Get total count
+        total = query.count()
+        
+        # Apply pagination
+        organizations = query.order_by(Organization.created_at.desc()).offset(skip).limit(limit).all()
+        
+        # Safely convert to response objects
+        organization_responses = []
+        for org in organizations:
+            try:
+                org_response = OrganizationResponse.from_orm(org)
+                organization_responses.append(org_response)
+            except Exception as e:
+                # Log the error but continue processing other organizations
+                logger.error(f"Error converting organization {org.id} to response: {str(e)}")
+                continue
+        
+        return OrganizationListResponse(
+            organizations=organization_responses,
+            total=total,
+            skip=skip,
+            limit=limit
         )
-    
-    # Apply active filter
-    if is_active is not None:
-        query = query.filter(Organization.is_active == is_active)
-    
-    # Get total count
-    total = query.count()
-    
-    # Apply pagination
-    organizations = query.order_by(Organization.created_at.desc()).offset(skip).limit(limit).all()
-    
-    return OrganizationListResponse(
-        organizations=[OrganizationResponse.from_orm(org) for org in organizations],
-        total=total,
-        skip=skip,
-        limit=limit
-    )
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        # Log unexpected errors and return user-friendly response
+        logger.error(f"Unexpected error in list_organizations: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while retrieving organizations. Please try again later."
+        )
 
-@router.get("/{org_id}", response_model=OrganizationResponse)
+@router.get("/{org_id}", response_model=OrganizationDetailedResponse)
 async def get_organization(
     org_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Get organization details."""
-    
-    organization = db.query(Organization).filter(Organization.id == org_id).first()
-    if not organization:
+    """Get organization details with org admin information."""
+    try:
+        # Get organization
+        organization = db.query(Organization).filter(Organization.id == org_id).first()
+        if not organization:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Organization not found"
+            )
+        
+        # Check access permissions
+        if current_user.global_role == "super_admin":
+            # Super admin can access any organization
+            pass
+        elif current_user.global_role == "tenant_admin":
+            # Tenant admin can access organizations in their tenant
+            if organization.tenant_id != current_user.tenant_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied to this organization"
+                )
+        else:
+            # Regular users can only access their own organization
+            if str(organization.id) != str(current_user.organization_id):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied to this organization"
+                )
+        
+        # Get organization admins
+        org_admins = db.query(User).filter(
+            and_(
+                User.organization_id == organization.id,
+                User.organization_role == "admin"
+            )
+        ).all()
+        
+        # Get user counts
+        total_users = db.query(User).filter(User.organization_id == organization.id).count()
+        active_users = db.query(User).filter(
+            and_(
+                User.organization_id == organization.id,
+                User.is_active == True
+            )
+        ).count()
+        
+        # Convert admins to response format
+        admin_list = []
+        for admin in org_admins:
+            admin_data = {
+                "user_id": str(admin.id),
+                "email": admin.email,
+                "full_name": admin.full_name,
+                "username": admin.username,
+                "is_active": admin.is_active,
+                "assigned_at": admin.updated_at or admin.created_at
+            }
+            admin_list.append(admin_data)
+        
+        # Create response data
+        response_data = {
+            "id": str(organization.id),
+            "tenant_id": str(organization.tenant_id) if organization.tenant_id else None,
+            "name": organization.name,
+            "slug": organization.slug,
+            "domain": organization.domain,
+            "description": organization.description,
+            "logo_url": organization.logo_url,
+            "max_users": organization.max_users,
+            "join_token": organization.join_token,
+            "join_enabled": organization.join_enabled,
+            "default_role": organization.default_role,
+            "is_active": organization.is_active,
+            "created_by": str(organization.created_by),
+            "created_at": organization.created_at,
+            "updated_at": organization.updated_at,
+            "join_created_at": organization.join_created_at,
+            "org_admins": admin_list,
+            "total_users": total_users,
+            "active_users": active_users,
+            "admin_count": len(admin_list)
+        }
+        
+        return response_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting organization details: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Organization not found"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while retrieving organization details"
         )
-    
-    # Check access permissions
-    if current_user.global_role == "super_admin":
-        # Super admin can access any organization
-        pass
-    elif current_user.global_role == "tenant_admin":
-        # Tenant admin can access organizations in their tenant
-        if organization.tenant_id != current_user.tenant_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied to this organization"
-            )
-    else:
-        # Regular users can only access their own organization
-        if str(organization.id) != str(current_user.organization_id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied to this organization"
-            )
-    
-    return OrganizationResponse.from_orm(organization)
 
 @router.put("/{org_id}", response_model=OrganizationResponse)
 async def update_organization(
@@ -336,7 +429,7 @@ async def delete_organization(
         users = db.query(User).filter(User.organization_id == org_id).all()
         for user in users:
             user.organization_id = None
-            user.organization_role = "user"
+            user.organization_role = None  # No org role when not in organization
     
     # Delete organization (this will cascade delete whitelist entries)
     db.delete(organization)
@@ -561,3 +654,189 @@ async def get_organization_users(
         skip=skip,
         limit=limit
     )
+
+@router.get("/{org_id}/details", response_model=OrganizationDetailedResponse)
+async def get_organization_details(
+    org_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Get detailed organization information including org admins.
+    
+    Returns:
+    - Basic organization information
+    - List of organization administrators
+    - User statistics (total users, active users)
+    """
+    try:
+        # Get organization
+        organization = db.query(Organization).filter(Organization.id == org_id).first()
+        if not organization:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Organization not found"
+            )
+        
+        # Check access permissions
+        if current_user.global_role == "super_admin":
+            # Super admin can access any organization
+            pass
+        elif current_user.global_role == "tenant_admin":
+            # Tenant admin can access organizations in their tenant
+            if organization.tenant_id != current_user.tenant_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied to this organization"
+                )
+        else:
+            # Regular users can only access their own organization
+            if str(organization.id) != str(current_user.organization_id):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied to this organization"
+                )
+        
+        # Get organization admins
+        org_admins = db.query(User).filter(
+            and_(
+                User.organization_id == organization.id,
+                User.organization_role == "admin",
+                User.is_active == True
+            )
+        ).all()
+        
+        # Get user statistics
+        total_users = db.query(User).filter(User.organization_id == organization.id).count()
+        active_users = db.query(User).filter(
+            and_(
+                User.organization_id == organization.id,
+                User.is_active == True
+            )
+        ).count()
+        
+        # Convert org admins to response format
+        org_admin_info = []
+        for admin in org_admins:
+            try:
+                admin_info = OrgAdminInfo(
+                    user_id=str(admin.id),
+                    email=admin.email,
+                    full_name=admin.full_name,
+                    username=admin.username,
+                    is_active=admin.is_active,
+                    assigned_at=admin.updated_at or admin.created_at
+                )
+                org_admin_info.append(admin_info)
+            except Exception as e:
+                logger.error(f"Error converting admin {admin.id} to response: {str(e)}")
+                continue
+        
+        # Create detailed response
+        org_dict = {
+            "id": str(organization.id),
+            "tenant_id": str(organization.tenant_id) if organization.tenant_id else None,
+            "name": organization.name,
+            "slug": organization.slug,
+            "domain": organization.domain,
+            "description": organization.description,
+            "logo_url": organization.logo_url,
+            "max_users": organization.max_users,
+            "join_token": organization.join_token,
+            "join_enabled": organization.join_enabled,
+            "default_role": organization.default_role,
+            "is_active": organization.is_active,
+            "created_by": str(organization.created_by),
+            "created_at": organization.created_at,
+            "updated_at": organization.updated_at,
+            "join_created_at": organization.join_created_at,
+            "org_admins": org_admin_info,
+            "total_users": total_users,
+            "active_users": active_users
+        }
+        
+        return OrganizationDetailedResponse(**org_dict)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting organization details: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while retrieving organization details"
+        )
+
+@router.get("/{org_id}/admins", response_model=List[OrgAdminInfo])
+async def get_organization_admins(
+    org_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Get list of organization administrators.
+    
+    Returns list of users with 'org_admin' role in the organization.
+    """
+    try:
+        # Get organization
+        organization = db.query(Organization).filter(Organization.id == org_id).first()
+        if not organization:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Organization not found"
+            )
+        
+        # Check access permissions
+        if current_user.global_role == "super_admin":
+            # Super admin can access any organization
+            pass
+        elif current_user.global_role == "tenant_admin":
+            # Tenant admin can access organizations in their tenant
+            if organization.tenant_id != current_user.tenant_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied to this organization"
+                )
+        else:
+            # Regular users can only access their own organization
+            if str(organization.id) != str(current_user.organization_id):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied to this organization"
+                )
+        
+        # Get organization admins
+        org_admins = db.query(User).filter(
+            and_(
+                User.organization_id == organization.id,
+                User.organization_role == "admin"
+            )
+        ).all()
+        
+        # Convert to response format
+        admin_responses = []
+        for admin in org_admins:
+            try:
+                admin_info = OrgAdminInfo(
+                    user_id=str(admin.id),
+                    email=admin.email,
+                    full_name=admin.full_name,
+                    username=admin.username,
+                    is_active=admin.is_active,
+                    assigned_at=admin.updated_at or admin.created_at
+                )
+                admin_responses.append(admin_info)
+            except Exception as e:
+                logger.error(f"Error converting admin {admin.id} to response: {str(e)}")
+                continue
+        
+        return admin_responses
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting organization admins: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while retrieving organization administrators"
+        )

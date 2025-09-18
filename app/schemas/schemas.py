@@ -9,14 +9,13 @@ import uuid
 # ========================================
 
 class GlobalRole(str, Enum):
-    USER = "user"
-    TENANT_ADMIN = "tenant_admin"
-    SUPER_ADMIN = "super_admin"
+    USER = "user"  # Normal user with no org till now
+    TENANT_ADMIN = "tenant_admin"  # Manage tenant and can access all org under that tenant only
+    SUPER_ADMIN = "super_admin"  # Project owner - full system access
 
 class OrganizationRole(str, Enum):
-    USER = "user"
-    MEMBER = "member"
-    ADMIN = "admin"
+    ADMIN = "admin"  # Org admin - manage only given org, user invite done by org admin
+    MEMBER = "member"  # Members - user which can access org
 
 class WhitelistStatus(str, Enum):
     ACTIVE = "active"
@@ -45,6 +44,9 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str = Field(..., min_length=8)
+    global_role: Optional[str] = "user"
+    first_name: Optional[str] = None  # Support separate first/last name
+    last_name: Optional[str] = None   # Support separate first/last name
     
     @validator('password')
     def validate_password(cls, v):
@@ -70,11 +72,10 @@ class UserResponse(BaseModel):
     username: Optional[str]
     full_name: Optional[str]
     global_role: str
-    organization_role: str
+    organization_role: Optional[str]  # Make this optional since users may not have org role initially
     organization_id: Optional[str]
     tenant_id: Optional[str]
     is_active: bool
-    is_verified: bool
     created_at: datetime
     last_login: Optional[datetime]
     
@@ -85,7 +86,7 @@ class UserResponse(BaseModel):
         return v
     
     class Config:
-        from_attributes = True
+        orm_mode = True
         from_attributes = True
 
 class UserListResponse(BaseModel):
@@ -104,8 +105,8 @@ class UserRoleUpdateResponse(BaseModel):
     full_name: Optional[str]
     old_global_role: str
     new_global_role: str
-    old_organization_role: str
-    new_organization_role: str
+    old_organization_role: Optional[str]
+    new_organization_role: Optional[str]
     updated_by: str
     updated_at: datetime
 
@@ -120,14 +121,13 @@ class TenantBase(BaseModel):
     logo_url: Optional[str] = None
 
 class TenantCreate(TenantBase):
-    max_organizations: Optional[int] = Field(50, ge=1, le=1000)
+    pass
 
 class TenantUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=2, max_length=100)
     domain: Optional[str] = None
     description: Optional[str] = None
     logo_url: Optional[str] = None
-    max_organizations: Optional[int] = Field(None, ge=1, le=1000)
     is_active: Optional[bool] = None
 
 class TenantResponse(BaseModel):
@@ -137,7 +137,6 @@ class TenantResponse(BaseModel):
     domain: Optional[str]
     description: Optional[str]
     logo_url: Optional[str]
-    max_organizations: int
     is_active: bool
     created_by: str
     created_at: datetime
@@ -150,7 +149,7 @@ class TenantResponse(BaseModel):
         return v
     
     class Config:
-        from_attributes = True
+        orm_mode = True
         from_attributes = True
 
 class TenantListResponse(BaseModel):
@@ -165,8 +164,11 @@ class TenantStatsResponse(BaseModel):
     total_organizations: int
     active_organizations: int
     total_users: int
-    max_organizations: int
     created_at: datetime
+    
+    class Config:
+        orm_mode = True
+        from_attributes = True
 
 # ========================================
 # ORGANIZATION SCHEMAS
@@ -180,8 +182,8 @@ class OrganizationBase(BaseModel):
 
 class OrganizationCreate(OrganizationBase):
     tenant_id: Optional[str] = None
-    max_users: Optional[int] = Field(100, ge=1, le=10000)
-    default_role: Optional[OrganizationRole] = OrganizationRole.USER
+    max_users: Optional[int] = Field(500, ge=1, le=10000)
+    default_role: Optional[OrganizationRole] = OrganizationRole.MEMBER
 
 class OrganizationUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=2, max_length=100)
@@ -219,7 +221,7 @@ class OrganizationResponse(BaseModel):
     
     class Config:
         from_attributes = True
-        from_attributes = True
+        orm_mode = True  # For compatibility with from_orm()
 
 class OrganizationListResponse(BaseModel):
     organizations: List[OrganizationResponse]
@@ -264,7 +266,7 @@ class WhitelistResponse(BaseModel):
     
     class Config:
         from_attributes = True
-        from_attributes = True
+        orm_mode = True  # For compatibility with from_orm()
 
 class WhitelistListResponse(BaseModel):
     whitelist: List[WhitelistResponse]
@@ -331,7 +333,7 @@ class CompanyResponse(BaseModel):
     
     class Config:
         from_attributes = True
-        from_attributes = True
+        orm_mode = True  # For compatibility with from_orm()
 
 class CompanyListResponse(BaseModel):
     companies: List[CompanyResponse]
@@ -384,7 +386,7 @@ class PredictionResponse(BaseModel):
     
     class Config:
         from_attributes = True
-        from_attributes = True
+        orm_mode = True  # For compatibility with from_orm()
 
 class PredictionListResponse(BaseModel):
     predictions: List[PredictionResponse]
@@ -547,3 +549,57 @@ class ErrorResponse(BaseModel):
     error: str
     message: str
     errors: Optional[List[dict]] = None
+
+class OrgAdminInfo(BaseModel):
+    """Schema for organization admin information."""
+    user_id: str
+    email: str
+    full_name: Optional[str]
+    username: Optional[str]
+    is_active: bool
+    assigned_at: datetime
+    
+    @validator('user_id', pre=True)
+    def convert_uuid_to_str(cls, v):
+        if v is not None:
+            return str(v)
+        return v
+    
+    class Config:
+        from_attributes = True
+        orm_mode = True
+
+class OrganizationDetailedResponse(BaseModel):
+    """Enhanced organization response with admin information."""
+    id: str
+    tenant_id: Optional[str]
+    name: str
+    slug: str
+    domain: Optional[str]
+    description: Optional[str]
+    logo_url: Optional[str]
+    max_users: int
+    join_token: str
+    join_enabled: bool
+    default_role: str
+    is_active: bool
+    created_by: str
+    created_at: datetime
+    updated_at: Optional[datetime]
+    join_created_at: datetime
+    
+    # Organization admin information
+    org_admins: List[OrgAdminInfo] = []
+    total_users: int = 0
+    active_users: int = 0
+    admin_count: int = 0
+    
+    @validator('id', 'tenant_id', 'created_by', pre=True)
+    def convert_uuid_to_str(cls, v):
+        if v is not None:
+            return str(v)
+        return v
+    
+    class Config:
+        from_attributes = True
+        orm_mode = True

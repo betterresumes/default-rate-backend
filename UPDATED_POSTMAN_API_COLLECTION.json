@@ -1,0 +1,842 @@
+{
+	"info": {
+		"_postman_id": "multi-tenant-api-collection-simplified",
+		"name": "🎯 Multi-Tenant Financial Risk API - SIMPLIFIED",
+		"description": "CLEAN API collection with streamlined tenant admin creation - NO CONFUSION, ONE API DOES EVERYTHING",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000",
+			"type": "string"
+		},
+		{
+			"key": "access_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "tenant_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "org_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "user_id",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "🔐 AUTHENTICATION ENDPOINTS",
+			"description": "Public authentication endpoints - no authentication required",
+			"item": [
+				{
+					"name": "1. Register User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"test.user@example.com\",\n  \"password\": \"TestPassword123!\",\n  \"first_name\": \"Test\",\n  \"last_name\": \"User\",\n  \"organization_id\": null\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/register",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "register"]
+						},
+						"description": "**Purpose**: Self-registration for new users\n\n**Access**: Public (no authentication required)\n\n**Expected Response**: 201 Created\n\n**Role Assignment**: All users start as 'user' role\n\n**Body Parameters**:\n- `email` (string, required): Valid email address\n- `password` (string, required): Strong password\n- `first_name` (string, required): User's first name\n- `last_name` (string, required): User's last name\n- `organization_id` (string, optional): Organization to join (if applicable)\n\n**Notes**: \n- Creates user with default role 'user'\n- Password must meet security requirements\n- Email must be unique\n- Role promotions done by admins later"
+					}
+				},
+				{
+					"name": "2. Login User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"test.user@example.com\",\n  \"password\": \"TestPassword123!\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/login",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "login"]
+						},
+						"description": "**Purpose**: Authenticate user and get JWT tokens\n\n**Access**: Public (no authentication required)\n\n**Expected Response**: 200 OK\n\n**Body Parameters**:\n- `email` (string, required): User's email\n- `password` (string, required): User's password\n\n**Response**:\n- `access_token`: JWT token for API access\n- `refresh_token`: Token for refreshing access token\n- `token_type`: Always 'bearer'\n- `user`: User information including role\n\n**Notes**: \n- Save the access_token for subsequent requests\n- Access token expires in 30 minutes\n- Use refresh token to get new access token\n- Check user role for available features"
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    pm.collectionVariables.set('access_token', jsonData.access_token);",
+									"    pm.collectionVariables.set('user_id', jsonData.user.id);",
+									"    console.log('Login successful. User role:', jsonData.user.global_role);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					]
+				},
+				{
+					"name": "3. Join Organization",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"newuser@example.com\",\n  \"password\": \"TestPassword123!\",\n  \"first_name\": \"New\",\n  \"last_name\": \"User\",\n  \"join_token\": \"org-join-token-here\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/join",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "join"]
+						},
+						"description": "**Purpose**: Register and automatically join an organization using invite token\n\n**Access**: Public (no authentication required)\n\n**Expected Response**: 201 Created\n\n**Body Parameters**:\n- `email` (string, required): Valid email address\n- `password` (string, required): Strong password\n- `first_name` (string, required): User's first name\n- `last_name` (string, required): User's last name\n- `join_token` (string, required): Organization invitation token\n\n**Notes**: \n- Creates user and adds to organization in one step\n- Join token must be valid and not expired\n- Email may need to be on organization whitelist\n- User becomes 'member' of the organization"
+					}
+				},
+				{
+					"name": "4. Refresh Token",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"refresh_token\": \"your-refresh-token-here\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/refresh",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "refresh"]
+						},
+						"description": "**Purpose**: Get new access token using refresh token\n\n**Access**: Public (no authentication required)\n\n**Expected Response**: 200 OK\n\n**Body Parameters**:\n- `refresh_token` (string, required): Valid refresh token from login\n\n**Response**:\n- `access_token`: New JWT token for API access\n- `token_type`: Always 'bearer'\n\n**Notes**: \n- Use when access token expires\n- Refresh token has longer expiry than access token\n- Updates the access_token variable automatically"
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    pm.collectionVariables.set('access_token', jsonData.access_token);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					]
+				},
+				{
+					"name": "5. Logout User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/logout",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "logout"]
+						},
+						"description": "**Purpose**: Logout user and invalidate tokens\n\n**Access**: Requires authentication (Bearer token)\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {access_token}\n\n**Notes**: \n- Invalidates current session\n- Client should clear stored tokens\n- No body parameters required"
+					}
+				}
+			]
+		},
+		{
+			"name": "🏢 TENANT MANAGEMENT (SIMPLIFIED)",
+			"description": "Essential tenant management APIs - Super Admin access only",
+			"item": [
+				{
+					"name": "1. List All Tenants",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/tenants",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "tenants"]
+						},
+						"description": "**Purpose**: Get list of all tenants in the system\n\n**Access**: Super Admin only\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {super_admin_token}\n\n**Response**: Array of tenant objects with:\n- Tenant ID, name, slug, domain\n- Admin assignments\n- Organization count\n- Creation details\n\n**Notes**: \n- View all tenants for management\n- Includes admin assignment info\n- Useful for tenant overview"
+					}
+				},
+				{
+					"name": "2. Get Tenant Details",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/tenants/{{tenant_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "tenants", "{{tenant_id}}"]
+						},
+						"description": "**Purpose**: Get detailed information about a specific tenant\n\n**Access**: Super Admin only\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {super_admin_token}\n\n**Path Parameters**:\n- `tenant_id` (UUID, required): ID of the tenant\n\n**Response**: Detailed tenant information including:\n- Basic tenant info\n- Assigned administrators\n- Organizations within tenant\n- Statistics and metrics\n\n**Notes**: \n- Complete tenant details\n- Shows admin assignments\n- Includes organization hierarchy"
+					}
+				},
+				{
+					"name": "3. Get Tenant Admins",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/tenants/{{tenant_id}}/admins",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "tenants", "{{tenant_id}}", "admins"]
+						},
+						"description": "**Purpose**: Get list of all tenant admins for a specific tenant\n\n**Access**: Super Admin only\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {super_admin_token}\n\n**Path Parameters**:\n- `tenant_id` (UUID, required): ID of the tenant\n\n**Response**: Array of tenant admin users\n\n**Notes**: \n- Shows all users with 'tenant_admin' role for this tenant\n- Includes admin user details and assignment info\n- Useful for admin management"
+					}
+				}
+			]
+		},
+		{
+			"name": "🏛️ ORGANIZATIONS ENDPOINTS (UPDATED)",
+			"description": "Organization management with proper tenant admin scoping - Multi-role access",
+			"item": [
+				{
+					"name": "1. Create Organization",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Engineering Department\",\n  \"description\": \"Software engineering and development team\",\n  \"tenant_id\": \"{{tenant_id}}\",\n  \"max_users\": 250\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/organizations",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "organizations"]
+						},
+						"description": "**Purpose**: Create a new organization within a tenant\n\n**Access**: Multi-role with proper scoping\n- **Super Admin**: Can create organizations for any tenant\n- **Tenant Admin**: Can create organizations within their tenant only\n- **Org Admin**: Cannot create organizations\n\n**Expected Response**: 200 OK\n\n**UPDATED BEHAVIOR**: Proper tenant admin scoping implemented\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Body Parameters**:\n- `name` (string, required): Organization name\n- `description` (string, optional): Organization description\n- `tenant_id` (UUID, conditional): Parent tenant ID\n  - Super Admin: Can specify any tenant_id or omit for standalone org\n  - Tenant Admin: Automatically uses their tenant_id (ignores provided value)\n- `max_users` (int, optional): Maximum users allowed (default: 500)\n\n**Real-World Usage**:\n- Super Admin creates tenant, then assigns tenant admin\n- Tenant Admin creates departments within their company\n- Each organization gets unique join token\n\n**Notes**: \n- Generates unique join token for invitations\n- Returns created organization with join token\n- Tenant admins are restricted to their tenant scope"
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    pm.collectionVariables.set('org_id', jsonData.id);",
+									"    console.log('Organization created. ID:', jsonData.id);",
+									"    console.log('Join token:', jsonData.join_token);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					]
+				},
+				{
+					"name": "2. List Organizations (SCOPED)",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/organizations",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "organizations"]
+						},
+						"description": "**Purpose**: Get list of organizations with role-based filtering\n\n**Access**: Multi-role with automatic scoping\n- **Super Admin**: All organizations across all tenants\n- **Tenant Admin**: Only organizations within their tenant\n- **Org Admin**: Organizations they manage\n- **User**: Organizations they belong to\n\n**Expected Response**: 200 OK\n\n**UPDATED BEHAVIOR**: Proper tenant admin scoping implemented\n\n**Headers**:\n- `Authorization`: Bearer {token}\n\n**Query Parameters**: \n- Results automatically filtered by user role and permissions\n- No manual tenant filtering needed for tenant admins\n\n**Real-World Usage**:\n- Tenant Admin sees all departments in their company\n- Org Admin sees only their specific departments\n- Regular users see only their assigned organization\n\n**Notes**: \n- Results filtered by user permissions automatically\n- Returns organization summaries\n- Includes user's role in each organization\n- Tenant admins get full visibility within their tenant"
+					}
+				},
+				{
+					"name": "3. Get Organization Details",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/organizations/{{org_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "organizations", "{{org_id}}"]
+						},
+						"description": "**Purpose**: Get detailed information about a specific organization\n\n**Access**: Users with access to the organization\n- **Super Admin**: Any organization\n- **Tenant Admin**: Organizations in their tenant\n- **Org Admin/Members**: Organizations they belong to\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {token}\n\n**Path Parameters**:\n- `org_id` (UUID, required): Organization ID\n\n**Notes**: \n- Returns detailed organization information\n- Includes join token for admins\n- 403 if user doesn't have access\n- 404 if organization not found\n- Tenant admins can access any org in their tenant"
+					}
+				},
+				{
+					"name": "4. Update Organization",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Engineering Department - Updated\",\n  \"description\": \"Updated description for engineering team\",\n  \"max_users\": 300\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/organizations/{{org_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "organizations", "{{org_id}}"]
+						},
+						"description": "**Purpose**: Update organization information\n\n**Access**: Organization administrators with proper scoping\n- **Super Admin**: Any organization\n- **Tenant Admin**: Organizations in their tenant\n- **Org Admin**: Only their assigned organization\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Path Parameters**:\n- `org_id` (UUID, required): Organization ID to update\n\n**Body Parameters**:\n- `name` (string, optional): New organization name\n- `description` (string, optional): New description\n- `max_users` (int, optional): New maximum user limit\n\n**Notes**: \n- Partial updates supported\n- Returns updated organization information\n- Tenant admins can update any org in their tenant"
+					}
+				},
+				{
+					"name": "5. Delete Organization",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/organizations/{{org_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "organizations", "{{org_id}}"]
+						},
+						"description": "**Purpose**: Delete an organization and all associated data\n\n**Access**: High-level administrators only\n- **Super Admin**: Any organization\n- **Tenant Admin**: Organizations in their tenant\n- **Org Admin**: Cannot delete organizations\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Path Parameters**:\n- `org_id` (UUID, required): Organization ID to delete\n\n**Notes**: \n- ⚠️ **DESTRUCTIVE OPERATION** - Deletes all organization data\n- Removes all users from organization\n- Deletes all associated predictions\n- Only super/tenant admins can delete organizations\n- Tenant admins limited to their tenant scope"
+					}
+				},
+				{
+					"name": "6. Regenerate Join Token",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/organizations/{{org_id}}/regenerate-token",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "organizations", "{{org_id}}", "regenerate-token"]
+						},
+						"description": "**Purpose**: Generate a new join token for organization invitations\n\n**Access**: Organization administrators\n- **Super Admin**: Any organization\n- **Tenant Admin**: Organizations in their tenant\n- **Org Admin**: Their assigned organization\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Path Parameters**:\n- `org_id` (UUID, required): Organization ID\n\n**Response**:\n- `join_token`: New invitation token\n- `expires_at`: Token expiration time\n\n**Notes**: \n- Invalidates previous join token\n- Use for sending organization invitations\n- Token has limited validity period\n- Tenant admins can regenerate for any org in their tenant"
+					}
+				},
+				{
+					"name": "7. Get Organization Users",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/organizations/{{org_id}}/users",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "organizations", "{{org_id}}", "users"]
+						},
+						"description": "**Purpose**: Get list of users in the organization\n\n**Access**: Organization members and administrators\n- **Super Admin**: Any organization\n- **Tenant Admin**: Organizations in their tenant\n- **Org Admin/Members**: Their organization\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {token}\n\n**Path Parameters**:\n- `org_id` (UUID, required): Organization ID\n\n**Response**: Array of user objects with roles\n\n**Notes**: \n- Shows all users in the organization\n- Includes user roles and status\n- Filtered based on viewer permissions\n- Tenant admins can view users across all orgs in their tenant"
+					}
+				},
+				{
+					"name": "8. Add Email to Whitelist",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"newuser@company.com\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/organizations/{{org_id}}/whitelist",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "organizations", "{{org_id}}", "whitelist"]
+						},
+						"description": "**Purpose**: Add an email to organization whitelist for join access\n\n**Access**: Organization administrators\n- **Super Admin**: Any organization\n- **Tenant Admin**: Organizations in their tenant\n- **Org Admin**: Their assigned organization\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Path Parameters**:\n- `org_id` (UUID, required): Organization ID\n\n**Body Parameters**:\n- `email` (string, required): Email address to whitelist\n\n**Notes**: \n- Allows email to join organization via token\n- Email validation performed\n- Prevents duplicate entries\n- Tenant admins can manage whitelists for all orgs in their tenant"
+					}
+				},
+				{
+					"name": "9. Get Organization Whitelist",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/organizations/{{org_id}}/whitelist",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "organizations", "{{org_id}}", "whitelist"]
+						},
+						"description": "**Purpose**: Get list of whitelisted emails for the organization\n\n**Access**: Organization administrators\n- **Super Admin**: Any organization\n- **Tenant Admin**: Organizations in their tenant\n- **Org Admin**: Their assigned organization\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Path Parameters**:\n- `org_id` (UUID, required): Organization ID\n\n**Response**: Array of whitelisted email addresses\n\n**Notes**: \n- Shows all emails allowed to join organization\n- Admin-only access for privacy\n- Useful for managing organization access\n- Tenant admins can view whitelists for all orgs in their tenant"
+					}
+				},
+				{
+					"name": "10. Remove Email from Whitelist",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/organizations/{{org_id}}/whitelist/newuser@company.com",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "organizations", "{{org_id}}", "whitelist", "newuser@company.com"]
+						},
+						"description": "**Purpose**: Remove an email from organization whitelist\n\n**Access**: Organization administrators\n- **Super Admin**: Any organization\n- **Tenant Admin**: Organizations in their tenant\n- **Org Admin**: Their assigned organization\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Path Parameters**:\n- `org_id` (UUID, required): Organization ID\n- `email` (string, required): Email address to remove\n\n**Notes**: \n- Removes email from join whitelist\n- Email will no longer be able to join via token\n- 404 if email not in whitelist\n- Tenant admins can manage whitelists for all orgs in their tenant"
+					}
+				}
+			]
+		},
+		{
+			"name": "👥 USERS ENDPOINTS (UPDATED)",
+			"description": "User management with proper tenant admin scoping - Multi-role access for CRUD operations",
+			"item": [
+				{
+					"name": "1. Create User (Admin)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"admin.created@example.com\",\n  \"password\": \"AdminPassword123!\",\n  \"first_name\": \"Admin\",\n  \"last_name\": \"Created\",\n  \"role\": \"user\",\n  \"organization_id\": \"{{org_id}}\",\n  \"tenant_id\": \"{{tenant_id}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/users",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "users"]
+						},
+						"description": "**Purpose**: Create a new user (Admin operation)\n\n**Access**: Multi-role with proper scoping\n- **Super Admin**: Can create users anywhere\n- **Tenant Admin**: Can create users within their tenant organizations\n- **Org Admin**: Can create users within their organization\n\n**Expected Response**: 201 Created\n\n**UPDATED BEHAVIOR**: Proper tenant admin scoping implemented\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Body Parameters**:\n- `email` (string, required): User's email address\n- `password` (string, required): User's password\n- `first_name` (string, required): User's first name\n- `last_name` (string, required): User's last name\n- `role` (string, optional): User role (default: 'user')\n- `organization_id` (UUID, optional): Organization assignment\n- `tenant_id` (UUID, optional): Tenant assignment\n\n**Role Assignment Rules**:\n- **Super Admin**: Can assign any role, any tenant/organization\n- **Tenant Admin**: Can assign roles within their tenant scope\n- **Org Admin**: Can only assign 'user' or 'member' roles within their org\n\n**Real-World Usage**:\n- Tenant Admin creates department heads and assigns them as org admins\n- Org Admin creates team members and assigns them as members\n- Different from public registration (more control)\n\n**Notes**: \n- Different from public registration\n- Allows setting initial role and assignments\n- Admin-controlled user creation with scope validation\n- Tenant admins restricted to their tenant organizations"
+					}
+				},
+				{
+					"name": "2. List Users (SCOPED)",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/users",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "users"]
+						},
+						"description": "**Purpose**: Get list of users with role-based filtering\n\n**Access**: Multi-role with automatic scoping\n- **Super Admin**: All users across all tenants\n- **Tenant Admin**: Users within their tenant (all organizations)\n- **Org Admin**: Users within their organizations\n- **Members/Users**: Limited visibility\n\n**Expected Response**: 200 OK\n\n**UPDATED BEHAVIOR**: Proper tenant admin scoping implemented\n\n**Headers**:\n- `Authorization`: Bearer {token}\n\n**Query Parameters**: \n- Results automatically filtered by user role and permissions\n- No manual filtering needed\n\n**Filtering Logic**:\n- **Super Admin**: All users in system\n- **Tenant Admin**: All users in organizations within their tenant\n- **Org Admin**: Users in organizations they manage\n- **Regular User**: Very limited visibility (maybe just their own profile)\n\n**Real-World Usage**:\n- Tenant Admin can see all employees across all departments in their company\n- Org Admin can see only their department employees\n- Useful for user management and reporting\n\n**Notes**: \n- Results filtered by user permissions automatically\n- Returns user summaries (no sensitive data)\n- Includes role and organization info\n- Tenant admin gets company-wide visibility"
+					}
+				},
+				{
+					"name": "3. Get User Details",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/users/{{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "users", "{{user_id}}"]
+						},
+						"description": "**Purpose**: Get detailed information about a specific user\n\n**Access**: Permission-based access with tenant scoping\n- **Super Admin**: Any user\n- **Tenant Admin**: Users within their tenant\n- **Org Admin**: Users they manage\n- **Users**: Their own profile only\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {token}\n\n**Path Parameters**:\n- `user_id` (UUID, required): User ID to retrieve\n\n**Notes**: \n- Returns detailed user information\n- 403 if insufficient permissions\n- 404 if user not found\n- Tenant admins can view any user in their tenant\n- Self-access always allowed"
+					}
+				},
+				{
+					"name": "4. Update User (Admin)",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"first_name\": \"Updated\",\n  \"last_name\": \"Name\",\n  \"email\": \"updated.email@example.com\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/users/{{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "users", "{{user_id}}"]
+						},
+						"description": "**Purpose**: Update user information (Admin or self)\n\n**Access**: Role-based with tenant scoping\n- **Super Admin**: Any user\n- **Tenant Admin**: Users within their tenant\n- **Org Admin**: Users they manage\n- **Users**: Their own profile only\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {token}\n\n**Path Parameters**:\n- `user_id` (UUID, required): User ID to update\n\n**Body Parameters**:\n- `first_name` (string, optional): New first name\n- `last_name` (string, optional): New last name\n- `email` (string, optional): New email address\n\n**Notes**: \n- Partial updates supported\n- Email uniqueness validated\n- Self-update or admin permissions required\n- Tenant admins can update any user in their tenant\n- Role changes require separate endpoint"
+					}
+				},
+				{
+					"name": "5. Delete User",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/users/{{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "users", "{{user_id}}"]
+						},
+						"description": "**Purpose**: Delete a user account\n\n**Access**: High-level administrators only\n- **Super Admin**: Any user\n- **Tenant Admin**: Users within their tenant\n- **Org Admin**: Limited delete permissions\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Path Parameters**:\n- `user_id` (UUID, required): User ID to delete\n\n**Notes**: \n- ⚠️ **DESTRUCTIVE OPERATION** - Deletes user account\n- Admin permissions required\n- Cannot delete own account\n- Removes user from all organizations\n- Tenant admins can delete users within their tenant scope"
+					}
+				},
+				{
+					"name": "6. Activate User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/users/{{user_id}}/activate",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "users", "{{user_id}}", "activate"]
+						},
+						"description": "**Purpose**: Activate a user account\n\n**Access**: Administrators with proper scoping\n- **Super Admin**: Any user\n- **Tenant Admin**: Users within their tenant\n- **Org Admin**: Users they manage\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Path Parameters**:\n- `user_id` (UUID, required): User ID to activate\n\n**Notes**: \n- Enables user account for login\n- Admin permissions required\n- User can access system after activation\n- Tenant admins can activate users within their tenant"
+					}
+				},
+				{
+					"name": "7. Deactivate User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/users/{{user_id}}/deactivate",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "users", "{{user_id}}", "deactivate"]
+						},
+						"description": "**Purpose**: Deactivate a user account\n\n**Access**: Administrators with proper scoping\n- **Super Admin**: Any user\n- **Tenant Admin**: Users within their tenant\n- **Org Admin**: Users they manage\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Path Parameters**:\n- `user_id` (UUID, required): User ID to deactivate\n\n**Notes**: \n- Disables user account login\n- Admin permissions required\n- User cannot access system when deactivated\n- Reversible with activate endpoint\n- Tenant admins can deactivate users within their tenant"
+					}
+				},
+				{
+					"name": "8. Update User Role (ENHANCED)",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"role\": \"org_admin\",\n  \"organization_id\": \"{{org_id}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/users/{{user_id}}/role",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "users", "{{user_id}}", "role"]
+						},
+						"description": "**Purpose**: Update a user's role with enhanced tenant admin support\n\n**Access**: Role-based with hierarchy validation\n- **Super Admin**: Can assign any role to anyone\n- **Tenant Admin**: Can assign roles within their tenant scope\n  - Can promote users to org_admin for organizations in their tenant\n  - Cannot assign tenant_admin or super_admin roles\n- **Org Admin**: Limited role assignment within their organization\n\n**Expected Response**: 200 OK\n\n**ENHANCED BEHAVIOR**: Proper tenant admin role assignment\n\n**Headers**:\n- `Authorization`: Bearer {admin_token}\n\n**Path Parameters**:\n- `user_id` (UUID, required): User ID to update role\n\n**Body Parameters**:\n- `role` (string, required): New role (user, org_admin, tenant_admin, super_admin)\n- `organization_id` (UUID, conditional): Required when assigning org_admin role\n\n**Role Assignment Rules**:\n- **Super Admin**: Can assign any role anywhere\n- **Tenant Admin**: \n  - Can assign org_admin to users for organizations in their tenant\n  - Can assign member/user roles\n  - Cannot assign tenant_admin or super_admin\n- **Org Admin**: Can assign member/user roles within their org\n\n**Real-World Workflow**:\n1. Tenant Admin promotes department head to org_admin\n2. Org Admin invites and manages team members\n3. Clear hierarchy: super_admin > tenant_admin > org_admin > user\n\n**Notes**: \n- Can only assign roles equal or lower than your own\n- Role hierarchy validation enforced\n- Tenant admins crucial for scaling admin duties\n- Organization assignment required for org_admin role"
+					}
+				},
+				{
+					"name": "9. Get Current User Profile",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/users/profile",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "users", "profile"]
+						},
+						"description": "**Purpose**: Get current user's profile information\n\n**Access**: Any authenticated user (self)\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {token}\n\n**Response**: Current user's profile data including:\n- Basic profile info (name, email, etc.)\n- Role information (global_role, organization_role)\n- Tenant and organization associations\n- Permissions summary\n\n**Role Information Returned**:\n- `global_role`: super_admin, tenant_admin, or user\n- `organization_role`: admin, member, or null\n- `tenant_id`: Associated tenant (for tenant admins)\n- `organization_id`: Associated organization\n\n**Notes**: \n- Returns own profile information\n- Includes role and organization details\n- Safe endpoint for profile views\n- Useful for UI role-based feature display"
+					}
+				},
+				{
+					"name": "10. Update Current User Profile",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"first_name\": \"Updated\",\n  \"last_name\": \"Profile\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/users/profile",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "users", "profile"]
+						},
+						"description": "**Purpose**: Update current user's own profile\n\n**Access**: Any authenticated user (self)\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {token}\n\n**Body Parameters**:\n- `first_name` (string, optional): New first name\n- `last_name` (string, optional): New last name\n- `email` (string, optional): New email address\n\n**Notes**: \n- Users can update their own profile\n- Partial updates supported\n- Email uniqueness validated\n- Cannot change role or organization assignments\n- Role changes must be done by administrators"
+					}
+				},
+				{
+					"name": "11. Get Me (Alternative Profile)",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/users/me",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "users", "me"]
+						},
+						"description": "**Purpose**: Alternative endpoint to get current user information\n\n**Access**: Any authenticated user (self)\n\n**Expected Response**: 200 OK\n\n**Headers**:\n- `Authorization`: Bearer {token}\n\n**Response**: Current user's information\n\n**Notes**: \n- Identical to /profile endpoint\n- Alternative naming convention\n- Moved from auth module to users module\n- Returns same data as /profile\n- Some APIs prefer /me endpoint naming"
+					}
+				}
+			]
+		},
+		{
+			"name": "🎯 TENANT ADMIN CREATION (BEST PRACTICE)",
+			"description": "THE ONLY API YOU NEED - Creates tenant + admin in one atomic operation",
+			"item": [
+				{
+					"name": "🚀 Create Tenant with Admin (RECOMMENDED)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"tenant_name\": \"HDFC Bank\",\n  \"tenant_description\": \"HDFC Bank Financial Services\",\n  \"tenant_domain\": \"hdfc.com\",\n  \"admin_email\": \"admin@hdfc.com\",\n  \"admin_password\": \"HDFCAdmin123!\",\n  \"admin_first_name\": \"HDFC\",\n  \"admin_last_name\": \"Administrator\",\n  \"admin_username\": \"hdfc_admin\",\n  \"create_default_org\": true,\n  \"default_org_name\": \"HDFC Bank - Main Organization\",\n  \"default_org_description\": \"Primary organization for HDFC Bank\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/tenant-admin/create-tenant-with-admin",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "tenant-admin", "create-tenant-with-admin"]
+						},
+						"description": "**🎯 THE ONLY API YOU NEED FOR TENANT CREATION!**\n\n**Purpose**: Create tenant and admin user in ONE atomic operation\n\n**Access**: Super Admin only\n\n**Expected Response**: 201 Created\n\n**✅ This replaces all multi-step processes:**\n- ❌ Create tenant → Assign admin (OLD WAY)\n- ✅ Create tenant + admin (NEW WAY)\n\n**For your HDFC Bank case:**\n- Creates HDFC Bank tenant\n- Creates admin@hdfc.com as tenant admin\n- Assigns them to HDFC Bank tenant\n- Creates default organization\n- ALL IN ONE TRANSACTION!\n\n**Headers**:\n- `Authorization`: Bearer {super_admin_token}\n\n**Body Parameters**:\n- `tenant_name` (string, required): \"HDFC Bank\"\n- `tenant_description` (string, optional): Description\n- `tenant_domain` (string, optional): \"hdfc.com\"\n- `admin_email` (string, required): \"admin@hdfc.com\"\n- `admin_password` (string, required): Strong password\n- `admin_first_name` (string, required): \"HDFC\"\n- `admin_last_name` (string, required): \"Administrator\"\n- `admin_username` (string, optional): Auto-generated if not provided\n- `create_default_org` (boolean, optional): true (recommended)\n- `default_org_name` (string, optional): Organization name\n- `default_org_description` (string, optional): Org description\n\n**Response includes**:\n- ✅ Tenant information (ID, name, slug, domain)\n- ✅ Admin user information (ID, email, username)\n- ✅ Default organization (if created)\n- ✅ Success confirmation\n\n**Benefits**:\n- 🚀 Single API call instead of multiple steps\n- 🔒 Atomic transaction (all or nothing)\n- 🎯 No confusion about which API to call\n- 🛡️ Handles username conflicts automatically\n- 🏢 Creates complete tenant structure\n\n**Error Handling**:\n- If email exists → Error with clear message\n- If tenant name exists → Error with suggestion\n- If any step fails → Everything rolls back\n- Username conflicts → Auto-generates unique username\n\n**Next Steps After This API**:\n1. Login as the created admin user\n2. Start creating organizations/users within the tenant\n3. No additional setup needed!"
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201 || pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    pm.collectionVariables.set('tenant_id', jsonData.tenant_id);",
+									"    pm.collectionVariables.set('admin_user_id', jsonData.admin_user_id);",
+									"    pm.collectionVariables.set('default_org_id', jsonData.default_org_id);",
+									"    console.log('🎉 SUCCESS: Complete tenant setup created!');",
+									"    console.log('🏢 Tenant:', jsonData.tenant_name, '(' + jsonData.tenant_id + ')');",
+									"    console.log('👨‍💼 Admin:', jsonData.admin_email, '(' + jsonData.admin_user_id + ')');",
+									"    console.log('🏛️ Org:', jsonData.default_org_name, '(' + jsonData.default_org_id + ')');",
+									"    console.log('');",
+									"    console.log('✅ Ready to use! Admin can now login and manage the tenant.');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					]
+				},
+				{
+					"name": "🔧 Fix Existing Setup (Your Current Case)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_email\": \"admin@hdfc.com\",\n  \"tenant_id\": \"19c27efd-bbcb-48f8-9f0e-15408c681229\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/tenant-admin/assign-existing-user",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "tenant-admin", "assign-existing-user"]
+						},
+						"description": "**🔧 FIXES YOUR CURRENT HDFC BANK SITUATION**\n\n**Purpose**: Connect existing tenant with existing user\n\n**Access**: Super Admin only\n\n**Expected Response**: 200 OK\n\n**Your specific case:**\n- ✅ HDFC Bank tenant exists: \"19c27efd-bbcb-48f8-9f0e-15408c681229\"\n- ✅ admin@hdfc.com user exists: \"7610be15-0827-4164-92d3-0094276acd66\"\n- ❌ They're not connected (your problem)\n- ✅ This API fixes that connection!\n\n**After this API call:**\n1. admin@hdfc.com becomes tenant admin for HDFC Bank\n2. User role changes to 'tenant_admin'\n3. User gets associated with HDFC Bank tenant\n4. admin@hdfc.com can login and create organizations\n5. HDFC Bank tenant will show admin in admins list\n\n**Headers**:\n- `Authorization`: Bearer {super_admin_token}\n\n**Body Parameters**:\n- `user_email`: \"admin@hdfc.com\" (your existing user)\n- `tenant_id`: \"19c27efd-bbcb-48f8-9f0e-15408c681229\" (your HDFC Bank tenant)\n\n**Response includes**:\n- ✅ User information (ID, email, username)\n- ✅ Tenant information (ID, name)\n- ✅ Role change details (previous → new)\n- ✅ Success confirmation\n\n**What happens:**\n- User role: 'user' → 'tenant_admin'\n- Tenant association: none → HDFC Bank\n- Permissions: basic → tenant management\n\n**Next steps after this:**\n1. Login as admin@hdfc.com\n2. Create organizations for HDFC Bank\n3. Manage users within the tenant\n\n**Note**: For NEW tenants, use the atomic creation API instead!"
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    console.log('🔧 FIXED: Tenant admin assignment completed!');",
+									"    console.log('👤 User:', jsonData.user_email);",
+									"    console.log('🏢 Tenant:', jsonData.tenant_name);",
+									"    console.log('📊 Role Change:', jsonData.previous_role, '→', jsonData.new_role);",
+									"    console.log('✅ admin@hdfc.com is now tenant admin for HDFC Bank!');",
+									"    console.log('🚀 Next: Login as admin@hdfc.com to create organizations.');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					]
+				}
+			]
+		}
+	],
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{access_token}}",
+				"type": "string"
+			}
+		]
+	}
+}

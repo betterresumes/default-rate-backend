@@ -16,26 +16,44 @@ current_verified_user = get_current_active_user
 router = APIRouter()
 
 # Role-based permission helper
-def check_user_permissions(user: User, required_role: str = "user"):
-    """Check if user has required permissions"""
-    if user.global_role == "super_admin":
+def check_user_permissions(user: User, required_role: str = "member"):
+    """Check if user has required permissions based on 5-role hierarchy:
+    1. super_admin: Full access
+    2. tenant_admin: Tenant scope access  
+    3. org admin: Organization admin access
+    4. member: Organization member access
+    5. user: No organization access
+    """
+    # Super admin and tenant admin have full permissions
+    if user.global_role in ["super_admin", "tenant_admin"]:
         return True
     
+    # Users without organization have no access (except super/tenant admin)
     if user.organization_id is None:
         return False
     
-    # Simplified role hierarchy: admin > user
-    role_hierarchy = {"user": 0, "admin": 1}
+    # Organization level permissions: admin > member
+    role_hierarchy = {"member": 0, "admin": 1}
     user_level = role_hierarchy.get(user.organization_role, -1)
     required_level = role_hierarchy.get(required_role, 0)
     
     return user_level >= required_level
 
-def get_organization_filter(user: User):
+def get_organization_filter(user: User, db: Session = None):
     """Get filter conditions based on user's organization access"""
     if user.global_role == "super_admin":
         # Super admins see everything
         return None
+    elif user.global_role == "tenant_admin":
+        # Tenant admins see companies from all organizations in their tenant
+        if user.tenant_id and db:
+            from ...core.database import Organization
+            org_subquery = db.query(Organization.id).filter(Organization.tenant_id == user.tenant_id).subquery()
+            return or_(
+                CompanyModel.organization_id.in_(org_subquery),
+                CompanyModel.is_global == True
+            )
+        return CompanyModel.id == None  # No tenant assigned
     
     if user.organization_id is None:
         # Users without organization see nothing
@@ -82,17 +100,24 @@ async def get_companies(
     current_user: User = Depends(current_verified_user),
     db: Session = Depends(get_db)
 ):
-    """Get paginated list of companies with filtering and sorting"""
+    """Get paginated list of companies with role-based filtering
+    
+    Access Control:
+    - Members+ with organization can view companies
+    - Users see only companies from their organization scope
+    - Super admins see all companies
+    - Tenant admins see companies from their tenant organizations
+    """
     try:
-        # Check if user has access to view companies
-        if not check_user_permissions(current_user, "user"):
+        # Check if user has access to view companies (member+ with organization)
+        if not check_user_permissions(current_user, "member"):
             raise HTTPException(
                 status_code=403, 
-                detail="You need to be part of an organization to view companies"
+                detail="You need to be a member of an organization to view companies"
             )
         
-        # Get organization-based filter
-        org_filter = get_organization_filter(current_user)
+        # Get organization-based filter for data isolation
+        org_filter = get_organization_filter(current_user, db)
         
         service = CompanyService(db)
         result = service.get_companies_with_predictions(
@@ -102,7 +127,7 @@ async def get_companies(
             search=search,
             sort_by=sort_by,
             sort_order=sort_order,
-            organization_filter=org_filter  # Pass the filter to service
+            organization_filter=org_filter  # Apply role-based filtering
         )
         
         companies_data = []
@@ -113,6 +138,9 @@ async def get_companies(
                 "name": company.name,
                 "market_cap": safe_float(company.market_cap),
                 "sector": company.sector,
+                "organization_id": str(company.organization_id) if company.organization_id else None,
+                "created_by": str(company.created_by) if company.created_by else None,
+                "is_global": getattr(company, 'is_global', False),
                 "created_at": serialize_datetime(company.created_at),
                 "updated_at": serialize_datetime(company.updated_at),
                 "annual_predictions": [
@@ -129,7 +157,40 @@ async def get_companies(
                         "net_income_margin": safe_float(pred.net_income_margin),
                         "ebit_to_interest_expense": safe_float(pred.ebit_to_interest_expense),
                         "return_on_assets": safe_float(pred.return_on_assets),
+                        "created_by": str(pred.created_by) if pred.created_by else None,
+                        "organization_id": str(pred.organization_id) if pred.organization_id else None,
                         "created_at": serialize_datetime(pred.created_at)
+                    } for pred in company.annual_predictions[:5]  # Limit to 5 recent predictions
+                ],
+                "prediction_count": len(company.annual_predictions)
+            }
+            companies_data.append(company_data)
+        
+        return {
+            "companies": companies_data,
+            "total": result["total"],
+            "page": page,
+            "limit": limit,
+            "total_pages": math.ceil(result["total"] / limit),
+            "has_next": page < math.ceil(result["total"] / limit),
+            "has_prev": page > 1,
+            "access_info": {
+                "user_role": current_user.global_role,
+                "organization_role": current_user.organization_role,
+                "organization_id": str(current_user.organization_id) if current_user.organization_id else None,
+                "tenant_id": str(current_user.tenant_id) if current_user.tenant_id else None,
+                "data_scope": "global" if current_user.global_role == "super_admin" else 
+                            "tenant" if current_user.global_role == "tenant_admin" else "organization"
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unable to retrieve companies: {str(e)}"
+        )
                     } for pred in company.annual_predictions
                 ],
                 "quarterly_predictions": [
@@ -268,33 +329,97 @@ async def create_company(
     current_user: User = Depends(current_verified_user),
     db: Session = Depends(get_db)
 ):
-    """Create a new company (requires admin role)"""
+    """Create a new company (Members+ with organization)
+    
+    Access Control:
+    - Members+ with organization can create companies
+    - Companies are automatically assigned to user's organization
+    - Symbol must be unique within user's access scope
+    """
     try:
-        # Check if user has admin permissions
-        if not check_user_permissions(current_user, "admin"):
+        # Check if user has permission to create companies (member+ with organization)
+        if not check_user_permissions(current_user, "member"):
             raise HTTPException(
                 status_code=403, 
-                detail="You need admin privileges to create companies"
+                detail="You need to be a member of an organization to create companies"
+            )
+        
+        # Ensure user has an organization (unless super_admin/tenant_admin)
+        if current_user.global_role not in ["super_admin", "tenant_admin"] and not current_user.organization_id:
+            raise HTTPException(
+                status_code=403, 
+                detail="You must be assigned to an organization to create companies"
             )
         
         service = CompanyService(db)
         
-        # Check if company with symbol already exists
-        existing = service.get_company_by_symbol(company.symbol)
+        # Check if company with symbol already exists in user's scope
+        org_filter = get_organization_filter(current_user, db)
+        
+        if org_filter is None:  # Super admin
+            existing = service.get_company_by_symbol(company.symbol)
+        else:
+            # Check within user's scope
+            existing = db.query(CompanyModel).filter(
+                and_(
+                    CompanyModel.symbol == company.symbol.upper(),
+                    org_filter
+                )
+            ).first()
+        
         if existing:
             raise HTTPException(
                 status_code=400, 
-                detail="A company with this symbol already exists"
+                detail=f"Company with symbol '{company.symbol}' already exists in your scope"
             )
         
-        # Create company with user's organization context
+        # Determine organization_id for the new company
+        organization_id = None
+        if current_user.global_role == "super_admin":
+            # Super admin can create global companies or assign to specific org
+            organization_id = getattr(company, 'organization_id', None)
+        elif current_user.global_role == "tenant_admin":
+            # Tenant admin creates for their tenant (use their org or specified)
+            organization_id = getattr(company, 'organization_id', current_user.organization_id)
+        else:
+            # Regular users create for their organization
+            organization_id = current_user.organization_id
+        
+        # Create company with enhanced tracking
         new_company = service.create_company(
             symbol=company.symbol.upper(),
             name=company.name,
             market_cap=company.market_cap,
             sector=company.sector,
-            organization_id=current_user.organization_id,
+            organization_id=organization_id,
             created_by=current_user.id
+        )
+        
+        return {
+            "success": True,
+            "data": {
+                "id": str(new_company.id),
+                "symbol": new_company.symbol,
+                "name": new_company.name,
+                "market_cap": safe_float(new_company.market_cap),
+                "sector": new_company.sector,
+                "organization_id": str(new_company.organization_id) if new_company.organization_id else None,
+                "created_by": str(new_company.created_by),
+                "created_at": serialize_datetime(new_company.created_at)
+            },
+            "message": f"Company created successfully and assigned to organization",
+            "access_info": {
+                "user_role": current_user.global_role,
+                "organization_role": current_user.organization_role,
+                "organization_id": str(current_user.organization_id) if current_user.organization_id else None
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Unable to create company: {str(e)}"
         )
         
         return {

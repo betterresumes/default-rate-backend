@@ -31,25 +31,44 @@ import math
 router = APIRouter()
 
 # Role-based permission helpers
-def check_user_permissions(user: User, required_role: str = "user"):
-    """Check if user has required permissions"""
-    if user.global_role == "super_admin":
+def check_user_permissions(user: User, required_role: str = "member"):
+    """Check if user has required permissions based on 5-role hierarchy:
+    1. super_admin: Full access
+    2. tenant_admin: Tenant scope access  
+    3. org admin: Organization admin access
+    4. member: Organization member access
+    5. user: No organization access
+    """
+    # Super admin and tenant admin have full permissions
+    if user.global_role in ["super_admin", "tenant_admin"]:
         return True
     
+    # Users without organization have no access (except super/tenant admin)
     if user.organization_id is None:
         return False
     
-    # Simplified role hierarchy: admin > user
-    role_hierarchy = {"user": 0, "admin": 1}
+    # Organization level permissions: admin > member
+    role_hierarchy = {"member": 0, "admin": 1}
     user_level = role_hierarchy.get(user.organization_role, -1)
     required_level = role_hierarchy.get(required_role, 0)
     
     return user_level >= required_level
 
-def get_company_filter(user: User):
+def get_company_filter(user: User, db: Session = None):
     """Get company filter conditions based on user's organization access"""
     if user.global_role == "super_admin":
         return None  # Super admins see all companies
+    elif user.global_role == "tenant_admin":
+        # Tenant admins see companies from all organizations in their tenant
+        if user.tenant_id and db:
+            from ...core.database import Organization
+            return or_(
+                Company.organization_id.in_(
+                    db.query(Organization.id).filter(Organization.tenant_id == user.tenant_id)
+                ),
+                Company.is_global == True
+            )
+        return Company.id == None  # No tenant assigned
     
     if user.organization_id is None:
         return Company.id == None  # No organization = no access
@@ -60,10 +79,23 @@ def get_company_filter(user: User):
         Company.is_global == True
     )
 
-def get_prediction_filter(user: User, prediction_model):
+def get_prediction_filter(user: User, prediction_model, db: Session = None):
     """Get prediction filter conditions based on user's organization access"""
     if user.global_role == "super_admin":
         return None  # Super admins see all predictions
+    elif user.global_role == "tenant_admin":
+        # Tenant admins see predictions from all organizations in their tenant
+        if user.tenant_id and db:
+            from ...core.database import Organization
+            org_subquery = db.query(Organization.id).filter(Organization.tenant_id == user.tenant_id).subquery()
+            return or_(
+                prediction_model.organization_id.in_(org_subquery),
+                and_(
+                    prediction_model.organization_id == None,
+                    prediction_model.created_by == user.id
+                )
+            )
+        return prediction_model.id == None  # No tenant assigned
     
     if user.organization_id is None:
         return prediction_model.id == None  # No organization = no access
@@ -79,11 +111,340 @@ def get_prediction_filter(user: User, prediction_model):
         )
     )
 
+# ========================================
+# NEW ROLE-BASED API ENDPOINTS
+# ========================================
+
+@router.post("/annual", response_model=dict)
+async def create_annual_prediction(
+    request: AnnualPredictionRequest,
+    current_user: User = Depends(current_verified_user),
+    db: Session = Depends(get_db)
+):
+    """Create annual default rate prediction with role-based access control
+    
+    Access Control:
+    - Members+ with organization can create predictions
+    - Predictions are automatically assigned to user's organization
+    - Company must exist in user's scope
+    - Prevents duplicate predictions for same company/year
+    """
+    try:
+        # Check if user has permission to create predictions (member+ with organization)
+        if not check_user_permissions(current_user, "member"):
+            raise HTTPException(
+                status_code=403,
+                detail="You need to be a member of an organization to create predictions"
+            )
+        
+        # Ensure user has an organization
+        if current_user.global_role not in ["super_admin", "tenant_admin"] and not current_user.organization_id:
+            raise HTTPException(
+                status_code=403, 
+                detail="You must be assigned to an organization to create predictions"
+            )
+        
+        # Find company and validate access
+        company_service = CompanyService(db)
+        company = company_service.get_company_by_symbol(request.stock_symbol)
+        
+        if not company:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Company with symbol '{request.stock_symbol}' not found. Please create the company first."
+            )
+        
+        # Validate user can access this company
+        if current_user.global_role == "super_admin":
+            # Super admin can access any company
+            pass
+        elif current_user.global_role == "tenant_admin":
+            # Tenant admin can access companies in their tenant
+            if company.organization_id:
+                from ...core.database import Organization
+                org = db.query(Organization).filter(Organization.id == company.organization_id).first()
+                if not org or org.tenant_id != current_user.tenant_id:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="You don't have access to this company"
+                    )
+        else:
+            # Regular users can only access companies in their organization or global companies
+            if company.organization_id != current_user.organization_id and not getattr(company, 'is_global', False):
+                raise HTTPException(
+                    status_code=403,
+                    detail="You don't have access to this company"
+                )
+        
+        # Check for existing prediction to prevent duplicates
+        existing_prediction = db.query(AnnualPrediction).filter(
+            and_(
+                AnnualPrediction.company_id == company.id,
+                AnnualPrediction.reporting_year == request.reporting_year,
+                AnnualPrediction.organization_id == (current_user.organization_id if current_user.organization_id else None),
+                AnnualPrediction.created_by == current_user.id
+            )
+        ).first()
+        
+        if existing_prediction:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Annual prediction for {request.stock_symbol} in {request.reporting_year} already exists for your organization"
+            )
+
+        # Prepare ratios for ML prediction
+        ratios = {
+            "long_term_debt_to_total_capital": request.long_term_debt_to_total_capital,
+            "total_debt_to_ebitda": request.total_debt_to_ebitda,
+            "net_income_margin": request.net_income_margin,
+            "ebit_to_interest_expense": request.ebit_to_interest_expense,
+            "return_on_assets": request.return_on_assets
+        }
+
+        # Run ML prediction
+        prediction_result = ml_model.predict_probability(ratios)
+        
+        if prediction_result is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Annual prediction failed. Please check your input data and try again."
+            )
+
+        # Create prediction record with full tracking
+        annual_prediction = AnnualPrediction(
+            id=uuid.uuid4(),
+            company_id=company.id,
+            reporting_year=request.reporting_year,
+            long_term_debt_to_total_capital=request.long_term_debt_to_total_capital,
+            total_debt_to_ebitda=request.total_debt_to_ebitda,
+            net_income_margin=request.net_income_margin,
+            ebit_to_interest_expense=request.ebit_to_interest_expense,
+            return_on_assets=request.return_on_assets,
+            probability=prediction_result["probability"],
+            risk_level=prediction_result["risk_level"],
+            confidence=prediction_result["confidence"],
+            organization_id=current_user.organization_id,  # Track organization
+            created_by=current_user.id,  # Track creator
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+
+        db.add(annual_prediction)
+        db.commit()
+        db.refresh(annual_prediction)
+
+        return {
+            "success": True,
+            "message": "Annual prediction created successfully",
+            "data": {
+                "prediction": {
+                    "id": str(annual_prediction.id),
+                    "type": "annual",
+                    "company_id": str(company.id),
+                    "company_symbol": company.symbol,
+                    "company_name": company.name,
+                    "reporting_year": annual_prediction.reporting_year,
+                    "probability": safe_float(annual_prediction.probability),
+                    "risk_level": annual_prediction.risk_level,
+                    "confidence": safe_float(annual_prediction.confidence),
+                    "organization_id": str(annual_prediction.organization_id) if annual_prediction.organization_id else None,
+                    "created_by": str(annual_prediction.created_by),
+                    "created_at": serialize_datetime(annual_prediction.created_at)
+                },
+                "financial_ratios": ratios,
+                "ml_result": prediction_result
+            },
+            "access_info": {
+                "user_role": current_user.global_role,
+                "organization_role": current_user.organization_role,
+                "organization_id": str(current_user.organization_id) if current_user.organization_id else None
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"An error occurred while creating the annual prediction: {str(e)}"
+        )
+
+
+@router.post("/quarterly", response_model=dict)
+async def create_quarterly_prediction(
+    request: QuarterlyPredictionRequest,
+    current_user: User = Depends(current_verified_user),
+    db: Session = Depends(get_db)
+):
+    """Create quarterly default rate prediction with role-based access control
+    
+    Access Control:
+    - Members+ with organization can create predictions
+    - Predictions are automatically assigned to user's organization
+    - Company must exist in user's scope
+    - Prevents duplicate predictions for same company/year/quarter
+    """
+    try:
+        # Check if user has permission to create predictions (member+ with organization)
+        if not check_user_permissions(current_user, "member"):
+            raise HTTPException(
+                status_code=403,
+                detail="You need to be a member of an organization to create predictions"
+            )
+        
+        # Ensure user has an organization
+        if current_user.global_role not in ["super_admin", "tenant_admin"] and not current_user.organization_id:
+            raise HTTPException(
+                status_code=403, 
+                detail="You must be assigned to an organization to create predictions"
+            )
+        
+        # Validate quarter
+        valid_quarters = ["Q1", "Q2", "Q3", "Q4"]
+        if request.reporting_quarter not in valid_quarters:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid quarter '{request.reporting_quarter}'. Must be one of: {', '.join(valid_quarters)}"
+            )
+        
+        # Find company and validate access
+        company_service = CompanyService(db)
+        company = company_service.get_company_by_symbol(request.stock_symbol)
+        
+        if not company:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Company with symbol '{request.stock_symbol}' not found. Please create the company first."
+            )
+        
+        # Validate user can access this company
+        if current_user.global_role == "super_admin":
+            # Super admin can access any company
+            pass
+        elif current_user.global_role == "tenant_admin":
+            # Tenant admin can access companies in their tenant
+            if company.organization_id:
+                from ...core.database import Organization
+                org = db.query(Organization).filter(Organization.id == company.organization_id).first()
+                if not org or org.tenant_id != current_user.tenant_id:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="You don't have access to this company"
+                    )
+        else:
+            # Regular users can only access companies in their organization or global companies
+            if company.organization_id != current_user.organization_id and not getattr(company, 'is_global', False):
+                raise HTTPException(
+                    status_code=403,
+                    detail="You don't have access to this company"
+                )
+        
+        # Check for existing prediction to prevent duplicates
+        existing_prediction = db.query(QuarterlyPrediction).filter(
+            and_(
+                QuarterlyPrediction.company_id == company.id,
+                QuarterlyPrediction.reporting_year == request.reporting_year,
+                QuarterlyPrediction.reporting_quarter == request.reporting_quarter,
+                QuarterlyPrediction.organization_id == (current_user.organization_id if current_user.organization_id else None),
+                QuarterlyPrediction.created_by == current_user.id
+            )
+        ).first()
+        
+        if existing_prediction:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Quarterly prediction for {request.stock_symbol} in {request.reporting_quarter} {request.reporting_year} already exists for your organization"
+            )
+
+        # Prepare ratios for ML prediction
+        ratios = {
+            "long_term_debt_to_total_capital": request.long_term_debt_to_total_capital,
+            "total_debt_to_ebitda": request.total_debt_to_ebitda,
+            "net_income_margin": request.net_income_margin,
+            "ebit_to_interest_expense": request.ebit_to_interest_expense,
+            "return_on_assets": request.return_on_assets
+        }
+
+        # Run quarterly ML prediction
+        prediction_result = quarterly_ml_model.predict_probability(ratios)
+        
+        if prediction_result is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Quarterly prediction failed. Please check your input data and try again."
+            )
+
+        # Create prediction record with full tracking
+        quarterly_prediction = QuarterlyPrediction(
+            id=uuid.uuid4(),
+            company_id=company.id,
+            reporting_year=request.reporting_year,
+            reporting_quarter=request.reporting_quarter,
+            long_term_debt_to_total_capital=request.long_term_debt_to_total_capital,
+            total_debt_to_ebitda=request.total_debt_to_ebitda,
+            net_income_margin=request.net_income_margin,
+            ebit_to_interest_expense=request.ebit_to_interest_expense,
+            return_on_assets=request.return_on_assets,
+            probability=prediction_result["probability"],
+            risk_level=prediction_result["risk_level"],
+            confidence=prediction_result["confidence"],
+            organization_id=current_user.organization_id,  # Track organization
+            created_by=current_user.id,  # Track creator
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+
+        db.add(quarterly_prediction)
+        db.commit()
+        db.refresh(quarterly_prediction)
+
+        return {
+            "success": True,
+            "message": "Quarterly prediction created successfully",
+            "data": {
+                "prediction": {
+                    "id": str(quarterly_prediction.id),
+                    "type": "quarterly",
+                    "company_id": str(company.id),
+                    "company_symbol": company.symbol,
+                    "company_name": company.name,
+                    "reporting_year": quarterly_prediction.reporting_year,
+                    "reporting_quarter": quarterly_prediction.reporting_quarter,
+                    "probability": safe_float(quarterly_prediction.probability),
+                    "risk_level": quarterly_prediction.risk_level,
+                    "confidence": safe_float(quarterly_prediction.confidence),
+                    "organization_id": str(quarterly_prediction.organization_id) if quarterly_prediction.organization_id else None,
+                    "created_by": str(quarterly_prediction.created_by),
+                    "created_at": serialize_datetime(quarterly_prediction.created_at)
+                },
+                "financial_ratios": ratios,
+                "ml_result": prediction_result
+            },
+            "access_info": {
+                "user_role": current_user.global_role,
+                "organization_role": current_user.organization_role,
+                "organization_id": str(current_user.organization_id) if current_user.organization_id else None
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"An error occurred while creating the quarterly prediction: {str(e)}"
+        )
+
+
 def serialize_datetime(dt):
     """Helper function to serialize datetime objects"""
     if dt is None:
         return None
-    return dt.isoformat()
+    if isinstance(dt, datetime):
+        return dt.isoformat()
+    return dt
 
 def safe_float(value):
     """Convert value to float, handling None and NaN values"""
@@ -91,6 +452,7 @@ def safe_float(value):
         return None
     try:
         float_val = float(value)
+        # Check if it's NaN or infinite
         if math.isnan(float_val) or math.isinf(float_val):
             return None
         return float_val
@@ -1503,336 +1865,6 @@ async def delete_quarterly_prediction(
         
         return {
             "success": True,
-            "message": "Quarterly prediction deleted successfully",
-            "deleted_prediction": {
-                "id": prediction_id,
-                "type": "quarterly"
-            }
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error": "Failed to delete quarterly prediction",
-                "details": str(e)
-            }
-        )
-
-@router.post("/predict-default-rate")
-async def predict_default_rate_legacy(
-    request: AnnualPredictionRequest,
-    current_user: User = Depends(current_verified_user),
-    db: Session = Depends(get_db)
-):
-    return await predict_annual_default_rate(request, current_user, db)
-
-@router.post("/quarterly-bulk-predict", response_model=QuarterlyBulkPredictionResponse)
-async def quarterly_bulk_predict_from_file(
-    file: UploadFile = File(...),
-    current_user: User = Depends(current_verified_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Dedicated quarterly bulk prediction endpoint.
-    
-    Supports 1000-5000 companies at once for quarterly predictions.
-    
-    Expected columns:
-    - stock_symbol, company_name, reporting_year, reporting_quarter
-    - total_debt_to_ebitda, sga_margin, long_term_debt_to_total_capital, return_on_capital
-    - Optional: market_cap, sector
-    """
-    start_time = time.time()
-    
-    try:
-        if not file.filename.endswith(('.csv', '.xlsx', '.xls')):
-            raise HTTPException(
-                status_code=400,
-                detail="File must be CSV (.csv) or Excel (.xlsx, .xls)"
-            )
-        
-        content = await file.read()
-        
-        try:
-            if file.filename.endswith('.csv'):
-                df = pd.read_csv(io.BytesIO(content))
-            else:
-                df = pd.read_excel(io.BytesIO(content))
-        except Exception as e:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Error reading file: {str(e)}"
-            )
-        
-        if df.empty:
-            raise HTTPException(
-                status_code=400,
-                detail="File contains no data"
-            )
-        
-        if len(df) > 5000:
-            raise HTTPException(
-                status_code=400,
-                detail="File too large. Maximum 5000 companies per upload."
-            )
-        
-        if len(df) < 1:
-            raise HTTPException(
-                status_code=400,
-                detail="File must contain at least 1 company"
-            )
-        
-        # Validate required columns for quarterly predictions
-        required_columns = [
-            'stock_symbol', 'company_name', 'reporting_year', 'reporting_quarter',
-            'total_debt_to_ebitda', 'sga_margin', 'long_term_debt_to_total_capital', 'return_on_capital'
-        ]
-        
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        if missing_columns:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Missing required columns: {', '.join(missing_columns)}"
-            )
-        
-        company_service = CompanyService(db)
-        results = []
-        processed_count = 0
-        error_count = 0
-        skipped_count = 0
-        
-        # Process each row
-        for index, row in df.iterrows():
-            try:
-                # Validate required fields
-                stock_symbol = str(row['stock_symbol']).strip()
-                company_name = str(row['company_name']).strip()
-                reporting_year = str(row['reporting_year']).strip()
-                reporting_quarter = str(row['reporting_quarter']).strip()
-                
-                if not all([stock_symbol, company_name, reporting_year, reporting_quarter]):
-                    results.append(QuarterlyBulkPredictionItem(
-                        stock_symbol=stock_symbol,
-                        company_name=company_name,
-                        reporting_year=reporting_year,
-                        reporting_quarter=reporting_quarter,
-                        success=False,
-                        error="Missing required fields"
-                    ))
-                    error_count += 1
-                    continue
-                
-                # Get or create company
-                company = company_service.get_company_by_symbol(stock_symbol)
-                if not company:
-                    market_cap = safe_float(row.get('market_cap'))
-                    sector = str(row.get('sector', '')).strip() or None
-                    
-                    company = company_service.create_company(
-                        symbol=stock_symbol,
-                        name=company_name,
-                        market_cap=market_cap,
-                        sector=sector,
-                        organization_id=current_user.organization_id,
-                        created_by=current_user.id
-                    )
-                
-                # Check if prediction already exists
-                existing_prediction = company_service.get_quarterly_prediction(
-                    company.id, reporting_year, reporting_quarter
-                )
-                
-                if existing_prediction:
-                    results.append(QuarterlyBulkPredictionItem(
-                        stock_symbol=stock_symbol,
-                        company_name=company_name,
-                        reporting_year=reporting_year,
-                        reporting_quarter=reporting_quarter,
-                        success=False,
-                        error=f"Quarterly prediction for {stock_symbol} Q{reporting_quarter} {reporting_year} already exists"
-                    ))
-                    skipped_count += 1
-                    continue
-                
-                # Prepare financial ratios for quarterly prediction
-                financial_ratios = {
-                    "total_debt_to_ebitda": safe_float(row['total_debt_to_ebitda']),
-                    "sga_margin": safe_float(row['sga_margin']),
-                    "long_term_debt_to_total_capital": safe_float(row['long_term_debt_to_total_capital']),
-                    "return_on_capital": safe_float(row['return_on_capital'])
-                }
-                
-                # Validate financial ratios
-                missing_ratios = [k for k, v in financial_ratios.items() if v is None]
-                if missing_ratios:
-                    results.append(QuarterlyBulkPredictionItem(
-                        stock_symbol=stock_symbol,
-                        company_name=company_name,
-                        reporting_year=reporting_year,
-                        reporting_quarter=reporting_quarter,
-                        success=False,
-                        error=f"Missing financial ratios: {', '.join(missing_ratios)}"
-                    ))
-                    error_count += 1
-                    continue
-                
-                # Get prediction from quarterly ML model
-                prediction_result = quarterly_ml_model.predict_default_probability(financial_ratios)
-                
-                if "error" in prediction_result:
-                    results.append(QuarterlyBulkPredictionItem(
-                        stock_symbol=stock_symbol,
-                        company_name=company_name,
-                        reporting_year=reporting_year,
-                        reporting_quarter=reporting_quarter,
-                        success=False,
-                        error=f"Quarterly prediction failed: {prediction_result['error']}"
-                    ))
-                    error_count += 1
-                    continue
-                
-                # Save quarterly prediction to database
-                prediction = company_service.create_quarterly_prediction(
-                    company=company,
-                    financial_data=financial_ratios,
-                    prediction_results=prediction_result,
-                    reporting_year=reporting_year,
-                    reporting_quarter=reporting_quarter,
-                    organization_id=current_user.organization_id,
-                    created_by=current_user.id
-                )
-                
-                results.append(QuarterlyBulkPredictionItem(
-                    stock_symbol=stock_symbol,
-                    company_name=company_name,
-                    reporting_year=reporting_year,
-                    reporting_quarter=reporting_quarter,
-                    success=True,
-                    prediction_id=str(prediction.id),
-                    default_probability=prediction_result["ensemble_probability"],
-                    risk_level=prediction_result["risk_level"],
-                    confidence=prediction_result["confidence"],
-                    financial_ratios=financial_ratios
-                ))
-                processed_count += 1
-                
-            except Exception as e:
-                results.append(QuarterlyBulkPredictionItem(
-                    stock_symbol=row.get('stock_symbol', 'Unknown'),
-                    company_name=row.get('company_name', 'Unknown'),
-                    reporting_year=row.get('reporting_year', 'Unknown'),
-                    reporting_quarter=row.get('reporting_quarter', 'Unknown'),
-                    success=False,
-                    error=f"Processing error: {str(e)}"
-                ))
-                error_count += 1
-        
-        end_time = time.time()
-        processing_time = round(end_time - start_time, 2)
-        
-        return QuarterlyBulkPredictionResponse(
-            success=True,
-            message=f"Quarterly bulk prediction completed. Processed: {processed_count}, Errors: {error_count}, Skipped: {skipped_count}",
-            total_records=len(df),
-            processed_records=processed_count,
-            error_records=error_count,
-            skipped_records=skipped_count,
-            processing_time_seconds=processing_time,
-            results=results
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error": "Quarterly bulk prediction failed",
-                "details": str(e)
-            }
-        )
-
-@router.post("/quarterly-bulk-predict-async", response_model=QuarterlyBulkJobResponse)
-async def quarterly_bulk_predict_async(
-    file: UploadFile = File(...),
-    current_user: User = Depends(current_verified_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Submit a quarterly bulk prediction job that runs in the background.
-    Returns a job ID that can be used to check status and retrieve results.
-    
-    This endpoint is recommended for very large files (>1000 companies) to avoid timeouts.
-    For smaller files, use the synchronous /quarterly-bulk-predict endpoint.
-    
-    Expected columns:
-    - stock_symbol, company_name, reporting_year, reporting_quarter
-    - total_debt_to_ebitda, sga_margin, long_term_debt_to_total_capital, return_on_capital
-    - Optional: market_cap, sector
-    """
-    
-    if not file.filename.endswith(('.xlsx', '.xls', '.csv')):
-        raise HTTPException(
-            status_code=400,
-            detail="File must be Excel (.xlsx, .xls) or CSV (.csv) format"
-        )
-    
-    try:
-        contents = await file.read()
-        
-        if file.filename.endswith('.csv'):
-            df = pd.read_csv(io.StringIO(contents.decode('utf-8')))
-        else:
-            df = pd.read_excel(io.BytesIO(contents))
-        
-        if df.empty:
-            raise HTTPException(
-                status_code=400,
-                detail="File is empty"
-            )
-        
-        company_count = len(df)
-        
-        # Validate required columns for quarterly predictions
-        required_columns = [
-            'stock_symbol', 'company_name', 'reporting_year', 'reporting_quarter',
-            'total_debt_to_ebitda', 'sga_margin', 'long_term_debt_to_total_capital', 'return_on_capital'
-        ]
-        
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        if missing_columns:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Missing required columns: {', '.join(missing_columns)}"
-            )
-        
-        file_content_b64 = base64.b64encode(contents).decode('utf-8')
-        
-        # Use quarterly task
-        from ...workers.tasks import process_quarterly_bulk_task
-        task = process_quarterly_bulk_task.delay(file_content_b64, file.filename, current_user.organization_id, current_user.id)
-        
-        if company_count <= 100:
-            estimated_time = f"{company_count * 2:.0f}-{company_count * 4:.0f} seconds"
-        elif company_count <= 1000:
-            estimated_time = f"{company_count * 1.5 / 60:.1f}-{company_count * 3 / 60:.1f} minutes"
-        else:
-            estimated_time = f"{company_count * 1 / 60:.1f}-{company_count * 2 / 60:.1f} minutes"
-        
-        return QuarterlyBulkJobResponse(
-            success=True,
-            message=f"Quarterly bulk prediction job submitted successfully. Processing {company_count} companies in background.",
-            job_id=task.id,
-            status="PENDING",
-            filename=file.filename,
-            estimated_processing_time=estimated_time
-        )
-        
-    except pd.errors.EmptyDataError:
         raise HTTPException(
             status_code=400,
             detail="File is empty or contains no data"

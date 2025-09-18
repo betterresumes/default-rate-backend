@@ -60,6 +60,7 @@ class Organization(Base):
     join_enabled = Column(Boolean, default=True)
     default_role = Column(String(50), default="member")  # Role assigned to new joiners
     join_created_at = Column(DateTime, default=func.now())
+    max_users = Column(Integer, default=500)  # Maximum number of users allowed in organization
     
     # Metadata
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)

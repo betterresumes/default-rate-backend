@@ -10,10 +10,11 @@ from ...schemas.schemas import (
     TenantCreate, TenantUpdate, TenantResponse, 
     TenantListResponse, TenantStatsResponse
 )
-from .auth_multi_tenant import require_super_admin, get_current_active_user
+from .auth_multi_tenant import get_current_active_user
+from .auth_admin import require_super_admin
 from ...utils.tenant_utils import create_tenant_slug, validate_tenant_domain
 
-router = APIRouter(prefix="/tenants", tags=["Tenant Management"])
+router = APIRouter(tags=["Tenant Management"])
 
 @router.post("", response_model=TenantResponse)
 async def create_tenant(
@@ -57,7 +58,6 @@ async def create_tenant(
         domain=tenant_data.domain,
         description=tenant_data.description,
         logo_url=tenant_data.logo_url,
-        max_organizations=tenant_data.max_organizations or 50,
         is_active=True,
         created_by=current_user.id,
         created_at=datetime.utcnow()
@@ -229,8 +229,10 @@ async def get_tenant_stats(
     # Get organization count
     org_count = db.query(Organization).filter(Organization.tenant_id == tenant_id).count()
     
-    # Get total user count across all organizations
-    user_count = db.query(User).join(Organization).filter(
+    # Get total user count across all organizations (fix ambiguous join)
+    user_count = db.query(User).join(
+        Organization, User.organization_id == Organization.id
+    ).filter(
         Organization.tenant_id == tenant_id
     ).count()
     
@@ -245,6 +247,141 @@ async def get_tenant_stats(
         total_organizations=org_count,
         active_organizations=active_org_count,
         total_users=user_count,
-        max_organizations=tenant.max_organizations,
         created_at=tenant.created_at
     )
+
+@router.post("/{tenant_id}/assign-admin", response_model=dict)
+async def assign_tenant_admin(
+    tenant_id: str,
+    request_data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_super_admin)
+):
+    """Assign a user as tenant admin (Super Admin only)."""
+    
+    user_email = request_data.get("user_email")
+    if not user_email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="user_email is required"
+        )
+    
+    # Validate tenant exists
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant not found"
+        )
+    
+    # Find user by email
+    user = db.query(User).filter(User.email == user_email).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Check if user is already a tenant admin for a different tenant
+    if user.global_role == "tenant_admin" and user.tenant_id and str(user.tenant_id) != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User is already a tenant admin for another tenant"
+        )
+    
+    # Assign tenant admin role
+    user.global_role = "tenant_admin"
+    user.tenant_id = tenant_id
+    user.organization_id = None  # Remove from specific org if assigned
+    user.organization_role = None
+    
+    db.commit()
+    db.refresh(user)
+    
+    return {
+        "message": f"Successfully assigned {user.email} as tenant admin for {tenant.name}",
+        "user_id": str(user.id),
+        "tenant_id": tenant_id,
+        "role": user.global_role
+    }
+
+@router.delete("/{tenant_id}/remove-admin/{user_id}", response_model=dict)
+async def remove_tenant_admin(
+    tenant_id: str,
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_super_admin)
+):
+    """Remove tenant admin role from a user (Super Admin only)."""
+    
+    # Validate tenant exists
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant not found"
+        )
+    
+    # Find user
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Check if user is tenant admin for this tenant
+    if user.global_role != "tenant_admin" or str(user.tenant_id) != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User is not a tenant admin for this tenant"
+        )
+    
+    # Remove tenant admin role
+    user.global_role = "user"
+    user.tenant_id = None
+    
+    db.commit()
+    db.refresh(user)
+    
+    return {
+        "message": f"Successfully removed tenant admin role from {user.email}",
+        "user_id": str(user.id),
+        "new_role": user.global_role
+    }
+
+@router.get("/{tenant_id}/admins", response_model=List[dict])
+async def get_tenant_admins(
+    tenant_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_super_admin)
+):
+    """Get list of tenant admins for a specific tenant (Super Admin only)."""
+    
+    # Validate tenant exists
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant not found"
+        )
+    
+    # Get all tenant admins for this tenant
+    tenant_admins = db.query(User).filter(
+        and_(
+            User.global_role == "tenant_admin",
+            User.tenant_id == tenant_id
+        )
+    ).all()
+    
+    return [
+        {
+            "user_id": str(admin.id),
+            "email": admin.email,
+            "full_name": admin.full_name,
+            "username": admin.username,
+            "is_active": admin.is_active,
+            "created_at": admin.created_at
+        }
+        for admin in tenant_admins
+    ]

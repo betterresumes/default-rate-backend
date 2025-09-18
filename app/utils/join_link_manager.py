@@ -41,8 +41,8 @@ class JoinLinkManager:
         created_by: str,
         domain: Optional[str] = None,
         description: Optional[str] = None,
-        max_users: int = 100,
-        default_role: str = "user"
+        max_users: int = 500,
+        default_role: str = "member"
     ) -> Dict[str, Any]:
         """
         Create a new organization with a join link
@@ -297,8 +297,8 @@ class SuperAdminManager:
             created_by=super_admin_user_id,
             domain=org_data.get("domain"),
             description=org_data.get("description"),
-            max_users=org_data.get("max_users", 100),
-            default_role=org_data.get("default_role", "user")
+            max_users=org_data.get("max_users", 500),
+            default_role=org_data.get("default_role", "member")
         )
         
         organization = result["organization"]
