@@ -42,7 +42,7 @@ class JoinLinkManager:
         domain: Optional[str] = None,
         description: Optional[str] = None,
         max_users: int = 500,
-        default_role: str = "member"
+        default_role: str = "org_member"
     ) -> Dict[str, Any]:
         """
         Create a new organization with a join link
@@ -185,7 +185,7 @@ class JoinLinkManager:
         
         # Join user to organization
         user.organization_id = organization.id
-        user.organization_role = organization.default_role
+        user.role = organization.default_role
         user.joined_via_token = join_token
         
         db.commit()
@@ -282,7 +282,7 @@ class SuperAdminManager:
         super_admin = db.query(User).filter(
             and_(
                 User.id == super_admin_user_id,
-                User.global_role == "super_admin"
+                User.role == "super_admin"
             )
         ).first()
         
@@ -298,7 +298,7 @@ class SuperAdminManager:
             domain=org_data.get("domain"),
             description=org_data.get("description"),
             max_users=org_data.get("max_users", 500),
-            default_role=org_data.get("default_role", "member")
+            default_role=org_data.get("default_role", "org_member")
         )
         
         organization = result["organization"]
@@ -308,7 +308,7 @@ class SuperAdminManager:
             admin_user = db.query(User).filter(User.email == org_data["admin_email"]).first()
             if admin_user and not admin_user.organization_id:
                 admin_user.organization_id = organization.id
-                admin_user.organization_role = "admin"
+                admin_user.role = "org_admin"
                 admin_user.joined_via_token = organization.join_token
                 db.commit()
                 
@@ -324,7 +324,7 @@ class SuperAdminManager:
         super_admin = db.query(User).filter(
             and_(
                 User.id == super_admin_user_id,
-                User.global_role == "super_admin"
+                User.role == "super_admin"
             )
         ).first()
         

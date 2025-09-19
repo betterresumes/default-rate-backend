@@ -121,31 +121,31 @@ def remove_email_from_whitelist(db: Session, organization_id: str, email: str) -
 
 def get_user_effective_role(user: User) -> str:
     """Get user's effective role for permission checking"""
-    if user.global_role == "super_admin":
+    if user.role == "super_admin":
         return "super_admin"
-    elif user.global_role == "tenant_admin":
+    elif user.role == "tenant_admin":
         return "tenant_admin"
-    elif user.organization_id and user.organization_role:
-        return f"org_{user.organization_role}"  # org_admin or org_member
+    elif user.organization_id and user.role:
+        return user.role  # org_admin or org_member
     else:
         return "user"  # No organization
 
 def can_access_tenant(user: User, tenant_id: str) -> bool:
     """Check if user can access tenant data"""
-    if user.global_role == "super_admin":
+    if user.role == "super_admin":
         return True
-    if user.global_role == "tenant_admin" and str(user.tenant_id) == tenant_id:
+    if user.role == "tenant_admin" and str(user.tenant_id) == tenant_id:
         return True
     return False
 
 def can_access_organization(user: User, organization_id: str) -> bool:
     """Check if user can access organization data"""
-    if user.global_role == "super_admin":
+    if user.role == "super_admin":
         return True
     if user.organization_id and str(user.organization_id) == organization_id:
         return True
     # Tenant admin can access all orgs in their tenant
-    if user.global_role == "tenant_admin" and user.tenant_id:
+    if user.role == "tenant_admin" and user.tenant_id:
         # Need to check if org belongs to user's tenant
         # This would require a database query in actual implementation
         return True  # Simplified for now
@@ -153,13 +153,13 @@ def can_access_organization(user: User, organization_id: str) -> bool:
 
 def can_manage_organization(user: User, organization_id: str) -> bool:
     """Check if user can manage organization (admin functions)"""
-    if user.global_role == "super_admin":
+    if user.role == "super_admin":
         return True
     if (user.organization_id and str(user.organization_id) == organization_id and 
-        user.organization_role == "admin"):
+        user.role == "org_admin"):
         return True
     # Tenant admin can manage orgs in their tenant
-    if user.global_role == "tenant_admin" and user.tenant_id:
+    if user.role == "tenant_admin" and user.tenant_id:
         return True  # Simplified for now
     return False
 
@@ -169,7 +169,7 @@ def can_manage_organization(user: User, organization_id: str) -> bool:
 
 def get_accessible_predictions_filter(user: User):
     """Get SQLAlchemy filter for predictions user can access"""
-    if user.global_role == "super_admin":
+    if user.role == "super_admin":
         # Super admin sees everything
         return None  # No filter needed
     elif user.organization_id:
@@ -190,9 +190,8 @@ def get_user_context(user: User) -> dict:
         "user_id": str(user.id),
         "email": user.email,
         "full_name": user.full_name,
-        "global_role": user.global_role,
+        "role": user.role,
         "organization_id": str(user.organization_id) if user.organization_id else None,
-        "organization_role": user.organization_role,
         "tenant_id": str(user.tenant_id) if user.tenant_id else None,
         "effective_role": get_user_effective_role(user)
     }

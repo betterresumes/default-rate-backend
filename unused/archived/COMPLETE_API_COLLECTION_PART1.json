@@ -1,0 +1,627 @@
+{
+  "info": {
+    "name": "🏦 COMPLETE Financial Risk API - PART 1: Auth & Core",
+    "description": "Complete Postman collection for multi-tenant financial risk prediction system - PART 1: Authentication, Admin, Tenant Management (34 endpoints)",
+    "version": "1.0.0 - PRODUCTION READY",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000",
+      "type": "string",
+      "description": "🌐 Base URL for the API server"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string",
+      "description": "🔑 JWT access token for authentication"
+    },
+    {
+      "key": "userId",
+      "value": "",
+      "type": "string",
+      "description": "👤 Current user ID"
+    },
+    {
+      "key": "organizationId",
+      "value": "",
+      "type": "string",
+      "description": "🏢 Current organization ID"
+    },
+    {
+      "key": "tenantId",
+      "value": "",
+      "type": "string",
+      "description": "🏦 Current tenant ID"
+    },
+    {
+      "key": "companyId",
+      "value": "",
+      "type": "string",
+      "description": "🏭 Current company ID"
+    },
+    {
+      "key": "predictionId",
+      "value": "",
+      "type": "string",
+      "description": "📊 Current prediction ID"
+    },
+    {
+      "key": "jobId",
+      "value": "",
+      "type": "string",
+      "description": "⚙️ Current background job ID"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "🔐 User Authentication (5 endpoints)",
+      "description": "Core user authentication: register, login, join organization, refresh token, logout",
+      "item": [
+        {
+          "name": "Register User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.user && response.user.id) {",
+                  "        pm.collectionVariables.set('userId', response.user.id);",
+                  "        console.log('✅ User ID set:', response.user.id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"admin@hdfcbank.com\",\n    \"password\": \"SecurePass@2024\",\n    \"full_name\": \"HDFC Bank Admin\",\n    \"role\": \"super_admin\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "register"]
+            },
+            "description": "**🔐 Register a new user account**\n\n📋 **Request Body Schema:**\n```json\n{\n  \"email\": \"string\",         // Valid email (required)\n  \"password\": \"string\",      // Min 8 chars (required)\n  \"full_name\": \"string\",     // User's full name (required)\n  \"role\": \"user|org_member|org_admin|tenant_admin|super_admin\", // Default: user\n  \"join_token\": \"string\"     // Optional: for joining organization\n}\n```\n\n✅ **Success Response (201):**\n```json\n{\n  \"success\": true,\n  \"message\": \"User registered successfully\",\n  \"user\": {\n    \"id\": \"uuid\",\n    \"email\": \"admin@hdfcbank.com\",\n    \"full_name\": \"HDFC Bank Admin\",\n    \"role\": \"super_admin\",\n    \"is_active\": true,\n    \"created_at\": \"2024-01-01T00:00:00Z\"\n  }\n}\n```\n\n❌ **Error Responses:**\n- 400: Email already registered\n- 422: Validation error (invalid email, weak password)"
+          }
+        },
+        {
+          "name": "Login User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.access_token) {",
+                  "        pm.collectionVariables.set('token', response.access_token);",
+                  "        console.log('🔑 Token set successfully');",
+                  "    }",
+                  "    if (response.user) {",
+                  "        if (response.user.id) pm.collectionVariables.set('userId', response.user.id);",
+                  "        if (response.user.organization_id) pm.collectionVariables.set('organizationId', response.user.organization_id);",
+                  "        if (response.user.tenant_id) pm.collectionVariables.set('tenantId', response.user.tenant_id);",
+                  "        console.log('👤 User context set');",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"admin@hdfcbank.com\",\n    \"password\": \"SecurePass@2024\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "login"]
+            },
+            "description": "**🔐 Authenticate user and receive access token**\n\n📋 **Request Body Schema:**\n```json\n{\n  \"email\": \"string\",        // User email (required)\n  \"password\": \"string\"      // User password (required)\n}\n```\n\n✅ **Success Response (200):**\n```json\n{\n  \"access_token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n  \"token_type\": \"bearer\",\n  \"expires_in\": 3600,\n  \"user\": {\n    \"id\": \"uuid\",\n    \"email\": \"admin@hdfcbank.com\",\n    \"full_name\": \"HDFC Bank Admin\",\n    \"role\": \"super_admin\",\n    \"organization_id\": \"uuid\",\n    \"tenant_id\": \"uuid\",\n    \"is_active\": true\n  }\n}\n```\n\n❌ **Error Responses:**\n- 401: Invalid credentials\n- 403: Account deactivated"
+          }
+        },
+        {
+          "name": "Join Organization",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.user && response.user.organization_id) {",
+                  "        pm.collectionVariables.set('organizationId', response.user.organization_id);",
+                  "        console.log('🏢 Joined organization:', response.user.organization_id);",
+                  "    }",
+                  "    if (response.access_token) {",
+                  "        pm.collectionVariables.set('token', response.access_token);",
+                  "        console.log('🔄 Token updated after join');",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"join_token\": \"HDFC-2024-MAIN001\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/join",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "join"]
+            },
+            "description": "**🏢 Join organization using join token** (Requires authentication)\n\n📋 **Request Body Schema:**\n```json\n{\n  \"join_token\": \"string\"    // Valid organization join token (required)\n}\n```\n\n✅ **Success Response (200):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Successfully joined organization\",\n  \"user\": {\n    \"id\": \"uuid\",\n    \"email\": \"user@hdfcbank.com\",\n    \"organization_id\": \"uuid\",\n    \"organization_role\": \"member\"\n  },\n  \"access_token\": \"updated_jwt_token\",\n  \"token_type\": \"bearer\"\n}\n```\n\n❌ **Error Responses:**\n- 400: Invalid join token\n- 401: Authentication required\n- 409: Already member of organization"
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.access_token) {",
+                  "        pm.collectionVariables.set('token', response.access_token);",
+                  "        console.log('🔄 Token refreshed successfully');",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"refresh_token\": \"your_refresh_token_here\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/refresh",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "refresh"]
+            },
+            "description": "**🔄 Refresh access token using refresh token**\n\n📋 **Request Body Schema:**\n```json\n{\n  \"refresh_token\": \"string\"  // Valid refresh token (required)\n}\n```\n\n✅ **Success Response (200):**\n```json\n{\n  \"access_token\": \"new_jwt_token_here\",\n  \"token_type\": \"bearer\",\n  \"expires_in\": 3600,\n  \"refresh_token\": \"new_refresh_token_here\"\n}\n```\n\n❌ **Error Responses:**\n- 401: Invalid or expired refresh token"
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/logout",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "logout"]
+            },
+            "description": "**🚪 Logout user and invalidate token** (Requires authentication)\n\n✅ **Success Response (200):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Successfully logged out\"\n}\n```\n\n❌ **Error Responses:**\n- 401: Authentication required"
+          }
+        }
+      ]
+    },
+    {
+      "name": "🔧 Admin Authentication (5 endpoints)",
+      "description": "Super admin and tenant admin endpoints for user management, impersonation, and auditing",
+      "item": [
+        {
+          "name": "Create User (Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.user && response.user.id) {",
+                  "        pm.collectionVariables.set('userId', response.user.id);",
+                  "        console.log('✅ Created User ID set:', response.user.id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"newuser@hdfcbank.com\",\n    \"password\": \"NewUserPass@2024\",\n    \"full_name\": \"New HDFC User\",\n    \"first_name\": \"New\",\n    \"last_name\": \"User\",\n    \"username\": \"hdfc_newuser\",\n    \"global_role\": \"user\",\n    \"organization_role\": \"member\",\n    \"organization_id\": \"{{organizationId}}\",\n    \"tenant_id\": \"{{tenantId}}\",\n    \"is_active\": true\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/auth/create-user",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "auth", "create-user"]
+            },
+            "description": "**👥 Create user account (Admin only)** - Requires admin role\n\n🔒 **Authorization:** super_admin, tenant_admin, or org_admin\n\n📋 **Request Body Schema:**\n```json\n{\n  \"email\": \"string\",         // Valid email (required)\n  \"password\": \"string\",      // Min 8 chars (required)\n  \"full_name\": \"string\",     // User's full name (required)\n  \"first_name\": \"string\",    // Optional: First name\n  \"last_name\": \"string\",     // Optional: Last name\n  \"username\": \"string\",      // Optional: Custom username\n  \"global_role\": \"user|org_member|org_admin|tenant_admin|super_admin\",\n  \"organization_role\": \"member|admin|owner\", // Optional\n  \"organization_id\": \"uuid\", // Optional: Organization assignment\n  \"tenant_id\": \"uuid\",       // Optional: Tenant assignment\n  \"is_active\": boolean        // Default: true\n}\n```\n\n✅ **Success Response (201):**\n```json\n{\n  \"user\": {\n    \"id\": \"uuid\",\n    \"email\": \"newuser@hdfcbank.com\",\n    \"username\": \"hdfc_newuser\",\n    \"full_name\": \"New HDFC User\",\n    \"global_role\": \"user\",\n    \"organization_role\": \"member\",\n    \"organization_id\": \"uuid\",\n    \"tenant_id\": \"uuid\",\n    \"is_active\": true,\n    \"created_at\": \"2024-01-01T00:00:00Z\"\n  },\n  \"message\": \"User created successfully\"\n}\n```"
+          }
+        },
+        {
+          "name": "Impersonate User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.access_token) {",
+                  "        pm.collectionVariables.set('token', response.access_token);",
+                  "        console.log('🎭 Impersonation token set');",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/auth/impersonate/{{userId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "auth", "impersonate", "{{userId}}"]
+            },
+            "description": "**🎭 Impersonate another user** - Requires super_admin role\n\n🔒 **Authorization:** super_admin only\n\n📋 **Path Parameters:**\n- `user_id` (string): UUID of the user to impersonate\n\n✅ **Success Response (200):**\n```json\n{\n  \"access_token\": \"impersonation_jwt_token\",\n  \"token_type\": \"bearer\",\n  \"expires_in\": 3600,\n  \"impersonated_user\": {\n    \"id\": \"uuid\",\n    \"email\": \"user@hdfcbank.com\",\n    \"full_name\": \"Target User\",\n    \"role\": \"user\"\n  },\n  \"impersonator\": {\n    \"id\": \"uuid\",\n    \"email\": \"admin@hdfcbank.com\",\n    \"full_name\": \"Admin User\"\n  }\n}\n```"
+          }
+        },
+        {
+          "name": "Force Password Reset",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"new_password\": \"NewSecurePassword@2024\",\n    \"notify_user\": true\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/auth/force-password-reset/{{userId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "auth", "force-password-reset", "{{userId}}"]
+            },
+            "description": "**🔒 Force password reset for any user** - Requires admin role\n\n🔒 **Authorization:** admin role required\n\n📋 **Request Body Schema:**\n```json\n{\n  \"new_password\": \"string\", // New password (min 8 chars)\n  \"notify_user\": boolean     // Whether to send email notification\n}\n```\n\n✅ **Success Response (200):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Password reset successfully\",\n  \"user_id\": \"uuid\",\n  \"notification_sent\": true\n}\n```"
+          }
+        },
+        {
+          "name": "Get User Login History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/auth/audit/login-history/{{userId}}?limit=50&offset=0",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "auth", "audit", "login-history", "{{userId}}"],
+              "query": [
+                {"key": "limit", "value": "50"},
+                {"key": "offset", "value": "0"}
+              ]
+            },
+            "description": "**📊 Get login history for specific user** - Requires admin role\n\n🔒 **Authorization:** admin role required\n\n📋 **Query Parameters:**\n- `limit` (integer): Number of records (default: 50)\n- `offset` (integer): Records to skip (default: 0)\n\n✅ **Success Response (200):**\n```json\n{\n  \"user_id\": \"uuid\",\n  \"total_logins\": 25,\n  \"history\": [\n    {\n      \"login_time\": \"2024-01-01T10:00:00Z\",\n      \"ip_address\": \"192.168.1.1\",\n      \"user_agent\": \"Mozilla/5.0...\",\n      \"success\": true,\n      \"location\": \"Mumbai, India\",\n      \"device_type\": \"desktop\"\n    }\n  ],\n  \"pagination\": {\n    \"limit\": 50,\n    \"offset\": 0,\n    \"total\": 25\n  }\n}\n```"
+          }
+        },
+        {
+          "name": "Bulk Activate Users",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"user_ids\": [\n        \"{{userId}}\",\n        \"user-id-2\",\n        \"user-id-3\"\n    ],\n    \"activate\": true,\n    \"send_notification\": true\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/auth/bulk-activate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "auth", "bulk-activate"]
+            },
+            "description": "**⚡ Activate or deactivate multiple users** - Requires admin role\n\n🔒 **Authorization:** admin role required\n\n📋 **Request Body Schema:**\n```json\n{\n  \"user_ids\": [\"uuid1\", \"uuid2\"], // Array of user IDs\n  \"activate\": boolean,             // true=activate, false=deactivate\n  \"send_notification\": boolean    // Send email notifications\n}\n```\n\n✅ **Success Response (200):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Bulk operation completed\",\n  \"processed\": 3,\n  \"successful\": 3,\n  \"failed\": 0,\n  \"results\": [\n    {\n      \"user_id\": \"uuid1\",\n      \"status\": \"success\",\n      \"message\": \"User activated successfully\"\n    }\n  ]\n}\n```"
+          }
+        }
+      ]
+    },
+    {
+      "name": "👥 Tenant Admin Management (5 endpoints)",
+      "description": "Super admin endpoints for creating tenants with admin users and managing tenant assignments",
+      "item": [
+        {
+          "name": "Create Tenant with Admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.tenant_id) pm.collectionVariables.set('tenantId', response.tenant_id);",
+                  "    if (response.admin_user_id) pm.collectionVariables.set('userId', response.admin_user_id);",
+                  "    if (response.default_org_id) pm.collectionVariables.set('organizationId', response.default_org_id);",
+                  "    console.log('🏦 Tenant created with admin');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"tenant_name\": \"HDFC Bank\",\n    \"tenant_description\": \"HDFC Bank - Financial Risk Assessment Platform\",\n    \"tenant_domain\": \"hdfcbank.com\",\n    \"admin_email\": \"admin@hdfcbank.com\",\n    \"admin_password\": \"HDFCAdmin@2024\",\n    \"admin_first_name\": \"HDFC\",\n    \"admin_last_name\": \"Administrator\",\n    \"admin_username\": \"hdfc_admin\",\n    \"create_default_org\": true,\n    \"default_org_name\": \"HDFC Main Organization\",\n    \"default_org_description\": \"Main organization for HDFC Bank operations\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/tenant-management/create-tenant-with-admin",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "tenant-management", "create-tenant-with-admin"]
+            },
+            "description": "**🏦 Create tenant and assign admin in one atomic operation**\n\n🔒 **Authorization:** super_admin only\n\n📋 **Request Body Schema:**\n```json\n{\n  \"tenant_name\": \"string\",        // Unique tenant name (required)\n  \"tenant_description\": \"string\", // Tenant description (required)\n  \"tenant_domain\": \"string\",      // Optional: Tenant domain\n  \"admin_email\": \"string\",        // Admin user email (required)\n  \"admin_password\": \"string\",     // Admin user password (required)\n  \"admin_first_name\": \"string\",   // Admin first name (required)\n  \"admin_last_name\": \"string\",    // Admin last name (required)\n  \"admin_username\": \"string\",     // Optional: Admin username\n  \"create_default_org\": boolean,  // Whether to create default org\n  \"default_org_name\": \"string\",   // Optional: Default org name\n  \"default_org_description\": \"string\" // Optional: Default org description\n}\n```\n\n✅ **Success Response (200):**\n```json\n{\n  \"tenant_id\": \"uuid\",\n  \"tenant_name\": \"HDFC Bank\",\n  \"tenant_slug\": \"hdfc-bank\",\n  \"tenant_domain\": \"hdfcbank.com\",\n  \"tenant_created_at\": \"2024-01-01T00:00:00Z\",\n  \"admin_user_id\": \"uuid\",\n  \"admin_email\": \"admin@hdfcbank.com\",\n  \"admin_full_name\": \"HDFC Administrator\",\n  \"admin_username\": \"hdfc_admin\",\n  \"admin_created_at\": \"2024-01-01T00:00:00Z\",\n  \"default_org_id\": \"uuid\",\n  \"default_org_name\": \"HDFC Main Organization\",\n  \"default_org_join_token\": \"HDFC-2024-ABC123\",\n  \"success\": true,\n  \"message\": \"Successfully created tenant 'HDFC Bank' with admin user\"\n}\n```"
+          }
+        },
+        {
+          "name": "Assign Existing User as Tenant Admin",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"user_email\": \"existing.user@hdfcbank.com\",\n    \"tenant_id\": \"{{tenantId}}\",\n    \"create_default_org\": false,\n    \"replace_existing_assignment\": false\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/tenant-management/assign-existing-user",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "tenant-management", "assign-existing-user"]
+            },
+            "description": "**👤 Assign existing user as tenant admin**\n\n🔒 **Authorization:** super_admin only\n\n📋 **Request Body Schema:**\n```json\n{\n  \"user_email\": \"string\",            // Email of existing user (required)\n  \"tenant_id\": \"uuid\",               // Target tenant ID (required)\n  \"create_default_org\": boolean,     // Whether to create default org\n  \"replace_existing_assignment\": boolean // Force reassign if already tenant admin\n}\n```\n\n✅ **Success Response (200):**\n```json\n{\n  \"user_id\": \"uuid\",\n  \"user_email\": \"existing.user@hdfcbank.com\",\n  \"tenant_id\": \"uuid\",\n  \"tenant_name\": \"HDFC Bank\",\n  \"previous_role\": \"user\",\n  \"new_role\": \"tenant_admin\",\n  \"success\": true,\n  \"message\": \"User assigned as tenant admin successfully\"\n}\n```"
+          }
+        },
+        {
+          "name": "Get Tenant Admin Info",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/tenant-management/tenant/{{tenantId}}/admin-info",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "tenant-management", "tenant", "{{tenantId}}", "admin-info"]
+            },
+            "description": "**📊 Get detailed tenant and admin information**\n\n🔒 **Authorization:** super_admin only\n\n✅ **Success Response (200):**\n```json\n{\n  \"tenant\": {\n    \"id\": \"uuid\",\n    \"name\": \"HDFC Bank\",\n    \"slug\": \"hdfc-bank\",\n    \"domain\": \"hdfcbank.com\",\n    \"description\": \"HDFC Bank - Financial Risk Assessment\",\n    \"is_active\": true,\n    \"created_at\": \"2024-01-01T00:00:00Z\"\n  },\n  \"admin_users\": [\n    {\n      \"id\": \"uuid\",\n      \"email\": \"admin@hdfcbank.com\",\n      \"full_name\": \"HDFC Administrator\",\n      \"username\": \"hdfc_admin\",\n      \"is_active\": true,\n      \"last_login\": \"2024-01-01T10:00:00Z\"\n    }\n  ],\n  \"organizations_count\": 5,\n  \"users_count\": 25,\n  \"total_admin_users\": 1\n}\n```"
+          }
+        },
+        {
+          "name": "Remove Tenant Admin",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/tenant-management/remove-tenant-admin/{{userId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "tenant-management", "remove-tenant-admin", "{{userId}}"]
+            },
+            "description": "**❌ Remove tenant admin role from user**\n\n🔒 **Authorization:** super_admin only\n\n✅ **Success Response (200):**\n```json\n{\n  \"user_id\": \"uuid\",\n  \"user_email\": \"admin@hdfcbank.com\",\n  \"previous_role\": \"tenant_admin\",\n  \"new_role\": \"user\",\n  \"tenant_id\": \"uuid\",\n  \"success\": true,\n  \"message\": \"Tenant admin role removed successfully\"\n}\n```"
+          }
+        },
+        {
+          "name": "Assign User to Organization",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"user_email\": \"user@hdfcbank.com\",\n    \"organization_id\": \"{{organizationId}}\",\n    \"organization_role\": \"member\",\n    \"bypass_join_token\": true\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/tenant-management/assign-user-to-organization",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "tenant-management", "assign-user-to-organization"]
+            },
+            "description": "**🏢 Directly assign user to organization** (bypasses join token)\n\n🔒 **Authorization:** super_admin only\n\n📋 **Request Body Schema:**\n```json\n{\n  \"user_email\": \"string\",        // Email of user to assign (required)\n  \"organization_id\": \"uuid\",     // Target organization ID (required)\n  \"organization_role\": \"member|admin|owner\", // Role in organization\n  \"bypass_join_token\": boolean   // Skip join token validation\n}\n```\n\n✅ **Success Response (200):**\n```json\n{\n  \"user_id\": \"uuid\",\n  \"user_email\": \"user@hdfcbank.com\",\n  \"organization_id\": \"uuid\",\n  \"organization_name\": \"HDFC Main Organization\",\n  \"organization_role\": \"member\",\n  \"success\": true,\n  \"message\": \"User assigned to organization successfully\"\n}\n```"
+          }
+        }
+      ]
+    },
+    {
+      "name": "🏢 Tenant Management (9 endpoints)",
+      "description": "Complete tenant lifecycle: create, list, get details, update, delete, stats, assign/remove admin, list admins",
+      "item": [
+        {
+          "name": "Create Tenant",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.tenant && response.tenant.id) {",
+                  "        pm.collectionVariables.set('tenantId', response.tenant.id);",
+                  "        console.log('🏦 Tenant ID set:', response.tenant.id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"ICICI Bank\",\n    \"description\": \"ICICI Bank - Digital Banking Risk Assessment Platform\",\n    \"domain\": \"icicibank.com\",\n    \"is_active\": true\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tenants",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "tenants"]
+            },
+            "description": "**🏦 Create a new tenant**\n\n🔒 **Authorization:** super_admin only\n\n📋 **Request Body Schema:**\n```json\n{\n  \"name\": \"string\",         // Tenant name (must be unique)\n  \"description\": \"string\",  // Tenant description\n  \"domain\": \"string\",       // Optional: Tenant domain\n  \"is_active\": boolean      // Default: true\n}\n```\n\n✅ **Success Response (200):**\n```json\n{\n  \"tenant\": {\n    \"id\": \"uuid\",\n    \"name\": \"ICICI Bank\",\n    \"slug\": \"icici-bank\",\n    \"description\": \"ICICI Bank - Digital Banking Risk Assessment Platform\",\n    \"domain\": \"icicibank.com\",\n    \"is_active\": true,\n    \"created_at\": \"2024-01-01T00:00:00Z\",\n    \"created_by\": \"uuid\"\n  }\n}\n```"
+          }
+        },
+        {
+          "name": "List All Tenants",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tenants?page=1&size=10&include_stats=true&include_admins=true",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "tenants"],
+              "query": [
+                {"key": "page", "value": "1"},
+                {"key": "size", "value": "10"},
+                {"key": "include_stats", "value": "true"},
+                {"key": "include_admins", "value": "true"}
+              ]
+            },
+            "description": "**📋 Get comprehensive list of all tenants**\n\n🔒 **Authorization:** super_admin only\n\n📋 **Query Parameters:**\n- `page` (integer): Page number (default: 1)\n- `size` (integer): Page size (default: 10)\n- `include_stats` (boolean): Include tenant statistics\n- `include_admins` (boolean): Include admin users info\n\n✅ **Success Response (200):**\n```json\n{\n  \"tenants\": [\n    {\n      \"id\": \"uuid\",\n      \"name\": \"HDFC Bank\",\n      \"slug\": \"hdfc-bank\",\n      \"domain\": \"hdfcbank.com\",\n      \"is_active\": true,\n      \"created_at\": \"2024-01-01T00:00:00Z\",\n      \"stats\": {\n        \"total_organizations\": 5,\n        \"total_users\": 25,\n        \"total_predictions\": 150,\n        \"active_users_count\": 20\n      },\n      \"admin_users\": [\n        {\n          \"id\": \"uuid\",\n          \"email\": \"admin@hdfcbank.com\",\n          \"full_name\": \"HDFC Administrator\"\n        }\n      ]\n    }\n  ],\n  \"pagination\": {\n    \"page\": 1,\n    \"size\": 10,\n    \"total\": 5,\n    \"pages\": 1\n  }\n}\n```"
+          }
+        },
+        {
+          "name": "Get Tenant Details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tenants/{{tenantId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "tenants", "{{tenantId}}"]
+            },
+            "description": "**📊 Get comprehensive details for specific tenant**\n\n🔒 **Authorization:** super_admin or tenant_admin of the tenant\n\n✅ **Success Response (200):**\n```json\n{\n  \"tenant\": {\n    \"id\": \"uuid\",\n    \"name\": \"HDFC Bank\",\n    \"slug\": \"hdfc-bank\",\n    \"description\": \"HDFC Bank - Financial Risk Assessment\",\n    \"domain\": \"hdfcbank.com\",\n    \"is_active\": true,\n    \"created_at\": \"2024-01-01T00:00:00Z\"\n  },\n  \"statistics\": {\n    \"total_organizations\": 5,\n    \"total_users\": 25,\n    \"total_predictions\": 150,\n    \"active_users_count\": 20,\n    \"total_companies\": 100\n  },\n  \"recent_activity\": [\n    {\n      \"type\": \"user_created\",\n      \"description\": \"New user registered\",\n      \"timestamp\": \"2024-01-01T10:00:00Z\"\n    }\n  ]\n}\n```"
+          }
+        },
+        {
+          "name": "Update Tenant",
+          "request": {
+            "method": "PUT",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"HDFC Bank Ltd\",\n    \"description\": \"HDFC Bank Limited - Enhanced Financial Risk Assessment Platform\",\n    \"domain\": \"hdfcbank.com\",\n    \"is_active\": true\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tenants/{{tenantId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "tenants", "{{tenantId}}"]
+            },
+            "description": "**✏️ Update tenant information**\n\n🔒 **Authorization:** super_admin or tenant_admin\n\n📋 **Request Body Schema:**\n```json\n{\n  \"name\": \"string\",         // Optional: New tenant name\n  \"description\": \"string\",  // Optional: New description\n  \"domain\": \"string\",       // Optional: New domain\n  \"is_active\": boolean      // Optional: Active status\n}\n```\n\n✅ **Success Response (200):**\n```json\n{\n  \"tenant\": {\n    \"id\": \"uuid\",\n    \"name\": \"HDFC Bank Ltd\",\n    \"slug\": \"hdfc-bank-ltd\",\n    \"description\": \"HDFC Bank Limited - Enhanced Financial Risk Assessment Platform\",\n    \"domain\": \"hdfcbank.com\",\n    \"is_active\": true,\n    \"updated_at\": \"2024-01-01T12:00:00Z\"\n  }\n}\n```"
+          }
+        },
+        {
+          "name": "Delete Tenant",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tenants/{{tenantId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "tenants", "{{tenantId}}"]
+            },
+            "description": "**🗑️ Delete tenant and all associated data**\n\n🔒 **Authorization:** super_admin only\n\n⚠️ **Warning:** This action is irreversible and deletes all tenant data including users, organizations, and predictions.\n\n✅ **Success Response (200):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Tenant deleted successfully\",\n  \"deleted_tenant_id\": \"uuid\",\n  \"deleted_data\": {\n    \"users\": 25,\n    \"organizations\": 5,\n    \"predictions\": 150,\n    \"companies\": 100\n  }\n}\n```"
+          }
+        },
+        {
+          "name": "Get Tenant Statistics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tenants/{{tenantId}}/stats",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "tenants", "{{tenantId}}", "stats"]
+            },
+            "description": "**📊 Get detailed statistics for tenant**\n\n🔒 **Authorization:** tenant access required\n\n✅ **Success Response (200):**\n```json\n{\n  \"tenant_id\": \"uuid\",\n  \"tenant_name\": \"HDFC Bank\",\n  \"organizations\": {\n    \"total\": 5,\n    \"active\": 4,\n    \"inactive\": 1\n  },\n  \"users\": {\n    \"total\": 25,\n    \"active\": 20,\n    \"admins\": 3,\n    \"members\": 17\n  },\n  \"predictions\": {\n    \"total\": 150,\n    \"this_month\": 45,\n    \"successful\": 140,\n    \"failed\": 10,\n    \"annual\": 90,\n    \"quarterly\": 60\n  },\n  \"companies\": {\n    \"total\": 100,\n    \"analyzed\": 85\n  }\n}\n```"
+          }
+        },
+        {
+          "name": "Assign Tenant Admin",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"user_id\": \"{{userId}}\",\n    \"replace_existing\": false\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tenants/{{tenantId}}/assign-admin",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "tenants", "{{tenantId}}", "assign-admin"]
+            },
+            "description": "**👤 Assign user as tenant admin**\n\n🔒 **Authorization:** super_admin only\n\n📋 **Request Body Schema:**\n```json\n{\n  \"user_id\": \"uuid\",         // ID of user to make admin\n  \"replace_existing\": boolean // Whether to replace existing tenant assignment\n}\n```\n\n✅ **Success Response (200):**\n```json\n{\n  \"success\": true,\n  \"message\": \"User assigned as tenant admin successfully\",\n  \"user_id\": \"uuid\",\n  \"tenant_id\": \"uuid\",\n  \"previous_role\": \"user\",\n  \"new_role\": \"tenant_admin\"\n}\n```"
+          }
+        },
+        {
+          "name": "Remove Tenant Admin",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tenants/{{tenantId}}/remove-admin/{{userId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "tenants", "{{tenantId}}", "remove-admin", "{{userId}}"]
+            },
+            "description": "**❌ Remove tenant admin role from user**\n\n🔒 **Authorization:** super_admin only\n\n✅ **Success Response (200):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Tenant admin role removed successfully\",\n  \"user_id\": \"uuid\",\n  \"tenant_id\": \"uuid\",\n  \"previous_role\": \"tenant_admin\",\n  \"new_role\": \"user\"\n}\n```"
+          }
+        },
+        {
+          "name": "List Tenant Admins",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tenants/{{tenantId}}/admins",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "tenants", "{{tenantId}}", "admins"]
+            },
+            "description": "**👥 Get list of all tenant administrators**\n\n🔒 **Authorization:** super_admin or tenant_admin\n\n✅ **Success Response (200):**\n```json\n[\n  {\n    \"user_id\": \"uuid\",\n    \"email\": \"admin@hdfcbank.com\",\n    \"full_name\": \"HDFC Administrator\",\n    \"username\": \"hdfc_admin\",\n    \"is_active\": true,\n    \"assigned_at\": \"2024-01-01T00:00:00Z\",\n    \"last_login\": \"2024-01-01T10:00:00Z\",\n    \"permissions\": [\"manage_users\", \"manage_organizations\"]\n  }\n]\n```"
+          }
+        }
+      ]
+    }
+  ]
+}

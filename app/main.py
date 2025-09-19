@@ -229,7 +229,8 @@ def create_app() -> FastAPI:
                 "🏢 tenant_management": {
                     "prefix": "/api/v1/tenants",
                     "access": "Super Admin Only",
-                    "endpoints": ["list", "create", "get", "update", "delete", "stats", "admins"]
+                    "endpoints": ["list", "create", "get", "update", "delete", "stats"],
+                    "note": "Core tenant CRUD operations only - admin management moved to tenant-admin section"
                 },
                 "🏛️ organization_management": {
                     "prefix": "/api/v1/organizations",

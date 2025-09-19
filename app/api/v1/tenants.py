@@ -8,10 +8,12 @@ from datetime import datetime
 from ...core.database import get_db, Tenant, Organization, User
 from ...schemas.schemas import (
     TenantCreate, TenantUpdate, TenantResponse, 
-    TenantListResponse, TenantStatsResponse
+    TenantListResponse, TenantStatsResponse,
+    ComprehensiveTenantListResponse, ComprehensiveTenantResponse,
+    TenantAdminInfo, DetailedOrganizationInfo, OrganizationAdminInfo, OrganizationUserInfo
 )
 from .auth_multi_tenant import get_current_active_user
-from .auth_admin import require_super_admin
+from .auth_admin import require_super_admin, require_tenant_admin_or_above
 from ...utils.tenant_utils import create_tenant_slug, validate_tenant_domain
 
 router = APIRouter(tags=["Tenant Management"])
@@ -69,18 +71,29 @@ async def create_tenant(
     
     return TenantResponse.from_orm(new_tenant)
 
-@router.get("", response_model=TenantListResponse)
+@router.get("", response_model=ComprehensiveTenantListResponse)
 async def list_tenants(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     search: Optional[str] = Query(None),
     is_active: Optional[bool] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_super_admin)
+    current_user: User = Depends(require_tenant_admin_or_above)
 ):
-    """List all tenants with optional filtering (Super Admin only)."""
+    """List tenants with comprehensive details - Super Admin sees all, Tenant Admin sees only their tenant."""
     
     query = db.query(Tenant)
+    
+    # Role-based filtering
+    if current_user.role == "tenant_admin":
+        # Tenant admin can only see their own tenant
+        if not current_user.tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant admin must belong to a tenant"
+            )
+        query = query.filter(Tenant.id == current_user.tenant_id)
+    # Super admin can see all tenants (no additional filter needed)
     
     # Apply filters
     if search:
@@ -101,20 +114,138 @@ async def list_tenants(
     # Apply pagination
     tenants = query.order_by(Tenant.created_at.desc()).offset(skip).limit(limit).all()
     
-    return TenantListResponse(
-        tenants=[TenantResponse.from_orm(tenant) for tenant in tenants],
+    # Return comprehensive response with detailed information
+    comprehensive_tenants = []
+    total_tenant_admins = 0
+    total_organizations = 0
+    total_users = 0
+    
+    for tenant in tenants:
+        # Get tenant admins
+        tenant_admins = db.query(User).filter(
+            and_(User.tenant_id == tenant.id, User.role == "tenant_admin")
+        ).all()
+        
+        tenant_admin_info = [
+            TenantAdminInfo(
+                id=str(admin.id),
+                email=admin.email,
+                username=admin.username,
+                full_name=admin.full_name,
+                role=admin.role,
+                is_active=admin.is_active,
+                created_at=admin.created_at,
+                last_login=admin.last_login
+            ) for admin in tenant_admins
+        ]
+        
+        # Get organizations under this tenant
+        organizations = db.query(Organization).filter(Organization.tenant_id == tenant.id).all()
+        
+        detailed_orgs = []
+        tenant_total_users = len(tenant_admins)  # Start with tenant admins
+        tenant_active_users = len([admin for admin in tenant_admins if admin.is_active])
+        
+        for org in organizations:
+            # Get organization admin
+            org_admin = db.query(User).filter(
+                and_(User.organization_id == org.id, User.role == "org_admin")
+            ).first()
+            
+            org_admin_info = None
+            if org_admin:
+                org_admin_info = OrganizationAdminInfo(
+                    id=str(org_admin.id),
+                    email=org_admin.email,
+                    username=org_admin.username,
+                    full_name=org_admin.full_name,
+                    role=org_admin.role,
+                    is_active=org_admin.is_active,
+                    created_at=org_admin.created_at
+                )
+            
+            # Get organization members
+            org_members = db.query(User).filter(
+                and_(User.organization_id == org.id, User.role == "org_member")
+            ).all()
+            
+            org_member_info = [
+                OrganizationUserInfo(
+                    id=str(member.id),
+                    email=member.email,
+                    username=member.username,
+                    full_name=member.full_name,
+                    role=member.role,
+                    is_active=member.is_active,
+                    created_at=member.created_at
+                ) for member in org_members
+            ]
+            
+            # Count users in this organization
+            org_total_users = len(org_members) + (1 if org_admin else 0)
+            tenant_total_users += org_total_users
+            tenant_active_users += len([m for m in org_members if m.is_active]) + (1 if org_admin and org_admin.is_active else 0)
+            
+            detailed_org = DetailedOrganizationInfo(
+                id=str(org.id),
+                name=org.name,
+                slug=org.slug,
+                description=org.description,
+                is_active=org.is_active,
+                join_token=org.join_token,
+                join_enabled=org.join_enabled,
+                default_role=org.default_role,
+                max_users=org.max_users,
+                created_at=org.created_at,
+                updated_at=org.updated_at,
+                admin=org_admin_info,
+                members=org_member_info,
+                total_users=org_total_users
+            )
+            detailed_orgs.append(detailed_org)
+        
+        comprehensive_tenant = ComprehensiveTenantResponse(
+            id=str(tenant.id),
+            name=tenant.name,
+            slug=tenant.slug,
+            domain=tenant.domain,
+            description=tenant.description,
+            logo_url=tenant.logo_url,
+            is_active=tenant.is_active,
+            created_by=str(tenant.created_by),
+            created_at=tenant.created_at,
+            updated_at=tenant.updated_at,
+            tenant_admins=tenant_admin_info,
+            total_tenant_admins=len(tenant_admin_info),
+            organizations=detailed_orgs,
+            total_organizations=len(detailed_orgs),
+            active_organizations=len([org for org in detailed_orgs if org.is_active]),
+            total_users_in_tenant=tenant_total_users,
+            total_active_users=tenant_active_users
+        )
+        
+        comprehensive_tenants.append(comprehensive_tenant)
+        total_tenant_admins += len(tenant_admin_info)
+        total_organizations += len(detailed_orgs)
+        total_users += tenant_total_users
+    
+    return ComprehensiveTenantListResponse(
+        tenants=comprehensive_tenants,
         total=total,
         skip=skip,
-        limit=limit
+        limit=limit,
+        total_tenant_admins=total_tenant_admins,
+        total_organizations=total_organizations,
+        total_users=total_users
     )
 
-@router.get("/{tenant_id}", response_model=TenantResponse)
+@router.get("/{tenant_id}", response_model=ComprehensiveTenantResponse)
 async def get_tenant(
     tenant_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_super_admin)
+    current_user: User = Depends(require_tenant_admin_or_above)
 ):
-    """Get tenant details (Super Admin only)."""
+    """Get comprehensive tenant details - Super Admin can access any tenant, Tenant Admin can access their own tenant."""
     
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not tenant:
@@ -123,16 +254,128 @@ async def get_tenant(
             detail="Tenant not found"
         )
     
-    return TenantResponse.from_orm(tenant)
+    # Check access permissions
+    if current_user.role == "tenant_admin":
+        # Tenant admin can only access their own tenant
+        if str(current_user.tenant_id) != tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied to this tenant"
+            )
+    
+    # Get comprehensive tenant information (same logic as list endpoint)
+    
+    # Get tenant admins
+    tenant_admins = db.query(User).filter(
+        and_(User.tenant_id == tenant.id, User.role == "tenant_admin")
+    ).all()
+    
+    tenant_admin_info = [
+        TenantAdminInfo(
+            id=str(admin.id),
+            email=admin.email,
+            username=admin.username,
+            full_name=admin.full_name,
+            role=admin.role,
+            is_active=admin.is_active,
+            created_at=admin.created_at,
+            last_login=admin.last_login
+        ) for admin in tenant_admins
+    ]
+    
+    # Get organizations under this tenant
+    organizations = db.query(Organization).filter(Organization.tenant_id == tenant.id).all()
+    
+    detailed_orgs = []
+    tenant_total_users = len(tenant_admins)  # Start with tenant admins
+    tenant_active_users = len([admin for admin in tenant_admins if admin.is_active])
+    
+    for org in organizations:
+        # Get organization admin
+        org_admin = db.query(User).filter(
+            and_(User.organization_id == org.id, User.role == "org_admin")
+        ).first()
+        
+        org_admin_info = None
+        if org_admin:
+            org_admin_info = OrganizationAdminInfo(
+                id=str(org_admin.id),
+                email=org_admin.email,
+                username=org_admin.username,
+                full_name=org_admin.full_name,
+                role=org_admin.role,
+                is_active=org_admin.is_active,
+                created_at=org_admin.created_at
+            )
+        
+        # Get organization members
+        org_members = db.query(User).filter(
+            and_(User.organization_id == org.id, User.role == "org_member")
+        ).all()
+        
+        org_member_info = [
+            OrganizationUserInfo(
+                id=str(member.id),
+                email=member.email,
+                username=member.username,
+                full_name=member.full_name,
+                role=member.role,
+                is_active=member.is_active,
+                created_at=member.created_at
+            ) for member in org_members
+        ]
+        
+        # Count users in this organization
+        org_total_users = len(org_members) + (1 if org_admin else 0)
+        tenant_total_users += org_total_users
+        tenant_active_users += len([m for m in org_members if m.is_active]) + (1 if org_admin and org_admin.is_active else 0)
+        
+        detailed_org = DetailedOrganizationInfo(
+            id=str(org.id),
+            name=org.name,
+            slug=org.slug,
+            description=org.description,
+            is_active=org.is_active,
+            join_token=org.join_token,
+            join_enabled=org.join_enabled,
+            default_role=org.default_role,
+            max_users=org.max_users,
+            created_at=org.created_at,
+            updated_at=org.updated_at,
+            admin=org_admin_info,
+            members=org_member_info,
+            total_users=org_total_users
+        )
+        detailed_orgs.append(detailed_org)
+    
+    return ComprehensiveTenantResponse(
+        id=str(tenant.id),
+        name=tenant.name,
+        slug=tenant.slug,
+        domain=tenant.domain,
+        description=tenant.description,
+        logo_url=tenant.logo_url,
+        is_active=tenant.is_active,
+        created_by=str(tenant.created_by),
+        created_at=tenant.created_at,
+        updated_at=tenant.updated_at,
+        tenant_admins=tenant_admin_info,
+        total_tenant_admins=len(tenant_admins),
+        organizations=detailed_orgs,
+        total_organizations=len(organizations),
+        active_organizations=len([org for org in organizations if org.is_active]),
+        total_users_in_tenant=tenant_total_users,
+        total_active_users=tenant_active_users
+    )
 
 @router.put("/{tenant_id}", response_model=TenantResponse)
 async def update_tenant(
     tenant_id: str,
     tenant_update: TenantUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_super_admin)
+    current_user: User = Depends(require_tenant_admin_or_above)
 ):
-    """Update tenant information (Super Admin only)."""
+    """Update tenant information - Super Admin can update any tenant, Tenant Admin can update their own tenant."""
     
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not tenant:
@@ -140,6 +383,15 @@ async def update_tenant(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Tenant not found"
         )
+    
+    # Check access permissions
+    if current_user.role == "tenant_admin":
+        # Tenant admin can only update their own tenant
+        if str(current_user.tenant_id) != tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Can only update your own tenant"
+            )
     
     # Update fields if provided
     update_data = tenant_update.dict(exclude_unset=True)
@@ -215,9 +467,9 @@ async def delete_tenant(
 async def get_tenant_stats(
     tenant_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_super_admin)
+    current_user: User = Depends(require_tenant_admin_or_above)
 ):
-    """Get tenant statistics (Super Admin only)."""
+    """Get tenant statistics - Super Admin can access any tenant, Tenant Admin can access their own tenant."""
     
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not tenant:
@@ -225,6 +477,15 @@ async def get_tenant_stats(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Tenant not found"
         )
+    
+    # Check access permissions
+    if current_user.role == "tenant_admin":
+        # Tenant admin can only access their own tenant stats
+        if str(current_user.tenant_id) != tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied to this tenant's statistics"
+            )
     
     # Get organization count
     org_count = db.query(Organization).filter(Organization.tenant_id == tenant_id).count()
@@ -250,138 +511,37 @@ async def get_tenant_stats(
         created_at=tenant.created_at
     )
 
-@router.post("/{tenant_id}/assign-admin", response_model=dict)
-async def assign_tenant_admin(
-    tenant_id: str,
-    request_data: dict,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_super_admin)
-):
-    """Assign a user as tenant admin (Super Admin only)."""
-    
-    user_email = request_data.get("user_email")
-    if not user_email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="user_email is required"
-        )
-    
-    # Validate tenant exists
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not tenant:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Tenant not found"
-        )
-    
-    # Find user by email
-    user = db.query(User).filter(User.email == user_email).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
-    # Check if user is already a tenant admin for a different tenant
-    if user.global_role == "tenant_admin" and user.tenant_id and str(user.tenant_id) != tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User is already a tenant admin for another tenant"
-        )
-    
-    # Assign tenant admin role
-    user.global_role = "tenant_admin"
-    user.tenant_id = tenant_id
-    user.organization_id = None  # Remove from specific org if assigned
-    user.organization_role = None
-    
-    db.commit()
-    db.refresh(user)
-    
-    return {
-        "message": f"Successfully assigned {user.email} as tenant admin for {tenant.name}",
-        "user_id": str(user.id),
-        "tenant_id": tenant_id,
-        "role": user.global_role
-    }
+# =============================================
+# COMMENTED OUT: DUPLICATE ENDPOINTS 
+# These are duplicated in tenant_admin_management.py with better business logic
+# Keeping for potential future use
+# =============================================
 
-@router.delete("/{tenant_id}/remove-admin/{user_id}", response_model=dict)
-async def remove_tenant_admin(
-    tenant_id: str,
-    user_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_super_admin)
-):
-    """Remove tenant admin role from a user (Super Admin only)."""
-    
-    # Validate tenant exists
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not tenant:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Tenant not found"
-        )
-    
-    # Find user
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
-    # Check if user is tenant admin for this tenant
-    if user.global_role != "tenant_admin" or str(user.tenant_id) != tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User is not a tenant admin for this tenant"
-        )
-    
-    # Remove tenant admin role
-    user.global_role = "user"
-    user.tenant_id = None
-    
-    db.commit()
-    db.refresh(user)
-    
-    return {
-        "message": f"Successfully removed tenant admin role from {user.email}",
-        "user_id": str(user.id),
-        "new_role": user.global_role
-    }
+# @router.post("/{tenant_id}/assign-admin", response_model=dict)
+# async def assign_tenant_admin(
+#     tenant_id: str,
+#     request_data: dict,
+#     db: Session = Depends(get_db),
+#     current_user: User = Depends(require_super_admin)
+# ):
+#     """DEPRECATED: Use /tenant-admin/assign-existing-user instead"""
+#     pass
 
-@router.get("/{tenant_id}/admins", response_model=List[dict])
-async def get_tenant_admins(
-    tenant_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_super_admin)
-):
-    """Get list of tenant admins for a specific tenant (Super Admin only)."""
-    
-    # Validate tenant exists
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not tenant:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Tenant not found"
-        )
-    
-    # Get all tenant admins for this tenant
-    tenant_admins = db.query(User).filter(
-        and_(
-            User.global_role == "tenant_admin",
-            User.tenant_id == tenant_id
-        )
-    ).all()
-    
-    return [
-        {
-            "user_id": str(admin.id),
-            "email": admin.email,
-            "full_name": admin.full_name,
-            "username": admin.username,
-            "is_active": admin.is_active,
-            "created_at": admin.created_at
-        }
-        for admin in tenant_admins
-    ]
+# @router.delete("/{tenant_id}/remove-admin/{user_id}", response_model=dict)
+# async def remove_tenant_admin(
+#     tenant_id: str,
+#     user_id: str,
+#     db: Session = Depends(get_db),
+#     current_user: User = Depends(require_super_admin)
+# ):
+#     """DEPRECATED: Use /tenant-admin/remove-tenant-admin/{user_id} instead"""
+#     pass
+
+# @router.get("/{tenant_id}/admins", response_model=List[dict])
+# async def get_tenant_admins(
+#     tenant_id: str,
+#     db: Session = Depends(get_db),
+#     current_user: User = Depends(require_super_admin)
+# ):
+#     """DEPRECATED: Use /tenant-admin/tenant/{tenant_id}/admin-info instead"""
+#     pass

@@ -1,0 +1,426 @@
+{
+	"info": {
+		"name": "Multi-Tenant Financial Risk API - Complete Collection",
+		"description": "Complete API collection for the multi-tenant financial risk prediction system with authentication, organizations, companies, and predictions",
+		"version": "2.1.0",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:8000",
+			"type": "string"
+		},
+		{
+			"key": "token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "userId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "organizationId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "tenantId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "companyId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "predictionId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "jobId",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{token}}",
+				"type": "string"
+			}
+		]
+	},
+	"item": [
+		{
+			"name": "🔐 Authentication",
+			"item": [
+				{
+					"name": "Register User",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200 || pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    if (response.user && response.user.id) {",
+									"        pm.collectionVariables.set('userId', response.user.id);",
+									"        console.log('User ID set:', response.user.id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"admin@example.com\",\n    \"password\": \"securepassword123\",\n    \"full_name\": \"System Admin\",\n    \"role\": \"super_admin\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/auth/register",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "v1", "auth", "register"]
+						}
+					}
+				},
+				{
+					"name": "Login User",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    if (response.access_token) {",
+									"        pm.collectionVariables.set('token', response.access_token);",
+									"        console.log('Token set:', response.access_token.substring(0, 20) + '...');",
+									"    }",
+									"    if (response.user && response.user.id) {",
+									"        pm.collectionVariables.set('userId', response.user.id);",
+									"        console.log('User ID set:', response.user.id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"admin@example.com\",\n    \"password\": \"securepassword123\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/auth/login",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "v1", "auth", "login"]
+						}
+					}
+				},
+				{
+					"name": "Register Organization User",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200 || pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    if (response.user && response.user.organization_id) {",
+									"        pm.collectionVariables.set('organizationId', response.user.organization_id);",
+									"        console.log('Organization ID set:', response.user.organization_id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"orguser@techcorp.com\",\n    \"password\": \"orgpassword123\",\n    \"full_name\": \"Organization User\",\n    \"role\": \"org_member\",\n    \"join_token\": \"TECH-2024-ABC123\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/auth/register",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "v1", "auth", "register"]
+						}
+					}
+				},
+				{
+					"name": "Get Current User",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/auth/me",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "v1", "auth", "me"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "🏢 Tenants",
+			"item": [
+				{
+					"name": "Create Tenant",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200 || pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    if (response.tenant && response.tenant.id) {",
+									"        pm.collectionVariables.set('tenantId', response.tenant.id);",
+									"        console.log('Tenant ID set:', response.tenant.id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Enterprise Financial Corp\",\n    \"slug\": \"enterprise-financial\",\n    \"domain\": \"enterprise-financial.com\",\n    \"description\": \"Leading financial services provider\",\n    \"logo_url\": \"https://example.com/logo.png\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/tenants",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "v1", "tenants"]
+						}
+					}
+				},
+				{
+					"name": "List Tenants",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/tenants?page=1&limit=10",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "v1", "tenants"],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "limit",
+									"value": "10"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Tenant by ID",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/tenants/{{tenantId}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "v1", "tenants", "{{tenantId}}"]
+						}
+					}
+				},
+				{
+					"name": "Update Tenant",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Enterprise Financial Corp - Updated\",\n    \"description\": \"Leading financial services provider with updated info\",\n    \"logo_url\": \"https://example.com/new-logo.png\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/tenants/{{tenantId}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "v1", "tenants", "{{tenantId}}"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "🏛️ Organizations",
+			"item": [
+				{
+					"name": "Create Organization",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200 || pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    if (response.organization && response.organization.id) {",
+									"        pm.collectionVariables.set('organizationId', response.organization.id);",
+									"        console.log('Organization ID set:', response.organization.id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"TechCorp Analytics\",\n    \"slug\": \"techcorp-analytics\",\n    \"domain\": \"techcorp.com\",\n    \"description\": \"Technology company focused on financial analytics\",\n    \"default_role\": \"org_member\",\n    \"max_users\": 100\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/organizations/",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "v1", "organizations", ""]
+						}
+					}
+				},
+				{
+					"name": "List Organizations",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/organizations/?page=1&limit=10",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "v1", "organizations", ""],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "limit",
+									"value": "10"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Organization by ID",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/organizations/{{organizationId}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "v1", "organizations", "{{organizationId}}"]
+						}
+					}
+				},
+				{
+					"name": "Update Organization",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"TechCorp Analytics - Updated\",\n    \"description\": \"Updated technology company focused on financial analytics\",\n    \"max_users\": 150,\n    \"allow_global_data_access\": true\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/organizations/{{organizationId}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "v1", "organizations", "{{organizationId}}"]
+						}
+					}
+				},
+				{
+					"name": "Enable Global Data Access",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"allow_global_data_access\": true\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/organizations/{{organizationId}}/global-data-access",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "v1", "organizations", "{{organizationId}}", "global-data-access"]
+						}
+					}
+				},
+				{
+					"name": "Get Global Data Access Status",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/organizations/{{organizationId}}/global-data-access",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "v1", "organizations", "{{organizationId}}", "global-data-access"]
+						}
+					}
+				}
+			]
+		}
+	]
+}

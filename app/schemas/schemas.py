@@ -8,15 +8,14 @@ import uuid
 # ENUMS
 # ========================================
 
-class GlobalRole(str, Enum):
-    USER = "user"  # Normal user with no org till now
-    TENANT_ADMIN = "tenant_admin"  # Manage tenant and can access all org under that tenant only
-    SUPER_ADMIN = "super_admin"  # Project owner - full system access
-
-class OrganizationRole(str, Enum):
-    ADMIN = "admin"  # Org admin - manage only given org, user invite done by org admin
-    MEMBER = "member"  # Members - user which can access org
-
+# New 5-Role System
+class UserRole(str, Enum):
+    SUPER_ADMIN = "super_admin"      # Can manage everything
+    TENANT_ADMIN = "tenant_admin"    # Attached to 1 tenant, can manage multiple orgs within that tenant
+    ORG_ADMIN = "org_admin"          # Attached to 1 organization, can manage users in that org  
+    ORG_MEMBER = "org_member"        # Attached to 1 organization, can access org resources
+    USER = "user"                    # No organization attachment, limited access
+ 
 class WhitelistStatus(str, Enum):
     ACTIVE = "active"
     INACTIVE = "inactive"
@@ -44,7 +43,7 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str = Field(..., min_length=8)
-    global_role: Optional[str] = "user"
+    role: Optional[str] = "user"  # Use single role field
     first_name: Optional[str] = None  # Support separate first/last name
     last_name: Optional[str] = None   # Support separate first/last name
     
@@ -71,8 +70,7 @@ class UserResponse(BaseModel):
     email: str
     username: Optional[str]
     full_name: Optional[str]
-    global_role: str
-    organization_role: Optional[str]  # Make this optional since users may not have org role initially
+    role: str  # Single role field
     organization_id: Optional[str]
     tenant_id: Optional[str]
     is_active: bool
@@ -87,7 +85,6 @@ class UserResponse(BaseModel):
     
     class Config:
         orm_mode = True
-        from_attributes = True
 
 class UserListResponse(BaseModel):
     users: List[UserResponse]
@@ -96,17 +93,14 @@ class UserListResponse(BaseModel):
     limit: int
 
 class UserRoleUpdate(BaseModel):
-    global_role: Optional[GlobalRole] = None
-    organization_role: Optional[OrganizationRole] = None
+    role: Optional[UserRole] = None  # Single role field
 
 class UserRoleUpdateResponse(BaseModel):
     user_id: str
     email: str
     full_name: Optional[str]
-    old_global_role: str
-    new_global_role: str
-    old_organization_role: Optional[str]
-    new_organization_role: Optional[str]
+    old_role: str
+    new_role: str
     updated_by: str
     updated_at: datetime
 
@@ -150,7 +144,6 @@ class TenantResponse(BaseModel):
     
     class Config:
         orm_mode = True
-        from_attributes = True
 
 class TenantListResponse(BaseModel):
     tenants: List[TenantResponse]
@@ -168,7 +161,6 @@ class TenantStatsResponse(BaseModel):
     
     class Config:
         orm_mode = True
-        from_attributes = True
 
 # ========================================
 # ORGANIZATION SCHEMAS
@@ -183,7 +175,7 @@ class OrganizationBase(BaseModel):
 class OrganizationCreate(OrganizationBase):
     tenant_id: Optional[str] = None
     max_users: Optional[int] = Field(500, ge=1, le=10000)
-    default_role: Optional[OrganizationRole] = OrganizationRole.MEMBER
+    default_role: Optional[str] = "org_member"  # Use string for new role system
 
 class OrganizationUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=2, max_length=100)
@@ -191,9 +183,10 @@ class OrganizationUpdate(BaseModel):
     description: Optional[str] = None
     logo_url: Optional[str] = None
     max_users: Optional[int] = Field(None, ge=1, le=10000)
-    default_role: Optional[OrganizationRole] = None
+    default_role: Optional[str] = None  # Use string for new role system
     join_enabled: Optional[bool] = None
     is_active: Optional[bool] = None
+    allow_global_data_access: Optional[bool] = None  # Controls access to global predictions/companies
 
 class OrganizationResponse(BaseModel):
     id: str
@@ -208,6 +201,7 @@ class OrganizationResponse(BaseModel):
     join_enabled: bool
     default_role: str
     is_active: bool
+    allow_global_data_access: bool
     created_by: str
     created_at: datetime
     updated_at: Optional[datetime]
@@ -220,7 +214,6 @@ class OrganizationResponse(BaseModel):
         return v
     
     class Config:
-        from_attributes = True
         orm_mode = True  # For compatibility with from_orm()
 
 class OrganizationListResponse(BaseModel):
@@ -265,7 +258,6 @@ class WhitelistResponse(BaseModel):
         return v
     
     class Config:
-        from_attributes = True
         orm_mode = True  # For compatibility with from_orm()
 
 class WhitelistListResponse(BaseModel):
@@ -332,7 +324,6 @@ class CompanyResponse(BaseModel):
         return v
     
     class Config:
-        from_attributes = True
         orm_mode = True  # For compatibility with from_orm()
 
 class CompanyListResponse(BaseModel):
@@ -342,19 +333,60 @@ class CompanyListResponse(BaseModel):
     limit: int
 
 # ========================================
-# PREDICTION SCHEMAS (for reference - update existing)
+# PREDICTION SCHEMAS FOR API
 # ========================================
 
-class PredictionBase(BaseModel):
-    company_id: str
+class PredictionRequest(BaseModel):
+    """Base prediction request schema for backward compatibility"""
+    company_name: str = Field(..., min_length=1, max_length=255)
+    revenue: float = Field(..., gt=0)
+    expenses: float = Field(..., ge=0)
+    assets: float = Field(..., gt=0)
+    liabilities: float = Field(..., ge=0)
+    year: int = Field(..., ge=2020, le=2030)
+
+class AnnualPredictionRequest(BaseModel):
+    """Annual prediction with required company data and 5 ratios"""
+    # Company Information
+    company_symbol: str = Field(..., min_length=1, max_length=20)
+    company_name: str = Field(..., min_length=1, max_length=255)
+    market_cap: float = Field(..., gt=0, description="Market cap in millions of dollars")
+    sector: str = Field(..., min_length=1, max_length=100)
+    
+    # Time Period
+    reporting_year: str = Field(..., pattern=r'^\d{4}$')
+    reporting_quarter: Optional[str] = Field(None, pattern=r'^Q[1-4]$', description="Optional quarter (Q1, Q2, Q3, Q4)")
+    
+    # 5 Financial Ratios for Annual ML Model (all required)
+    long_term_debt_to_total_capital: float = Field(..., ge=0, le=100)
+    total_debt_to_ebitda: float = Field(..., ge=0)
+    net_income_margin: float = Field(..., ge=-100, le=100)
+    ebit_to_interest_expense: float = Field(..., ge=0)
+    return_on_assets: float = Field(..., ge=-100, le=100)
+
+class QuarterlyPredictionRequest(BaseModel):
+    """Quarterly prediction with required company data and 4 ratios"""
+    # Company Information
+    company_symbol: str = Field(..., min_length=1, max_length=20)
+    company_name: str = Field(..., min_length=1, max_length=255)
+    market_cap: float = Field(..., gt=0, description="Market cap in millions of dollars")
+    sector: str = Field(..., min_length=1, max_length=100)
+    
+    # Time Period
     reporting_year: str = Field(..., pattern=r'^\d{4}$')
     reporting_quarter: str = Field(..., pattern=r'^(Q[1-4]|[1-4])$')
-
-class QuarterlyPredictionCreate(PredictionBase):
+    
+    # 4 Financial Ratios for Quarterly ML Model (all required)
     total_debt_to_ebitda: float = Field(..., ge=0)
     sga_margin: float = Field(..., ge=-100, le=100)
     long_term_debt_to_total_capital: float = Field(..., ge=0, le=100)
     return_on_capital: float = Field(..., ge=-100, le=100)
+
+# Legacy schemas for backward compatibility (if needed)
+class PredictionBase(BaseModel):
+    company_id: str
+    reporting_year: str = Field(..., pattern=r'^\d{4}$')
+    reporting_quarter: Optional[str] = Field(None, pattern=r'^(Q[1-4]|[1-4])$')
 
 class AnnualPredictionCreate(PredictionBase):
     long_term_debt_to_total_capital: float = Field(..., ge=0, le=100)
@@ -362,6 +394,36 @@ class AnnualPredictionCreate(PredictionBase):
     net_income_margin: float = Field(..., ge=-100, le=100)
     ebit_to_interest_expense: float = Field(..., ge=0)
     return_on_assets: float = Field(..., ge=-100, le=100)
+
+class QuarterlyPredictionCreate(PredictionBase):
+    total_debt_to_ebitda: float = Field(..., ge=0)
+    sga_margin: float = Field(..., ge=-100, le=100)
+    long_term_debt_to_total_capital: float = Field(..., ge=0, le=100)
+    return_on_capital: float = Field(..., ge=-100, le=100)
+
+# Unified prediction request (for flexible API)
+class UnifiedPredictionRequest(BaseModel):
+    """Unified prediction request that can handle both annual and quarterly"""
+    # Company Information
+    company_symbol: str = Field(..., min_length=1, max_length=20)
+    company_name: str = Field(..., min_length=1, max_length=255)
+    market_cap: float = Field(..., gt=0, description="Market cap in millions of dollars")
+    sector: str = Field(..., min_length=1, max_length=100)
+    
+    # Time Period
+    reporting_year: str = Field(..., pattern=r'^\d{4}$')
+    reporting_quarter: Optional[str] = Field(None, pattern=r'^(Q[1-4]|[1-4])$', description="Optional - if provided, creates quarterly prediction")
+    
+    # Annual Model Ratios (required for annual, optional for quarterly)
+    long_term_debt_to_total_capital: Optional[float] = Field(None, ge=0, le=100)
+    total_debt_to_ebitda: Optional[float] = Field(None, ge=0)
+    net_income_margin: Optional[float] = Field(None, ge=-100, le=100)
+    ebit_to_interest_expense: Optional[float] = Field(None, ge=0)
+    return_on_assets: Optional[float] = Field(None, ge=-100, le=100)
+    
+    # Quarterly Model Ratios (required for quarterly, optional for annual)
+    sga_margin: Optional[float] = Field(None, ge=-100, le=100)
+    return_on_capital: Optional[float] = Field(None, ge=-100, le=100)
 
 class PredictionResponse(BaseModel):
     id: str
@@ -385,7 +447,6 @@ class PredictionResponse(BaseModel):
         return v
     
     class Config:
-        from_attributes = True
         orm_mode = True  # For compatibility with from_orm()
 
 class PredictionListResponse(BaseModel):
@@ -405,140 +466,6 @@ class BulkUploadResponse(BaseModel):
     successful: int
     failed: int
     errors: List[dict] = []
-
-# ========================================
-# ADDITIONAL PREDICTION SCHEMAS
-# ========================================
-
-class PredictionRequest(BaseModel):
-    """Base prediction request schema."""
-    company_name: str = Field(..., min_length=1, max_length=255)
-    revenue: float = Field(..., gt=0)
-    expenses: float = Field(..., ge=0)
-    assets: float = Field(..., gt=0)
-    liabilities: float = Field(..., ge=0)
-    year: int = Field(..., ge=2020, le=2030)
-
-class QuarterlyPredictionRequest(BaseModel):
-    """Request schema for quarterly predictions."""
-    company_name: str = Field(..., min_length=1, max_length=255)
-    revenue: float = Field(..., gt=0)
-    expenses: float = Field(..., ge=0)
-    assets: float = Field(..., gt=0)
-    liabilities: float = Field(..., ge=0)
-    quarter: int = Field(..., ge=1, le=4)
-    year: int = Field(..., ge=2020, le=2030)
-
-class AnnualPredictionRequest(BaseModel):
-    """Request schema for annual predictions."""
-    company_name: str = Field(..., min_length=1, max_length=255)
-    revenue: float = Field(..., gt=0)
-    expenses: float = Field(..., ge=0)
-    assets: float = Field(..., gt=0)
-    liabilities: float = Field(..., ge=0)
-    year: int = Field(..., ge=2020, le=2030)
-
-class UnifiedPredictionRequest(BaseModel):
-    """Unified prediction request for both annual and quarterly."""
-    company_name: str = Field(..., min_length=1, max_length=255)
-    revenue: float = Field(..., gt=0)
-    expenses: float = Field(..., ge=0)
-    assets: float = Field(..., gt=0)
-    liabilities: float = Field(..., ge=0)
-    year: int = Field(..., ge=2020, le=2030)
-    quarter: Optional[int] = Field(None, ge=1, le=4)
-
-class CompanyWithPredictionsResponse(BaseModel):
-    """Company with its predictions."""
-    company: CompanyResponse
-    annual_predictions: List[PredictionResponse] = []
-    quarterly_predictions: List[PredictionResponse] = []
-
-class BulkPredictionItem(BaseModel):
-    """Single item in bulk prediction."""
-    company_name: str
-    revenue: float
-    expenses: float
-    assets: float
-    liabilities: float
-    year: int
-    prediction_probability: Optional[float] = None
-    prediction_class: Optional[str] = None
-    status: str = "pending"
-    error_message: Optional[str] = None
-
-class BulkPredictionResponse(BaseModel):
-    """Response for bulk predictions."""
-    job_id: str
-    status: str = "started"
-    total_companies: int
-    processed: int = 0
-    successful: int = 0
-    failed: int = 0
-    items: List[BulkPredictionItem] = []
-
-class QuarterlyBulkPredictionItem(BaseModel):
-    """Single item in quarterly bulk prediction."""
-    company_name: str
-    revenue: float
-    expenses: float
-    assets: float
-    liabilities: float
-    quarter: int
-    year: int
-    prediction_probability: Optional[float] = None
-    prediction_class: Optional[str] = None
-    status: str = "pending"
-    error_message: Optional[str] = None
-
-class QuarterlyBulkPredictionResponse(BaseModel):
-    """Response for quarterly bulk predictions."""
-    job_id: str
-    status: str = "started"
-    total_companies: int
-    processed: int = 0
-    successful: int = 0
-    failed: int = 0
-    items: List[QuarterlyBulkPredictionItem] = []
-
-class PredictionUpdateRequest(BaseModel):
-    """Request to update prediction."""
-    prediction_probability: Optional[float] = None
-    prediction_class: Optional[str] = None
-    notes: Optional[str] = None
-
-class BulkJobResponse(BaseModel):
-    """Job response for bulk operations."""
-    job_id: str
-    status: str
-    created_at: datetime
-    completed_at: Optional[datetime] = None
-    total_items: int
-    processed_items: int
-    successful_items: int
-    failed_items: int
-    progress_percentage: float
-
-class QuarterlyBulkJobResponse(BaseModel):
-    """Job response for quarterly bulk operations."""
-    job_id: str
-    status: str
-    created_at: datetime
-    completed_at: Optional[datetime] = None
-    total_items: int
-    processed_items: int
-    successful_items: int
-    failed_items: int
-    progress_percentage: float
-
-class JobStatusResponse(BaseModel):
-    """General job status response."""
-    job_id: str
-    status: str
-    progress: float
-    total: int
-    completed: int
-    errors: List[str] = []
 
 # ========================================
 # ERROR SCHEMAS
@@ -566,7 +493,6 @@ class OrgAdminInfo(BaseModel):
         return v
     
     class Config:
-        from_attributes = True
         orm_mode = True
 
 class OrganizationDetailedResponse(BaseModel):
@@ -601,5 +527,242 @@ class OrganizationDetailedResponse(BaseModel):
         return v
     
     class Config:
-        from_attributes = True
         orm_mode = True
+
+# ========================================
+# COMPREHENSIVE TENANT SCHEMAS (for Super Admin)
+# ========================================
+
+class TenantAdminInfo(BaseModel):
+    """Tenant admin user information"""
+    id: str
+    email: str
+    username: str
+    full_name: str
+    role: str
+    is_active: bool
+    created_at: datetime
+    last_login: Optional[datetime]
+    
+    @validator('id', pre=True)
+    def convert_uuid_to_str(cls, v):
+        if v is not None:
+            return str(v)
+        return v
+    
+    class Config:
+        orm_mode = True
+
+class OrganizationAdminInfo(BaseModel):
+    """Organization admin information"""
+    id: str
+    email: str
+    username: str
+    full_name: str
+    role: str
+    is_active: bool
+    created_at: datetime
+    
+    @validator('id', pre=True)
+    def convert_uuid_to_str(cls, v):
+        if v is not None:
+            return str(v)
+        return v
+    
+    class Config:
+        orm_mode = True
+
+class OrganizationUserInfo(BaseModel):
+    """Organization member information"""
+    id: str
+    email: str
+    username: str
+    full_name: str
+    role: str
+    is_active: bool
+    created_at: datetime
+    
+    @validator('id', pre=True)
+    def convert_uuid_to_str(cls, v):
+        if v is not None:
+            return str(v)
+        return v
+    
+    class Config:
+        orm_mode = True
+
+class DetailedOrganizationInfo(BaseModel):
+    """Detailed organization information with users"""
+    id: str
+    name: str
+    slug: str
+    description: Optional[str]
+    is_active: bool
+    join_token: str
+    join_enabled: bool
+    default_role: str
+    max_users: int
+    created_at: datetime
+    updated_at: Optional[datetime]
+    
+    # Users in this organization
+    admin: Optional[OrganizationAdminInfo] = None
+    members: List[OrganizationUserInfo] = []
+    total_users: int = 0
+    
+    @validator('id', pre=True)
+    def convert_uuid_to_str(cls, v):
+        if v is not None:
+            return str(v)
+        return v
+    
+    class Config:
+        orm_mode = True
+
+class ComprehensiveTenantResponse(BaseModel):
+    """Comprehensive tenant information for super admin"""
+    id: str
+    name: str
+    slug: str
+    domain: Optional[str]
+    description: Optional[str]
+    logo_url: Optional[str]
+    is_active: bool
+    created_by: str
+    created_at: datetime
+    updated_at: Optional[datetime]
+    
+    # Tenant administration
+    tenant_admins: List[TenantAdminInfo] = []
+    total_tenant_admins: int = 0
+    
+    # Organizations under this tenant
+    organizations: List[DetailedOrganizationInfo] = []
+    total_organizations: int = 0
+    active_organizations: int = 0
+    
+    # Overall statistics
+    total_users_in_tenant: int = 0
+    total_active_users: int = 0
+    
+    @validator('id', 'created_by', pre=True)
+    def convert_uuid_to_str(cls, v):
+        if v is not None:
+            return str(v)
+        return v
+    
+    class Config:
+        orm_mode = True
+
+class ComprehensiveTenantListResponse(BaseModel):
+    """List response with comprehensive tenant information"""
+    tenants: List[ComprehensiveTenantResponse]
+    total: int
+    skip: int
+    limit: int
+    
+    # Summary statistics
+    total_tenant_admins: int = 0
+    total_organizations: int = 0
+    total_users: int = 0
+
+# ========================================
+# ENHANCED ORGANIZATION SCHEMAS
+# ========================================
+
+class TenantInfo(BaseModel):
+    """Basic tenant information for organization responses"""
+    id: str
+    name: str
+    slug: str
+    domain: Optional[str]
+    
+    @validator('id', pre=True)
+    def convert_uuid_to_str(cls, v):
+        if v is not None:
+            return str(v)
+        return v
+
+class OrganizationMemberInfo(BaseModel):
+    """Organization member information"""
+    id: str
+    tenant_id: Optional[str]
+    organization_id: Optional[str]
+    email: str
+    username: Optional[str]
+    full_name: Optional[str]
+    role: str
+    is_active: bool
+    created_at: datetime
+    
+    @validator('id', pre=True)
+    def convert_uuid_to_str(cls, v):
+        if v is not None:
+            return str(v)
+        return v
+
+class EnhancedTenantInfo(BaseModel):
+    """Enhanced tenant information with admin details"""
+    id: str
+    name: str
+    description: Optional[str]
+    tenant_code: str
+    logo_url: Optional[str]
+    is_active: bool
+    created_at: datetime
+    # Tenant admin details
+    tenant_admins: List[OrganizationMemberInfo] = []
+    total_tenant_admins: int = 0
+    
+    @validator('id', pre=True)
+    def convert_uuid_to_str(cls, v):
+        if v is not None:
+            return str(v)
+        return v
+
+class EnhancedOrganizationResponse(BaseModel):
+    """Enhanced organization response with tenant, admin, and member details"""
+    id: str
+    tenant_id: Optional[str]
+    name: str
+    slug: str
+    domain: Optional[str]
+    description: Optional[str]
+    logo_url: Optional[str]
+    max_users: int
+    join_token: str
+    join_enabled: bool
+    default_role: str
+    is_active: bool
+    created_by: str
+    created_at: datetime
+    updated_at: Optional[datetime]
+    join_created_at: datetime
+    
+    # Enhanced details
+    tenant: Optional[EnhancedTenantInfo] = None
+    org_admin: Optional[OrganizationMemberInfo] = None
+    members: List[OrganizationMemberInfo] = []
+    total_users: int = 0
+    active_users: int = 0
+    total_members: int = 0
+    active_members: int = 0
+    
+    @validator('id', 'tenant_id', 'created_by', pre=True)
+    def convert_uuid_to_str(cls, v):
+        if v is not None:
+            return str(v)
+        return v
+    
+    class Config:
+        orm_mode = True
+
+class EnhancedOrganizationListResponse(BaseModel):
+    """Enhanced organization list response"""
+    organizations: List[EnhancedOrganizationResponse]
+    total: int
+    skip: int
+    limit: int
+    total_admins: int = 0
+    total_members: int = 0
+    total_users: int = 0

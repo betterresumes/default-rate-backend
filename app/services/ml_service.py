@@ -188,5 +188,17 @@ class MLModelService:
                 "predicted_at": datetime.utcnow().isoformat()
             }
 
+    async def predict_annual(self, financial_ratios: Dict[str, float]) -> Dict:
+        """
+        Async wrapper for annual prediction - calls predict_default_probability
+        
+        Args:
+            financial_ratios: Dictionary containing the 5 required financial ratios
+            
+        Returns:
+            Dictionary with prediction results
+        """
+        return self.predict_default_probability(financial_ratios)
+
 # Create a global instance
 ml_model = MLModelService()

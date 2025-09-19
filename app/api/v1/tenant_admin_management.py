@@ -81,7 +81,7 @@ class AssignUserToOrgRequest(BaseModel):
     """Schema for assigning user to organization."""
     user_email: EmailStr
     organization_id: str
-    role: str = "member"  # member, org_admin
+    role: str = "org_member"  # org_member, org_admin
     
 class AssignUserToOrgResponse(BaseModel):
     """Response schema for user organization assignment."""
@@ -182,8 +182,7 @@ async def create_tenant_with_admin(
             username=username,
             full_name=full_name,
             hashed_password=hashed_password,
-            global_role="tenant_admin",  # Assign tenant admin role
-            organization_role=None,  # Will be set when joining organization
+            role="tenant_admin",  # Assign tenant admin role
             tenant_id=new_tenant.id,  # Assign to the new tenant
             is_active=True,
             created_at=datetime.utcnow()
@@ -207,7 +206,7 @@ async def create_tenant_with_admin(
                 tenant_id=new_tenant.id,
                 slug=create_tenant_slug(org_name),  # Reuse slug function
                 join_token=generate_join_token(),
-                default_role="member",
+                default_role="org_member",
                 is_active=True,
                 join_enabled=True,
                 created_by=admin_user.id,
@@ -219,7 +218,7 @@ async def create_tenant_with_admin(
             
             # Make admin user the organization admin
             admin_user.organization_id = default_org.id
-            admin_user.organization_role = "admin"
+            admin_user.role = "org_admin"  # Update role to org_admin when assigned to organization
         
         # 4. Commit all changes
         db.commit()
@@ -291,7 +290,7 @@ async def assign_existing_user_as_tenant_admin(
         )
     
     # Check if user is already a tenant admin of another tenant
-    if user.global_role == "tenant_admin" and user.tenant_id != assignment_data.tenant_id:
+    if user.role == "tenant_admin" and user.tenant_id != assignment_data.tenant_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"User is already tenant admin of another tenant. Use super admin to reassign."
@@ -299,10 +298,10 @@ async def assign_existing_user_as_tenant_admin(
     
     try:
         # Store previous role for response
-        previous_role = user.global_role
+        previous_role = user.role
         
         # Update user role and tenant assignment
-        user.global_role = "tenant_admin"
+        user.role = "tenant_admin"
         user.tenant_id = assignment_data.tenant_id
         user.updated_at = datetime.utcnow()
         
@@ -315,7 +314,7 @@ async def assign_existing_user_as_tenant_admin(
             tenant_id=str(tenant.id),
             tenant_name=tenant.name,
             previous_role=previous_role,
-            new_role=user.global_role,
+            new_role=user.role,
             success=True,
             message=f"Successfully assigned {user.email} as tenant admin for {tenant.name}"
         )
@@ -351,7 +350,7 @@ async def get_tenant_admin_info(
     tenant_admins = db.query(User).filter(
         and_(
             User.tenant_id == tenant_id,
-            User.global_role == "tenant_admin"
+            User.role == "tenant_admin"
         )
     ).all()
     
@@ -368,7 +367,7 @@ async def get_tenant_admin_info(
                 "full_name": admin.full_name,
                 "username": admin.username,
                 "organization_id": str(admin.organization_id) if admin.organization_id else None,
-                "organization_role": admin.organization_role,
+                "role": admin.role,
                 "created_at": admin.created_at,
                 "last_login": admin.last_login
             }
@@ -401,7 +400,7 @@ async def remove_tenant_admin_role(
             detail="User not found"
         )
     
-    if user.global_role != "tenant_admin":
+    if user.role != "tenant_admin":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User is not a tenant admin"
@@ -413,7 +412,7 @@ async def remove_tenant_admin_role(
         tenant = db.query(Tenant).filter(Tenant.id == old_tenant_id).first() if old_tenant_id else None
         
         # Demote user
-        user.global_role = "user"
+        user.role = "user"
         user.tenant_id = None  # Remove tenant assignment
         user.updated_at = datetime.utcnow()
         
@@ -478,7 +477,7 @@ async def assign_user_to_organization(
             )
         
         # Validate role
-        valid_roles = ["member", "org_admin"]
+        valid_roles = ["org_member", "org_admin"]
         if assignment.role not in valid_roles:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -531,9 +530,9 @@ async def assign_user_to_organization(
         
         # Set appropriate global role based on org role
         if assignment.role == "org_admin":
-            user.global_role = "org_admin"
+            user.role = "org_admin"
         else:
-            user.global_role = "member"
+            user.role = "org_member"
         
         db.commit()
         

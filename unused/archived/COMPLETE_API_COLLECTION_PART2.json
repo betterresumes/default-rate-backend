@@ -1,0 +1,493 @@
+{
+  "info": {
+    "name": "🏦 COMPLETE Financial Risk API - PART 2: Organizations & Users",
+    "description": "Complete Postman collection for multi-tenant financial risk prediction system - PART 2: Organizations & Users Management (25 endpoints)",
+    "version": "1.0.0 - PRODUCTION READY",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000",
+      "type": "string",
+      "description": "🌐 Base URL for the API server"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string",
+      "description": "🔑 JWT access token for authentication"
+    },
+    {
+      "key": "userId",
+      "value": "",
+      "type": "string",
+      "description": "👤 Current user ID"
+    },
+    {
+      "key": "organizationId",
+      "value": "",
+      "type": "string",
+      "description": "🏢 Current organization ID"
+    },
+    {
+      "key": "tenantId",
+      "value": "",
+      "type": "string",
+      "description": "🏦 Current tenant ID"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "🏢 Organizations Management (14 endpoints)",
+      "description": "Complete organization lifecycle: CRUD operations, member management, whitelist, data access rules",
+      "item": [
+        {
+          "name": "Create Organization",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.organization && response.organization.id) {",
+                  "        pm.collectionVariables.set('organizationId', response.organization.id);",
+                  "        console.log('🏢 Organization ID set:', response.organization.id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"HDFC Risk Assessment Division\",\n    \"description\": \"Dedicated risk assessment and analysis division for corporate banking\",\n    \"type\": \"division\",\n    \"domain_whitelist\": [\"hdfcbank.com\", \"hdfc.com\"],\n    \"auto_approve_members\": true,\n    \"max_members\": 100,\n    \"data_access_rules\": {\n        \"allow_all_companies\": false,\n        \"allowed_sectors\": [\"banking\", \"finance\", \"insurance\"],\n        \"restricted_data_types\": [\"sensitive_financial\"]\n    }\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "organizations"]
+            },
+            "description": "**🏢 Create a new organization**\n\n🔒 **Authorization:** tenant_admin or org_admin\n\n📋 **Request Body Schema:**\n```json\n{\n  \"name\": \"string\",              // Organization name (required)\n  \"description\": \"string\",       // Organization description\n  \"type\": \"department|division|team|subsidiary\", // Organization type\n  \"domain_whitelist\": [\"string\"], // Allowed email domains\n  \"auto_approve_members\": boolean, // Auto-approve join requests\n  \"max_members\": integer,         // Maximum allowed members\n  \"data_access_rules\": {\n    \"allow_all_companies\": boolean,\n    \"allowed_sectors\": [\"string\"],\n    \"restricted_data_types\": [\"string\"]\n  }\n}\n```\n\n✅ **Success Response (201):**\n```json\n{\n  \"organization\": {\n    \"id\": \"uuid\",\n    \"name\": \"HDFC Risk Assessment Division\",\n    \"slug\": \"hdfc-risk-assessment-division\",\n    \"description\": \"Dedicated risk assessment and analysis division\",\n    \"type\": \"division\",\n    \"join_token\": \"HDFC-2024-RAD001\",\n    \"domain_whitelist\": [\"hdfcbank.com\", \"hdfc.com\"],\n    \"auto_approve_members\": true,\n    \"max_members\": 100,\n    \"current_members\": 1,\n    \"tenant_id\": \"uuid\",\n    \"created_by\": \"uuid\",\n    \"created_at\": \"2024-01-01T00:00:00Z\",\n    \"is_active\": true\n  }\n}\n```"
+          }
+        },
+        {
+          "name": "List Organizations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations?page=1&size=10&include_stats=true&type=division&search=risk",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "organizations"],
+              "query": [
+                {"key": "page", "value": "1"},
+                {"key": "size", "value": "10"},
+                {"key": "include_stats", "value": "true"},
+                {"key": "type", "value": "division"},
+                {"key": "search", "value": "risk"}
+              ]
+            },
+            "description": "**📋 Get list of organizations** (scoped to user's tenant)\n\n🔒 **Authorization:** authenticated user\n\n📋 **Query Parameters:**\n- `page` (integer): Page number (default: 1)\n- `size` (integer): Page size (default: 10)\n- `include_stats` (boolean): Include member/activity stats\n- `type` (string): Filter by organization type\n- `search` (string): Search in name/description\n\n✅ **Success Response (200):**\n```json\n{\n  \"organizations\": [\n    {\n      \"id\": \"uuid\",\n      \"name\": \"HDFC Risk Assessment Division\",\n      \"description\": \"Dedicated risk assessment division\",\n      \"type\": \"division\",\n      \"current_members\": 15,\n      \"max_members\": 100,\n      \"is_active\": true,\n      \"created_at\": \"2024-01-01T00:00:00Z\",\n      \"stats\": {\n        \"total_predictions\": 45,\n        \"active_members\": 12,\n        \"companies_analyzed\": 25\n      }\n    }\n  ],\n  \"pagination\": {\n    \"page\": 1,\n    \"size\": 10,\n    \"total\": 5,\n    \"pages\": 1\n  }\n}\n```"
+          }
+        },
+        {
+          "name": "Get Organization Details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{organizationId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "organizations", "{{organizationId}}"]
+            },
+            "description": "**📊 Get comprehensive organization details**\n\n🔒 **Authorization:** organization member or admin\n\n✅ **Success Response (200):**\n```json\n{\n  \"organization\": {\n    \"id\": \"uuid\",\n    \"name\": \"HDFC Risk Assessment Division\",\n    \"slug\": \"hdfc-risk-assessment-division\",\n    \"description\": \"Dedicated risk assessment and analysis division\",\n    \"type\": \"division\",\n    \"join_token\": \"HDFC-2024-RAD001\",\n    \"domain_whitelist\": [\"hdfcbank.com\"],\n    \"auto_approve_members\": true,\n    \"max_members\": 100,\n    \"current_members\": 15,\n    \"tenant_id\": \"uuid\",\n    \"created_at\": \"2024-01-01T00:00:00Z\",\n    \"data_access_rules\": {\n      \"allow_all_companies\": false,\n      \"allowed_sectors\": [\"banking\", \"finance\"],\n      \"restricted_data_types\": [\"sensitive_financial\"]\n    }\n  },\n  \"user_role\": \"admin\",\n  \"statistics\": {\n    \"total_predictions\": 45,\n    \"successful_predictions\": 42,\n    \"failed_predictions\": 3,\n    \"companies_analyzed\": 25,\n    \"active_members\": 12\n  }\n}\n```"
+          }
+        },
+        {
+          "name": "Update Organization",
+          "request": {
+            "method": "PUT",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"HDFC Advanced Risk Assessment Division\",\n    \"description\": \"Advanced risk assessment and AI-driven analysis division for corporate banking\",\n    \"type\": \"division\",\n    \"domain_whitelist\": [\"hdfcbank.com\", \"hdfc.com\", \"hdfclife.com\"],\n    \"auto_approve_members\": false,\n    \"max_members\": 150,\n    \"data_access_rules\": {\n        \"allow_all_companies\": false,\n        \"allowed_sectors\": [\"banking\", \"finance\", \"insurance\", \"fintech\"],\n        \"restricted_data_types\": [\"sensitive_financial\", \"personal_data\"]\n    }\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{organizationId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "organizations", "{{organizationId}}"]
+            },
+            "description": "**✏️ Update organization information**\n\n🔒 **Authorization:** organization admin or tenant admin\n\n📋 **Request Body Schema:** (All fields optional)\n```json\n{\n  \"name\": \"string\",\n  \"description\": \"string\",\n  \"type\": \"string\",\n  \"domain_whitelist\": [\"string\"],\n  \"auto_approve_members\": boolean,\n  \"max_members\": integer,\n  \"data_access_rules\": {\n    \"allow_all_companies\": boolean,\n    \"allowed_sectors\": [\"string\"],\n    \"restricted_data_types\": [\"string\"]\n  }\n}\n```\n\n✅ **Success Response (200):**\n```json\n{\n  \"organization\": {\n    \"id\": \"uuid\",\n    \"name\": \"HDFC Advanced Risk Assessment Division\",\n    \"updated_at\": \"2024-01-01T12:00:00Z\"\n  }\n}\n```"
+          }
+        },
+        {
+          "name": "Delete Organization",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{organizationId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "organizations", "{{organizationId}}"]
+            },
+            "description": "**🗑️ Delete organization** (requires confirmation)\n\n🔒 **Authorization:** organization owner or tenant admin\n\n⚠️ **Warning:** This removes all members and associated data\n\n✅ **Success Response (200):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Organization deleted successfully\",\n  \"deleted_organization_id\": \"uuid\",\n  \"affected_users\": 15,\n  \"data_cleanup\": {\n    \"predictions_transferred\": 45,\n    \"members_reassigned\": 15\n  }\n}\n```"
+          }
+        },
+        {
+          "name": "Update Domain Whitelist",
+          "request": {
+            "method": "PUT",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"domain_whitelist\": [\"hdfcbank.com\", \"hdfc.com\", \"hdfclife.com\", \"hdfcergo.com\"],\n    \"auto_approve_whitelisted\": true\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{organizationId}}/whitelist",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "organizations", "{{organizationId}}", "whitelist"]
+            },
+            "description": "**🔐 Update organization domain whitelist**\n\n🔒 **Authorization:** organization admin\n\n📋 **Request Body Schema:**\n```json\n{\n  \"domain_whitelist\": [\"string\"],  // List of allowed domains\n  \"auto_approve_whitelisted\": boolean // Auto-approve users from whitelisted domains\n}\n```\n\n✅ **Success Response (200):**\n```json\n{\n  \"organization_id\": \"uuid\",\n  \"domain_whitelist\": [\"hdfcbank.com\", \"hdfc.com\", \"hdfclife.com\"],\n  \"auto_approve_whitelisted\": true,\n  \"updated_at\": \"2024-01-01T12:00:00Z\"\n}\n```"
+          }
+        },
+        {
+          "name": "List Organization Members",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{organizationId}}/users?page=1&size=20&role=member&include_stats=true",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "organizations", "{{organizationId}}", "users"],
+              "query": [
+                {"key": "page", "value": "1"},
+                {"key": "size", "value": "20"},
+                {"key": "role", "value": "member"},
+                {"key": "include_stats", "value": "true"}
+              ]
+            },
+            "description": "**👥 Get organization members with detailed info**\n\n🔒 **Authorization:** organization member\n\n📋 **Query Parameters:**\n- `page`, `size`: Pagination\n- `role`: Filter by role (member, admin, owner)\n- `include_stats`: Include user activity stats\n\n✅ **Success Response (200):**\n```json\n{\n  \"members\": [\n    {\n      \"user_id\": \"uuid\",\n      \"email\": \"analyst@hdfcbank.com\",\n      \"full_name\": \"Risk Analyst\",\n      \"username\": \"risk_analyst_01\",\n      \"organization_role\": \"member\",\n      \"joined_at\": \"2024-01-01T00:00:00Z\",\n      \"last_activity\": \"2024-01-01T10:00:00Z\",\n      \"is_active\": true,\n      \"stats\": {\n        \"predictions_created\": 15,\n        \"companies_analyzed\": 8,\n        \"login_count\": 45\n      }\n    }\n  ],\n  \"summary\": {\n    \"total_members\": 15,\n    \"admins\": 2,\n    \"members\": 13,\n    \"active_members\": 12\n  }\n}\n```"
+          }
+        },
+        {
+          "name": "Add User to Organization",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"user_email\": \"newanalyst@hdfcbank.com\",\n    \"organization_role\": \"member\",\n    \"send_invitation\": true,\n    \"custom_message\": \"Welcome to HDFC Risk Assessment Division! You'll be working on corporate banking risk analysis.\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{organizationId}}/users",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "organizations", "{{organizationId}}", "users"]
+            },
+            "description": "**➕ Add user to organization**\n\n🔒 **Authorization:** organization admin\n\n📋 **Request Body Schema:**\n```json\n{\n  \"user_email\": \"string\",        // Email of user to add\n  \"organization_role\": \"member|admin\", // Role in organization\n  \"send_invitation\": boolean,     // Send email invitation\n  \"custom_message\": \"string\"      // Optional: Custom invitation message\n}\n```\n\n✅ **Success Response (200):**\n```json\n{\n  \"success\": true,\n  \"message\": \"User added to organization successfully\",\n  \"user_id\": \"uuid\",\n  \"organization_id\": \"uuid\",\n  \"organization_role\": \"member\",\n  \"invitation_sent\": true,\n  \"join_method\": \"admin_added\"\n}\n```"
+          }
+        },
+        {
+          "name": "Remove User from Organization",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{organizationId}}/users/{{userId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "organizations", "{{organizationId}}", "users", "{{userId}}"]
+            },
+            "description": "**❌ Remove user from organization**\n\n🔒 **Authorization:** organization admin (cannot remove owners)\n\n✅ **Success Response (200):**\n```json\n{\n  \"success\": true,\n  \"message\": \"User removed from organization successfully\",\n  \"user_id\": \"uuid\",\n  \"organization_id\": \"uuid\",\n  \"data_handling\": {\n    \"predictions_transferred\": false,\n    \"access_revoked\": true\n  }\n}\n```"
+          }
+        },
+        {
+          "name": "Update User Role in Organization",
+          "request": {
+            "method": "PUT",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"organization_role\": \"admin\",\n    \"notify_user\": true\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{organizationId}}/users/{{userId}}/role",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "organizations", "{{organizationId}}", "users", "{{userId}}", "role"]
+            },
+            "description": "**🔄 Update user's role in organization**\n\n🔒 **Authorization:** organization admin or owner\n\n📋 **Request Body Schema:**\n```json\n{\n  \"organization_role\": \"member|admin|owner\", // New role\n  \"notify_user\": boolean                     // Send notification email\n}\n```\n\n✅ **Success Response (200):**\n```json\n{\n  \"success\": true,\n  \"message\": \"User role updated successfully\",\n  \"user_id\": \"uuid\",\n  \"organization_id\": \"uuid\",\n  \"previous_role\": \"member\",\n  \"new_role\": \"admin\",\n  \"notification_sent\": true\n}\n```"
+          }
+        },
+        {
+          "name": "List Organization Admins",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{organizationId}}/admins",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "organizations", "{{organizationId}}", "admins"]
+            },
+            "description": "**👑 Get list of organization administrators**\n\n🔒 **Authorization:** organization member\n\n✅ **Success Response (200):**\n```json\n[\n  {\n    \"user_id\": \"uuid\",\n    \"email\": \"admin@hdfcbank.com\",\n    \"full_name\": \"Risk Assessment Admin\",\n    \"username\": \"risk_admin\",\n    \"organization_role\": \"admin\",\n    \"assigned_at\": \"2024-01-01T00:00:00Z\",\n    \"last_login\": \"2024-01-01T10:00:00Z\",\n    \"permissions\": [\n      \"manage_members\",\n      \"view_analytics\",\n      \"create_predictions\"\n    ]\n  }\n]\n```"
+          }
+        },
+        {
+          "name": "Get Data Access Rules",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{organizationId}}/data-access",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "organizations", "{{organizationId}}", "data-access"]
+            },
+            "description": "**📊 Get organization's data access rules and permissions**\n\n🔒 **Authorization:** organization member\n\n✅ **Success Response (200):**\n```json\n{\n  \"organization_id\": \"uuid\",\n  \"data_access_rules\": {\n    \"allow_all_companies\": false,\n    \"allowed_sectors\": [\"banking\", \"finance\", \"insurance\"],\n    \"restricted_data_types\": [\"sensitive_financial\", \"personal_data\"],\n    \"company_filters\": {\n      \"min_revenue\": 1000000,\n      \"max_risk_score\": 85,\n      \"geographic_restrictions\": [\"India\", \"UAE\"]\n    }\n  },\n  \"permissions\": {\n    \"can_create_predictions\": true,\n    \"can_view_sensitive_data\": false,\n    \"can_export_data\": true,\n    \"max_predictions_per_month\": 100\n  },\n  \"current_usage\": {\n    \"predictions_this_month\": 25,\n    \"companies_accessed\": 15,\n    \"data_exports\": 5\n  }\n}\n```"
+          }
+        },
+        {
+          "name": "Update Data Access Rules",
+          "request": {
+            "method": "PUT",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"data_access_rules\": {\n        \"allow_all_companies\": false,\n        \"allowed_sectors\": [\"banking\", \"finance\", \"insurance\", \"fintech\"],\n        \"restricted_data_types\": [\"sensitive_financial\", \"personal_data\", \"confidential\"],\n        \"company_filters\": {\n            \"min_revenue\": 5000000,\n            \"max_risk_score\": 80,\n            \"geographic_restrictions\": [\"India\", \"UAE\", \"Singapore\"]\n        }\n    },\n    \"permissions\": {\n        \"can_create_predictions\": true,\n        \"can_view_sensitive_data\": false,\n        \"can_export_data\": true,\n        \"max_predictions_per_month\": 150\n    }\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{organizationId}}/data-access",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "organizations", "{{organizationId}}", "data-access"]
+            },
+            "description": "**🔧 Update organization's data access rules**\n\n🔒 **Authorization:** organization admin or tenant admin\n\n📋 **Request Body Schema:**\n```json\n{\n  \"data_access_rules\": {\n    \"allow_all_companies\": boolean,\n    \"allowed_sectors\": [\"string\"],\n    \"restricted_data_types\": [\"string\"],\n    \"company_filters\": {\n      \"min_revenue\": number,\n      \"max_risk_score\": number,\n      \"geographic_restrictions\": [\"string\"]\n    }\n  },\n  \"permissions\": {\n    \"can_create_predictions\": boolean,\n    \"can_view_sensitive_data\": boolean,\n    \"can_export_data\": boolean,\n    \"max_predictions_per_month\": number\n  }\n}\n```\n\n✅ **Success Response (200):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Data access rules updated successfully\",\n  \"organization_id\": \"uuid\",\n  \"updated_at\": \"2024-01-01T12:00:00Z\",\n  \"affected_members\": 15\n}\n```"
+          }
+        },
+        {
+          "name": "Get Organization Statistics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{organizationId}}/stats?period=month&include_trends=true",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "organizations", "{{organizationId}}", "stats"],
+              "query": [
+                {"key": "period", "value": "month"},
+                {"key": "include_trends", "value": "true"}
+              ]
+            },
+            "description": "**📈 Get comprehensive organization statistics and analytics**\n\n🔒 **Authorization:** organization member\n\n📋 **Query Parameters:**\n- `period`: week|month|quarter|year\n- `include_trends`: Include trend analysis\n\n✅ **Success Response (200):**\n```json\n{\n  \"organization_id\": \"uuid\",\n  \"period\": \"month\",\n  \"members\": {\n    \"total\": 15,\n    \"active\": 12,\n    \"new_this_period\": 3,\n    \"admins\": 2\n  },\n  \"predictions\": {\n    \"total\": 45,\n    \"successful\": 42,\n    \"failed\": 3,\n    \"success_rate\": 93.3,\n    \"new_this_period\": 15\n  },\n  \"companies\": {\n    \"analyzed\": 25,\n    \"unique_sectors\": 8,\n    \"new_this_period\": 5\n  },\n  \"trends\": {\n    \"prediction_growth\": \"+25%\",\n    \"member_activity\": \"+15%\",\n    \"success_rate_change\": \"+2.1%\"\n  }\n}\n```"
+          }
+        }
+      ]
+    },
+    {
+      "name": "👤 Users Management (11 endpoints)",
+      "description": "Complete user lifecycle: profile management, CRUD operations, role management, activation",
+      "item": [
+        {
+          "name": "Get User Profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/profile",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "users", "profile"]
+            },
+            "description": "**👤 Get current user's complete profile**\n\n🔒 **Authorization:** authenticated user\n\n✅ **Success Response (200):**\n```json\n{\n  \"user\": {\n    \"id\": \"uuid\",\n    \"email\": \"analyst@hdfcbank.com\",\n    \"username\": \"hdfc_analyst\",\n    \"full_name\": \"Risk Analyst\",\n    \"first_name\": \"Risk\",\n    \"last_name\": \"Analyst\",\n    \"global_role\": \"user\",\n    \"organization_id\": \"uuid\",\n    \"organization_name\": \"HDFC Risk Assessment Division\",\n    \"organization_role\": \"member\",\n    \"tenant_id\": \"uuid\",\n    \"tenant_name\": \"HDFC Bank\",\n    \"is_active\": true,\n    \"created_at\": \"2024-01-01T00:00:00Z\",\n    \"last_login\": \"2024-01-01T10:00:00Z\",\n    \"profile_settings\": {\n      \"timezone\": \"Asia/Kolkata\",\n      \"language\": \"en\",\n      \"notifications_enabled\": true,\n      \"email_notifications\": true\n    }\n  },\n  \"permissions\": [\n    \"create_predictions\",\n    \"view_companies\",\n    \"export_data\"\n  ],\n  \"recent_activity\": {\n    \"predictions_created\": 5,\n    \"last_prediction\": \"2024-01-01T09:00:00Z\",\n    \"companies_analyzed\": 3\n  }\n}\n```"
+          }
+        },
+        {
+          "name": "Update User Profile",
+          "request": {
+            "method": "PUT",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"full_name\": \"Senior Risk Analyst\",\n    \"first_name\": \"Senior Risk\",\n    \"last_name\": \"Analyst\",\n    \"username\": \"hdfc_senior_analyst\",\n    \"profile_settings\": {\n        \"timezone\": \"Asia/Kolkata\",\n        \"language\": \"en\",\n        \"notifications_enabled\": true,\n        \"email_notifications\": true,\n        \"dashboard_layout\": \"advanced\"\n    }\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/profile",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "users", "profile"]
+            },
+            "description": "**✏️ Update current user's profile**\n\n🔒 **Authorization:** authenticated user\n\n📋 **Request Body Schema:**\n```json\n{\n  \"full_name\": \"string\",      // Optional: Full name\n  \"first_name\": \"string\",     // Optional: First name\n  \"last_name\": \"string\",      // Optional: Last name\n  \"username\": \"string\",       // Optional: Username (must be unique)\n  \"profile_settings\": {        // Optional: User preferences\n    \"timezone\": \"string\",\n    \"language\": \"string\",\n    \"notifications_enabled\": boolean,\n    \"email_notifications\": boolean,\n    \"dashboard_layout\": \"string\"\n  }\n}\n```\n\n✅ **Success Response (200):**\n```json\n{\n  \"user\": {\n    \"id\": \"uuid\",\n    \"full_name\": \"Senior Risk Analyst\",\n    \"username\": \"hdfc_senior_analyst\",\n    \"updated_at\": \"2024-01-01T12:00:00Z\"\n  },\n  \"message\": \"Profile updated successfully\"\n}\n```"
+          }
+        },
+        {
+          "name": "Change Password",
+          "request": {
+            "method": "PUT",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"current_password\": \"OldPassword@2024\",\n    \"new_password\": \"NewSecurePassword@2024\",\n    \"confirm_password\": \"NewSecurePassword@2024\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/change-password",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "users", "change-password"]
+            },
+            "description": "**🔒 Change user password**\n\n🔒 **Authorization:** authenticated user\n\n📋 **Request Body Schema:**\n```json\n{\n  \"current_password\": \"string\",  // Current password (required)\n  \"new_password\": \"string\",      // New password (min 8 chars)\n  \"confirm_password\": \"string\"   // Must match new_password\n}\n```\n\n✅ **Success Response (200):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Password changed successfully\",\n  \"password_strength\": \"strong\",\n  \"last_changed\": \"2024-01-01T12:00:00Z\"\n}\n```"
+          }
+        },
+        {
+          "name": "List Users (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users?page=1&size=20&role=user&organization_id={{organizationId}}&is_active=true&search=analyst",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "users"],
+              "query": [
+                {"key": "page", "value": "1"},
+                {"key": "size", "value": "20"},
+                {"key": "role", "value": "user"},
+                {"key": "organization_id", "value": "{{organizationId}}"},
+                {"key": "is_active", "value": "true"},
+                {"key": "search", "value": "analyst"}
+              ]
+            },
+            "description": "**📋 Get list of users** (Admin endpoint)\n\n🔒 **Authorization:** admin role required\n\n📋 **Query Parameters:**\n- `page`, `size`: Pagination\n- `role`: Filter by global role\n- `organization_id`: Filter by organization\n- `is_active`: Filter by active status\n- `search`: Search in name/email/username\n\n✅ **Success Response (200):**\n```json\n{\n  \"users\": [\n    {\n      \"id\": \"uuid\",\n      \"email\": \"analyst@hdfcbank.com\",\n      \"username\": \"hdfc_analyst\",\n      \"full_name\": \"Risk Analyst\",\n      \"global_role\": \"user\",\n      \"organization_id\": \"uuid\",\n      \"organization_name\": \"HDFC Risk Assessment\",\n      \"organization_role\": \"member\",\n      \"tenant_id\": \"uuid\",\n      \"is_active\": true,\n      \"created_at\": \"2024-01-01T00:00:00Z\",\n      \"last_login\": \"2024-01-01T10:00:00Z\"\n    }\n  ],\n  \"pagination\": {\n    \"page\": 1,\n    \"size\": 20,\n    \"total\": 25,\n    \"pages\": 2\n  }\n}\n```"
+          }
+        },
+        {
+          "name": "Get User Details (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "users", "{{userId}}"]
+            },
+            "description": "**👤 Get detailed user information** (Admin endpoint)\n\n🔒 **Authorization:** admin role required\n\n✅ **Success Response (200):**\n```json\n{\n  \"user\": {\n    \"id\": \"uuid\",\n    \"email\": \"analyst@hdfcbank.com\",\n    \"username\": \"hdfc_analyst\",\n    \"full_name\": \"Risk Analyst\",\n    \"first_name\": \"Risk\",\n    \"last_name\": \"Analyst\",\n    \"global_role\": \"user\",\n    \"organization_id\": \"uuid\",\n    \"organization_role\": \"member\",\n    \"tenant_id\": \"uuid\",\n    \"is_active\": true,\n    \"created_at\": \"2024-01-01T00:00:00Z\",\n    \"last_login\": \"2024-01-01T10:00:00Z\"\n  },\n  \"activity_stats\": {\n    \"total_logins\": 45,\n    \"predictions_created\": 15,\n    \"companies_analyzed\": 8,\n    \"organizations_joined\": 1\n  },\n  \"security_info\": {\n    \"last_password_change\": \"2024-01-01T00:00:00Z\",\n    \"failed_login_attempts\": 0,\n    \"account_locked\": false\n  }\n}\n```"
+          }
+        },
+        {
+          "name": "Update User (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"full_name\": \"Senior Risk Analyst - Updated\",\n    \"first_name\": \"Senior Risk\",\n    \"last_name\": \"Analyst - Updated\",\n    \"username\": \"hdfc_senior_analyst_v2\",\n    \"global_role\": \"org_member\",\n    \"organization_role\": \"admin\",\n    \"is_active\": true\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "users", "{{userId}}"]
+            },
+            "description": "**✏️ Update user information** (Admin endpoint)\n\n🔒 **Authorization:** admin role required\n\n📋 **Request Body Schema:**\n```json\n{\n  \"full_name\": \"string\",           // Optional: Full name\n  \"first_name\": \"string\",          // Optional: First name\n  \"last_name\": \"string\",           // Optional: Last name\n  \"username\": \"string\",            // Optional: Username\n  \"global_role\": \"string\",         // Optional: Global role\n  \"organization_role\": \"string\",   // Optional: Organization role\n  \"is_active\": boolean             // Optional: Active status\n}\n```\n\n✅ **Success Response (200):**\n```json\n{\n  \"user\": {\n    \"id\": \"uuid\",\n    \"full_name\": \"Senior Risk Analyst - Updated\",\n    \"global_role\": \"org_member\",\n    \"organization_role\": \"admin\",\n    \"updated_at\": \"2024-01-01T12:00:00Z\"\n  },\n  \"message\": \"User updated successfully\"\n}\n```"
+          }
+        },
+        {
+          "name": "Delete User (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "users", "{{userId}}"]
+            },
+            "description": "**🗑️ Delete user account** (Admin endpoint)\n\n🔒 **Authorization:** admin role required\n\n⚠️ **Warning:** This action is irreversible\n\n✅ **Success Response (200):**\n```json\n{\n  \"success\": true,\n  \"message\": \"User deleted successfully\",\n  \"deleted_user_id\": \"uuid\",\n  \"data_cleanup\": {\n    \"predictions_anonymized\": 15,\n    \"organization_memberships_removed\": 1,\n    \"personal_data_purged\": true\n  }\n}\n```"
+          }
+        },
+        {
+          "name": "Update User Role (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"global_role\": \"org_admin\",\n    \"organization_role\": \"admin\",\n    \"notify_user\": true,\n    \"effective_date\": \"2024-01-01T00:00:00Z\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}/role",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "users", "{{userId}}", "role"]
+            },
+            "description": "**🔄 Update user roles** (Admin endpoint)\n\n🔒 **Authorization:** admin role required\n\n📋 **Request Body Schema:**\n```json\n{\n  \"global_role\": \"user|org_member|org_admin|tenant_admin|super_admin\",\n  \"organization_role\": \"member|admin|owner\", // Optional\n  \"notify_user\": boolean,                     // Send notification\n  \"effective_date\": \"string\"                  // ISO date (optional)\n}\n```\n\n✅ **Success Response (200):**\n```json\n{\n  \"success\": true,\n  \"message\": \"User roles updated successfully\",\n  \"user_id\": \"uuid\",\n  \"changes\": {\n    \"global_role\": {\n      \"from\": \"user\",\n      \"to\": \"org_admin\"\n    },\n    \"organization_role\": {\n      \"from\": \"member\",\n      \"to\": \"admin\"\n    }\n  },\n  \"effective_date\": \"2024-01-01T00:00:00Z\",\n  \"notification_sent\": true\n}\n```"
+          }
+        },
+        {
+          "name": "Activate/Deactivate User (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"is_active\": true,\n    \"reason\": \"Account reactivated after security review\",\n    \"notify_user\": true\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}/activate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "users", "{{userId}}", "activate"]
+            },
+            "description": "**⚡ Activate or deactivate user account** (Admin endpoint)\n\n🔒 **Authorization:** admin role required\n\n📋 **Request Body Schema:**\n```json\n{\n  \"is_active\": boolean,  // true=activate, false=deactivate\n  \"reason\": \"string\",    // Optional: Reason for change\n  \"notify_user\": boolean // Send notification email\n}\n```\n\n✅ **Success Response (200):**\n```json\n{\n  \"success\": true,\n  \"message\": \"User activated successfully\",\n  \"user_id\": \"uuid\",\n  \"previous_status\": \"inactive\",\n  \"new_status\": \"active\",\n  \"reason\": \"Account reactivated after security review\",\n  \"notification_sent\": true,\n  \"timestamp\": \"2024-01-01T12:00:00Z\"\n}\n```"
+          }
+        },
+        {
+          "name": "Get User Organizations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}/organizations",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "users", "{{userId}}", "organizations"]
+            },
+            "description": "**🏢 Get user's organization memberships**\n\n🔒 **Authorization:** admin or self\n\n✅ **Success Response (200):**\n```json\n{\n  \"user_id\": \"uuid\",\n  \"organizations\": [\n    {\n      \"organization_id\": \"uuid\",\n      \"organization_name\": \"HDFC Risk Assessment Division\",\n      \"organization_role\": \"admin\",\n      \"joined_at\": \"2024-01-01T00:00:00Z\",\n      \"is_primary\": true,\n      \"permissions\": [\n        \"manage_members\",\n        \"create_predictions\",\n        \"view_analytics\"\n      ]\n    }\n  ],\n  \"total_organizations\": 1,\n  \"primary_organization\": \"uuid\"\n}\n```"
+          }
+        },
+        {
+          "name": "Get User Activity History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}/activity?page=1&size=50&activity_type=login&start_date=2024-01-01&end_date=2024-01-31",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "users", "{{userId}}", "activity"],
+              "query": [
+                {"key": "page", "value": "1"},
+                {"key": "size", "value": "50"},
+                {"key": "activity_type", "value": "login"},
+                {"key": "start_date", "value": "2024-01-01"},
+                {"key": "end_date", "value": "2024-01-31"}
+              ]
+            },
+            "description": "**📊 Get user activity history** (Admin endpoint)\n\n🔒 **Authorization:** admin role required\n\n📋 **Query Parameters:**\n- `page`, `size`: Pagination\n- `activity_type`: login|prediction|profile_update|role_change\n- `start_date`, `end_date`: Date range filter\n\n✅ **Success Response (200):**\n```json\n{\n  \"user_id\": \"uuid\",\n  \"activities\": [\n    {\n      \"id\": \"uuid\",\n      \"activity_type\": \"login\",\n      \"description\": \"User logged in\",\n      \"timestamp\": \"2024-01-01T10:00:00Z\",\n      \"ip_address\": \"192.168.1.1\",\n      \"user_agent\": \"Mozilla/5.0...\",\n      \"location\": \"Mumbai, India\",\n      \"success\": true,\n      \"metadata\": {\n        \"session_duration\": \"2h 15m\",\n        \"actions_performed\": 15\n      }\n    }\n  ],\n  \"summary\": {\n    \"total_activities\": 150,\n    \"logins\": 45,\n    \"predictions_created\": 15,\n    \"profile_updates\": 3\n  },\n  \"pagination\": {\n    \"page\": 1,\n    \"size\": 50,\n    \"total\": 150\n  }\n}\n```"
+          }
+        }
+      ]
+    }
+  ]
+}

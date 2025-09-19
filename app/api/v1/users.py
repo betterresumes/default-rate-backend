@@ -12,7 +12,7 @@ from ...schemas.schemas import (
 )
 from .auth_multi_tenant import get_current_active_user
 from .auth_admin import (
-    require_super_admin, require_tenant_admin, require_org_admin
+    require_super_admin, require_tenant_admin_or_above, require_org_admin_or_above
 )
 
 router = APIRouter(tags=["User Management"])
@@ -72,12 +72,11 @@ async def create_user(
     """Create a new user (Admin only)."""
     
     # Only super admin, tenant admin, or org admin can create users
-    if current_user.global_role not in ["super_admin", "tenant_admin"]:
-        if current_user.organization_role != "admin":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only admins can create users"
-            )
+    if current_user.role not in ["super_admin", "tenant_admin", "org_admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can create users"
+        )
     
     # Check if email already exists
     existing_user = db.query(User).filter(User.email == user_data.email.lower()).first()
@@ -96,12 +95,12 @@ async def create_user(
                 detail="Username already taken"
             )
     
-    # Determine organization and tenant based on current user's role
-    if current_user.global_role == "super_admin":
+    # Determine organization and tenant based on current user's role with new 5-role system
+    if current_user.role == "super_admin":
         # Super admin can create users for any organization/tenant
         organization_id = user_data.organization_id if hasattr(user_data, 'organization_id') else None
         tenant_id = user_data.tenant_id if hasattr(user_data, 'tenant_id') else None
-    elif current_user.global_role == "tenant_admin":
+    elif current_user.role == "tenant_admin":
         # Tenant admin can only create users within their tenant
         organization_id = user_data.organization_id if hasattr(user_data, 'organization_id') else None
         tenant_id = current_user.tenant_id
@@ -123,66 +122,50 @@ async def create_user(
     from .auth_multi_tenant import AuthManager
     hashed_password = AuthManager.get_password_hash(user_data.password)
     
-    # Create new user
+    # Create new user with new 5-role system
     try:
-        # Validate requested global role
-        valid_global_roles = ["user", "tenant_admin", "super_admin"]
-        requested_global_role = getattr(user_data, 'global_role', "user")
+        # Validate requested role
+        valid_roles = ["user", "org_member", "org_admin", "tenant_admin", "super_admin"]
+        requested_role = getattr(user_data, 'role', "user")
         
-        if requested_global_role not in valid_global_roles:
+        if requested_role not in valid_roles:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid global_role '{requested_global_role}'. Valid roles: {valid_global_roles}"
+                detail=f"Invalid role '{requested_role}'. Valid roles: {valid_roles}"
             )
         
-        # Determine global role based on permissions
-        if current_user.global_role == "super_admin":
-            # Super admin can assign any global role
-            global_role = requested_global_role
-        elif current_user.global_role == "tenant_admin":
-            # Tenant admin can assign user or tenant_admin roles (but not super_admin)
-            allowed_roles = ["user", "tenant_admin"]
-            if requested_global_role not in allowed_roles:
+        # Determine role based on permissions
+        if current_user.role == "super_admin":
+            # Super admin can assign any role
+            user_role = requested_role
+        elif current_user.role == "tenant_admin":
+            # Tenant admin can assign user, org_member, org_admin, tenant_admin roles (but not super_admin)
+            allowed_roles = ["user", "org_member", "org_admin", "tenant_admin"]
+            if requested_role not in allowed_roles:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Tenant admin can only assign roles: {allowed_roles}. Cannot assign '{requested_global_role}'"
+                    detail=f"Tenant admin can only assign roles: {allowed_roles}. Cannot assign '{requested_role}'"
                 )
-            global_role = requested_global_role
+            user_role = requested_role
         else:
-            # Org admin can only create regular users
-            if requested_global_role != "user":
+            # Org admin can only create org_member or org_admin users
+            allowed_roles = ["org_member", "org_admin"]
+            if requested_role not in allowed_roles:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Organization admin can only create users with 'user' global role"
+                    detail=f"Organization admin can only assign roles: {allowed_roles}. Cannot assign '{requested_role}'"
                 )
-            global_role = "user"
-        
-        # Determine organization role
-        # Only assign org role if user is being added to an organization
-        if organization_id:
-            valid_org_roles = ["member", "admin"]
-            requested_org_role = getattr(user_data, 'organization_role', "member")
-            
-            if requested_org_role not in valid_org_roles:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid organization_role '{requested_org_role}'. Valid roles: {valid_org_roles}"
-                )
-            org_role = requested_org_role
-        else:
-            # No organization = no organization role
-            org_role = None
+            user_role = requested_role
         
         new_user = User(
             id=uuid.uuid4(),
             email=user_data.email.lower(),
             username=user_data.username,
-            hashed_password=hashed_password,  # Correct field name
-            full_name=f"{user_data.first_name or ''} {user_data.last_name or ''}".strip() or None,  # Combine names
+            hashed_password=hashed_password,
+            full_name=f"{user_data.first_name or ''} {user_data.last_name or ''}".strip() or None,
             organization_id=organization_id,
             tenant_id=tenant_id,
-            global_role=global_role,
-            organization_role=org_role,
+            role=user_role,  # New single role field
             is_active=True,
             created_at=datetime.utcnow()
         )
@@ -261,11 +244,11 @@ async def list_users(
     query = db.query(User)
     
     # Apply role-based filtering
-    if current_user.global_role == "super_admin":
+    if current_user.role == "super_admin":
         # Super admin can see all users
         if organization_id:
             query = query.filter(User.organization_id == organization_id)
-    elif current_user.global_role == "tenant_admin":
+    elif current_user.role == "tenant_admin":
         # Tenant admin can see users from their tenant's organizations
         if not current_user.tenant_id:
             raise HTTPException(
@@ -294,7 +277,7 @@ async def list_users(
                 )
             query = query.filter(User.organization_id == organization_id)
     
-    elif current_user.organization_role == "admin":
+    elif current_user.role == "org_admin":
         # Organization admin can see users from their organization
         if not current_user.organization_id:
             return UserListResponse(users=[], total=0, skip=skip, limit=limit)
@@ -316,10 +299,7 @@ async def list_users(
     
     # Apply role filter
     if role:
-        if role in ["super_admin", "tenant_admin"]:
-            query = query.filter(User.global_role == role)
-        else:
-            query = query.filter(User.organization_role == role)
+        query = query.filter(User.role == role)
     
     # Apply active filter
     if is_active is not None:
@@ -354,10 +334,10 @@ async def get_user(
         )
     
     # Check access permissions
-    if current_user.global_role == "super_admin":
+    if current_user.role == "super_admin":
         # Super admin can access any user
         pass
-    elif current_user.global_role == "tenant_admin":
+    elif current_user.role == "tenant_admin":
         # Tenant admin can access users from their tenant's organizations
         if user.organization_id:
             org = db.query(Organization).filter(Organization.id == user.organization_id).first()
@@ -366,7 +346,7 @@ async def get_user(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Access denied to this user"
                 )
-    elif current_user.organization_role == "admin":
+    elif current_user.role == "org_admin":
         # Organization admin can access users from their organization
         if str(user.organization_id) != str(current_user.organization_id):
             raise HTTPException(
@@ -401,15 +381,15 @@ async def update_user(
     
     # Check permissions - only admins can update other users
     if str(user.id) != str(current_user.id):
-        if current_user.global_role not in ["super_admin", "tenant_admin"]:
-            if current_user.organization_role != "admin":
+        if current_user.role not in ["super_admin", "tenant_admin"]:
+            if current_user.role != "org_admin":
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Only admins can update other users"
                 )
         
         # Tenant admin can only update users in their tenant
-        if current_user.global_role == "tenant_admin":
+        if current_user.role == "tenant_admin":
             if user.organization_id:
                 org = db.query(Organization).filter(Organization.id == user.organization_id).first()
                 if not org or org.tenant_id != current_user.tenant_id:
@@ -419,7 +399,7 @@ async def update_user(
                     )
         
         # Org admin can only update users in their organization
-        elif current_user.organization_role == "admin":
+        elif current_user.role == "org_admin":
             if str(user.organization_id) != str(current_user.organization_id):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -466,85 +446,58 @@ async def update_user_role(
             detail="User not found"
         )
     
-    # Determine what roles current user can assign
-    can_assign_global = False
-    can_assign_org = False
-    
-    if current_user.global_role == "super_admin":
-        can_assign_global = True
-        can_assign_org = True
-    elif current_user.global_role == "tenant_admin":
-        # Tenant admin can assign tenant admin and org roles within their tenant
-        if user.organization_id:
-            org = db.query(Organization).filter(Organization.id == user.organization_id).first()
-            if org and org.tenant_id == current_user.tenant_id:
-                can_assign_global = True  # Can assign tenant_admin
-                can_assign_org = True
-        else:
-            can_assign_global = True  # Can assign tenant_admin to users without org
-    elif current_user.organization_role == "admin":
-        # Organization admin can only assign org roles within their organization
-        if str(user.organization_id) == str(current_user.organization_id):
-            can_assign_org = True
-    
-    if not (can_assign_global or can_assign_org):
+    # Check if current user has permission to update roles
+    if current_user.role not in ["super_admin", "tenant_admin", "org_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Insufficient privileges to update user roles"
         )
     
     # Validate role assignments
-    if role_update.global_role is not None:
-        if not can_assign_global:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Cannot assign global roles"
-            )
-        
-        # Validate global role value
-        if role_update.global_role not in ["user", "tenant_admin", "super_admin"]:
+    if role_update.role is not None:
+        # Validate role value - must be one of the 5 roles
+        valid_roles = ["user", "org_member", "org_admin", "tenant_admin", "super_admin"]
+        if str(role_update.role) not in valid_roles:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid global role"
+                detail=f"Invalid role. Valid roles: {', '.join(valid_roles)}"
             )
         
-        # Only super admin can assign super_admin role
-        if role_update.global_role == "super_admin" and current_user.global_role != "super_admin":
+        # Check if current user can assign this role
+        requested_role = str(role_update.role)
+        
+        if requested_role == "super_admin" and current_user.role != "super_admin":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only super admin can assign super admin role"
             )
-    
-    if role_update.organization_role is not None:
-        if not can_assign_org:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Cannot assign organization roles"
-            )
         
-        # Validate organization role value
-        if role_update.organization_role not in ["member", "admin"]:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid organization role. Valid roles: member, admin"
-            )
+        if requested_role == "tenant_admin":
+            if current_user.role not in ["super_admin", "tenant_admin"]:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Only super admin or tenant admin can assign tenant admin role"
+                )
         
-        # User must belong to an organization to have org role
-        if not user.organization_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User must belong to an organization to have organization role"
-            )
+        if requested_role in ["org_admin", "org_member"]:
+            if current_user.role not in ["super_admin", "tenant_admin", "org_admin"]:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Insufficient privileges to assign organization roles"
+                )
+            
+            # User must belong to an organization for org roles
+            if not user.organization_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="User must belong to an organization to have organization role"
+                )
     
-    # Apply role updates
-    old_global_role = user.global_role
-    old_org_role = user.organization_role
+    # Apply role update
+    old_role = user.role
     
-    if role_update.global_role is not None:
-        user.global_role = role_update.global_role
-    
-    if role_update.organization_role is not None:
-        user.organization_role = role_update.organization_role
+    if role_update.role is not None:
+        user.role = str(role_update.role)
     
     user.updated_at = datetime.utcnow()
     
@@ -555,10 +508,8 @@ async def update_user_role(
         user_id=str(user.id),
         email=user.email,
         full_name=user.full_name,
-        old_global_role=old_global_role,
-        new_global_role=user.global_role,
-        old_organization_role=old_org_role,
-        new_organization_role=user.organization_role,
+        old_role=old_role,
+        new_role=user.role,
         updated_by=str(current_user.id),
         updated_at=user.updated_at
     )
@@ -582,15 +533,15 @@ async def remove_user(
     # Check permissions
     can_remove = False
     
-    if current_user.global_role == "super_admin":
+    if current_user.role == "super_admin":
         can_remove = True
-    elif current_user.global_role == "tenant_admin":
+    elif current_user.role == "tenant_admin":
         # Tenant admin can remove users from their tenant's organizations
         if user.organization_id:
             org = db.query(Organization).filter(Organization.id == user.organization_id).first()
             if org and org.tenant_id == current_user.tenant_id:
                 can_remove = True
-    elif current_user.organization_role == "admin":
+    elif current_user.role == "org_admin":
         # Organization admin can remove users from their organization
         if str(user.organization_id) == str(current_user.organization_id):
             can_remove = True
@@ -616,7 +567,7 @@ async def remove_user(
             org_name = org.name if org else "Unknown"
         
         user.organization_id = None
-        user.organization_role = None  # No org role when not in organization
+        # user.organization_role = None  # Removed - single role field handles this
         user.updated_at = datetime.utcnow()
         
         db.commit()
@@ -654,14 +605,14 @@ async def activate_user(
     # Check permissions (same as role update)
     can_modify = False
     
-    if current_user.global_role == "super_admin":
+    if current_user.role == "super_admin":
         can_modify = True
-    elif current_user.global_role == "tenant_admin":
+    elif current_user.role == "tenant_admin":
         if user.organization_id:
             org = db.query(Organization).filter(Organization.id == user.organization_id).first()
             if org and org.tenant_id == current_user.tenant_id:
                 can_modify = True
-    elif current_user.organization_role == "admin":
+    elif current_user.role == "org_admin":
         if str(user.organization_id) == str(current_user.organization_id):
             can_modify = True
     
@@ -703,14 +654,14 @@ async def deactivate_user(
     # Check permissions (same as role update)
     can_modify = False
     
-    if current_user.global_role == "super_admin":
+    if current_user.role == "super_admin":
         can_modify = True
-    elif current_user.global_role == "tenant_admin":
+    elif current_user.role == "tenant_admin":
         if user.organization_id:
             org = db.query(Organization).filter(Organization.id == user.organization_id).first()
             if org and org.tenant_id == current_user.tenant_id:
                 can_modify = True
-    elif current_user.organization_role == "admin":
+    elif current_user.role == "org_admin":
         if str(user.organization_id) == str(current_user.organization_id):
             can_modify = True
     

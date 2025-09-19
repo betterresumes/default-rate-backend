@@ -157,8 +157,7 @@ async def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
             username=username,  # Use the validated/generated username
             full_name=full_name,
             hashed_password=hashed_password,
-            global_role=user_data.global_role if hasattr(user_data, 'global_role') and user_data.global_role else "user",
-            organization_role=None,  # No org role initially - assigned when joining organization
+            role=user_data.role if hasattr(user_data, 'role') and user_data.role else "user",  # New single role field
             is_active=True,
             created_at=datetime.utcnow()
         )
@@ -293,9 +292,17 @@ async def join_organization(
             detail="Organization has reached its member capacity"
         )
     
-    # Join user to organization
+    # Join user to organization - update role based on organization default (with security validation)
     current_user.organization_id = organization.id
-    current_user.organization_role = organization.default_role or "member"
+    # Security: Only allow org_member role through self-join, org_admin must be assigned by admin
+    if organization.default_role == "org_member":
+        new_role = "org_member"
+    else:
+        # Even if org has default_role as org_admin, self-join users only get org_member
+        # org_admin role must be assigned by tenant_admin or super_admin
+        new_role = "org_member"
+    
+    current_user.role = new_role
     current_user.joined_via_token = join_request.join_token
     current_user.whitelist_email = current_user.email
     current_user.updated_at = datetime.utcnow()
@@ -308,7 +315,7 @@ async def join_organization(
         message=f"Successfully joined {organization.name}",
         organization_id=str(organization.id),
         organization_name=organization.name,
-        user_role=current_user.organization_role
+        user_role=current_user.role
     )
 
 # =============================================

@@ -19,39 +19,46 @@ from .auth_multi_tenant import AuthManager, get_current_active_user
 
 router = APIRouter(prefix="/admin", tags=["Admin Authentication"])
 
-# Admin permission validators
+# New 5-Role System Permission Validators
 def require_super_admin(current_user: User = Depends(get_current_active_user)) -> User:
     """Require super admin role."""
-    if current_user.global_role != "super_admin":
+    if current_user.role != "super_admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Super admin privileges required"
         )
     return current_user
 
-def require_tenant_admin(current_user: User = Depends(get_current_active_user)) -> User:
-    """Require tenant admin role."""
-    if current_user.global_role not in ["super_admin", "tenant_admin"]:
+def require_tenant_admin_or_above(current_user: User = Depends(get_current_active_user)) -> User:
+    """Require tenant admin role or above."""
+    if current_user.role not in ["super_admin", "tenant_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Tenant admin privileges required"
+            detail="Tenant admin privileges or above required"
         )
     return current_user
 
-def require_org_admin(current_user: User = Depends(get_current_active_user)) -> User:
-    """Require organization admin role."""
-    if (current_user.global_role not in ["super_admin", "tenant_admin"] and 
-        current_user.organization_role != "admin"):
+def require_org_admin_or_above(current_user: User = Depends(get_current_active_user)) -> User:
+    """Require organization admin role or above."""
+    if current_user.role not in ["super_admin", "tenant_admin", "org_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Organization admin privileges required"
+            detail="Organization admin privileges or above required"
+        )
+    return current_user
+
+def require_org_member_or_above(current_user: User = Depends(get_current_active_user)) -> User:
+    """Require organization membership or above."""
+    if current_user.role not in ["super_admin", "tenant_admin", "org_admin", "org_member"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Organization membership or above required"
         )
     return current_user
 
 def require_any_admin(current_user: User = Depends(get_current_active_user)) -> User:
     """Require any admin role (super_admin, tenant_admin, or org_admin)."""
-    if (current_user.global_role not in ["super_admin", "tenant_admin"] and 
-        current_user.organization_role != "admin"):
+    if current_user.role not in ["super_admin", "tenant_admin", "org_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privileges required"
@@ -118,23 +125,23 @@ async def admin_create_user(
                 )
     
     # Admin role validation
-    global_role = getattr(user_data, 'global_role', 'user') or 'user'
+    user_role = getattr(user_data, 'role', 'user') or 'user'
     
-    # Validate admin can assign this role
-    if current_user.global_role == "super_admin":
-        # Super admin can assign any role
+    # Access control validation
+    if current_user.role == "super_admin":
+        # Super admin can create any role
         pass
-    elif current_user.global_role == "tenant_admin":
-        # Tenant admin can assign tenant_admin, user roles
-        if global_role not in ["user", "tenant_admin"]:
+    elif current_user.role == "tenant_admin":
+        # Tenant admin can only create org_admin, org_member, or user roles (NOT tenant_admin)
+        if user_role not in ["user", "org_admin", "org_member"]:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Tenant admin can only assign 'user' or 'tenant_admin' roles"
+                status_code=403,
+                detail="Tenant admins can only create users with 'user', 'org_admin', or 'org_member' roles"
             )
     else:
-        # Org admin can only assign user role
-        if global_role != "user":
-            global_role = "user"
+        # Regular users cannot create others
+        if user_role != "user":
+            user_role = "user"
     
     # Create new user account
     hashed_password = AuthManager.get_password_hash(user_data.password)
@@ -146,8 +153,7 @@ async def admin_create_user(
             username=username,
             full_name=full_name,
             hashed_password=hashed_password,
-            global_role=global_role,
-            organization_role=None,  # Set later if organization assigned
+            role=user_role,
             is_active=True,
             created_at=datetime.utcnow()
         )
@@ -244,15 +250,15 @@ async def admin_force_password_reset(
     
     # Check admin permissions
     can_reset = False
-    if current_user.global_role == "super_admin":
+    if current_user.role == "super_admin":
         can_reset = True
-    elif current_user.global_role == "tenant_admin":
+    elif current_user.role == "tenant_admin":
         # Tenant admin can reset passwords for users in their tenant
         if target_user.organization_id:
             org = db.query(Organization).filter(Organization.id == target_user.organization_id).first()
             if org and org.tenant_id == current_user.tenant_id:
                 can_reset = True
-    elif current_user.organization_role == "admin":
+    elif current_user.role == "org_admin":
         # Org admin can reset passwords for users in their organization
         if str(target_user.organization_id) == str(current_user.organization_id):
             can_reset = True
@@ -304,14 +310,15 @@ async def admin_get_user_login_history(
     
     # Check admin permissions
     can_view = False
-    if current_user.global_role == "super_admin":
+    if current_user.role == "super_admin":
         can_view = True
-    elif current_user.global_role == "tenant_admin":
+    elif current_user.role == "tenant_admin":
         if target_user.organization_id:
             org = db.query(Organization).filter(Organization.id == target_user.organization_id).first()
             if org and org.tenant_id == current_user.tenant_id:
                 can_view = True
-    elif current_user.organization_role == "admin":
+    elif current_user.role == "org_admin":
+        # Org admin can view login history for users in their organization
         if str(target_user.organization_id) == str(current_user.organization_id):
             can_view = True
     
@@ -356,14 +363,14 @@ async def admin_bulk_activate_users(
             
             # Check permissions
             can_activate = False
-            if current_user.global_role == "super_admin":
+            if current_user.role == "super_admin":
                 can_activate = True
-            elif current_user.global_role == "tenant_admin":
+            elif current_user.role == "tenant_admin":
                 if target_user.organization_id:
                     org = db.query(Organization).filter(Organization.id == target_user.organization_id).first()
                     if org and org.tenant_id == current_user.tenant_id:
                         can_activate = True
-            elif current_user.organization_role == "admin":
+            elif current_user.role == "org_admin":
                 if str(target_user.organization_id) == str(current_user.organization_id):
                     can_activate = True
             

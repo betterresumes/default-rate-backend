@@ -58,9 +58,12 @@ class Organization(Base):
     # Whitelist-based Join System
     join_token = Column(String(32), unique=True, nullable=False, index=True)
     join_enabled = Column(Boolean, default=True)
-    default_role = Column(String(50), default="member")  # Role assigned to new joiners
+    default_role = Column(String(50), default="org_member")  # New role system - default to org_member
     join_created_at = Column(DateTime, default=func.now())
     max_users = Column(Integer, default=500)  # Maximum number of users allowed in organization
+    
+    # Global Data Access Control
+    allow_global_data_access = Column(Boolean, default=False)  # Controls if org users can see global predictions/companies
     
     # Metadata
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
@@ -116,9 +119,13 @@ class User(Base):
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=True, index=True)  # For tenant admins
     organization_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True, index=True)  # For org members
     
-    # Role system (5 roles)
-    global_role = Column(String(50), default="user")  # "super_admin", "tenant_admin", "user"
-    organization_role = Column(String(50), nullable=True)  # "admin", "member" (only if in organization)
+    # New 5-Role System (Single role field)
+    # super_admin: Can manage everything
+    # tenant_admin: Attached to 1 tenant, can manage multiple orgs within that tenant
+    # org_admin: Attached to 1 organization, can manage users in that org
+    # org_member: Attached to 1 organization, can access org resources
+    # user: No organization attachment, limited access
+    role = Column(String(50), default="user")  # Single role field
     
     # Status and metadata
     is_active = Column(Boolean, default=True)
@@ -149,7 +156,7 @@ class Company(Base):
     __tablename__ = "companies"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    symbol = Column(String(20), unique=True, index=True, nullable=False)
+    symbol = Column(String(20), index=True, nullable=False)  # Removed unique=True
     name = Column(String(255), nullable=False)
     market_cap = Column(Numeric(precision=20, scale=2), nullable=False)
     sector = Column(String(100), nullable=False)
@@ -162,6 +169,12 @@ class Company(Base):
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    
+    # Composite unique constraint: same symbol allowed in different organizations
+    __table_args__ = (
+        Index('ix_company_symbol_org', 'symbol', 'organization_id', unique=True),
+        # This allows: HDFC in org A, HDFC in org B, but not duplicate HDFC in same org
+    )
     
     # Relationships
     organization = relationship("Organization", back_populates="companies")
@@ -183,20 +196,22 @@ class AnnualPrediction(Base):
     # NULL organization_id = accessible to all users (super admin data)
     # Non-NULL organization_id = only accessible to org members
     
-    # Prediction data (unchanged)
-    reporting_year = Column(String(4), nullable=True)
-    reporting_quarter = Column(String(2), nullable=True)
+    # Time period - matching existing schema
+    reporting_year = Column(String(10), nullable=False)
+    reporting_quarter = Column(String(10), nullable=True)  # For compatibility
     
+    # Financial prediction fields - matching existing schema
     long_term_debt_to_total_capital = Column(Numeric(precision=10, scale=4), nullable=True)
     total_debt_to_ebitda = Column(Numeric(precision=10, scale=4), nullable=True)
     net_income_margin = Column(Numeric(precision=10, scale=4), nullable=True)
     ebit_to_interest_expense = Column(Numeric(precision=10, scale=4), nullable=True)
     return_on_assets = Column(Numeric(precision=10, scale=4), nullable=True)
     
+    # ML prediction results
     probability = Column(Numeric(precision=5, scale=4), nullable=False)
     risk_level = Column(String(20), nullable=False)
     confidence = Column(Numeric(precision=5, scale=4), nullable=False)
-    predicted_at = Column(DateTime, default=func.now())
+    predicted_at = Column(DateTime, nullable=True)
     
     # Metadata
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
@@ -208,7 +223,7 @@ class AnnualPrediction(Base):
     
     # Indexes for performance
     __table_args__ = (
-        Index('idx_annual_company_year_quarter', 'company_id', 'reporting_year', 'reporting_quarter', unique=True),
+        Index('idx_annual_company_reporting_year', 'company_id', 'reporting_year'),
         Index('idx_annual_organization', 'organization_id'),
         Index('idx_annual_created_by', 'created_by'),
     )
@@ -224,21 +239,23 @@ class QuarterlyPrediction(Base):
     # NULL organization_id = accessible to all users (super admin data)
     # Non-NULL organization_id = only accessible to org members
     
-    # Prediction data (unchanged)
-    reporting_year = Column(String(4), nullable=False)
-    reporting_quarter = Column(String(2), nullable=False)
+    # Time period - matching existing schema
+    reporting_year = Column(String(10), nullable=False)
+    reporting_quarter = Column(String(10), nullable=False)  # Q1, Q2, Q3, Q4
     
-    total_debt_to_ebitda = Column(Numeric(precision=10, scale=4), nullable=False)
-    sga_margin = Column(Numeric(precision=10, scale=4), nullable=False)
-    long_term_debt_to_total_capital = Column(Numeric(precision=10, scale=4), nullable=False)
-    return_on_capital = Column(Numeric(precision=10, scale=4), nullable=False)
+    # Financial prediction fields - matching existing schema
+    total_debt_to_ebitda = Column(Numeric(precision=10, scale=4), nullable=True)
+    sga_margin = Column(Numeric(precision=10, scale=4), nullable=True)
+    long_term_debt_to_total_capital = Column(Numeric(precision=10, scale=4), nullable=True)
+    return_on_capital = Column(Numeric(precision=10, scale=4), nullable=True)
     
-    logistic_probability = Column(Numeric(precision=5, scale=4), nullable=False)
-    gbm_probability = Column(Numeric(precision=5, scale=4), nullable=False)
-    ensemble_probability = Column(Numeric(precision=5, scale=4), nullable=False)
+    # ML prediction results - matching existing schema
+    logistic_probability = Column(Numeric(precision=5, scale=4), nullable=True)
+    gbm_probability = Column(Numeric(precision=5, scale=4), nullable=True)
+    ensemble_probability = Column(Numeric(precision=5, scale=4), nullable=True)
     risk_level = Column(String(20), nullable=False)
     confidence = Column(Numeric(precision=5, scale=4), nullable=False)
-    predicted_at = Column(DateTime, default=func.now())
+    predicted_at = Column(DateTime, nullable=True)
     
     # Metadata
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
@@ -250,9 +267,56 @@ class QuarterlyPrediction(Base):
     
     # Indexes for performance
     __table_args__ = (
-        Index('idx_quarterly_company_year_quarter', 'company_id', 'reporting_year', 'reporting_quarter', unique=True),
+        Index('idx_quarterly_company_reporting_year_quarter', 'company_id', 'reporting_year', 'reporting_quarter'),
         Index('idx_quarterly_organization', 'organization_id'),
         Index('idx_quarterly_created_by', 'created_by'),
+    )
+
+# ========================================
+# BULK UPLOAD JOB TABLES
+# ========================================
+
+class BulkUploadJob(Base):
+    __tablename__ = "bulk_upload_jobs"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    
+    # Job details
+    job_type = Column(String(50), nullable=False, index=True)  # 'annual' or 'quarterly'
+    status = Column(String(20), default='pending', index=True)  # pending, processing, completed, failed
+    
+    # File information
+    original_filename = Column(String(255), nullable=False)
+    file_size = Column(Integer, nullable=True)
+    total_rows = Column(Integer, nullable=True)
+    
+    # Progress tracking
+    processed_rows = Column(Integer, default=0)
+    successful_rows = Column(Integer, default=0)
+    failed_rows = Column(Integer, default=0)
+    
+    # Results
+    error_message = Column(Text, nullable=True)
+    error_details = Column(Text, nullable=True)  # JSON string with detailed errors
+    
+    # Timestamps
+    created_at = Column(DateTime, default=func.now())
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    
+    # Relationships
+    user = relationship("User", foreign_keys=[user_id])
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    
+    # Indexes for performance
+    __table_args__ = (
+        Index('idx_bulk_job_status', 'status'),
+        Index('idx_bulk_job_user', 'user_id'),
+        Index('idx_bulk_job_org', 'organization_id'),
+        Index('idx_bulk_job_created', 'created_at'),
     )
 
 # ========================================

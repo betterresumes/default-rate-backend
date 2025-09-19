@@ -193,4 +193,16 @@ class QuarterlyMLModelService:
         """Alias for predict_quarterly_default_probability for compatibility"""
         return self.predict_quarterly_default_probability(financial_ratios)
 
+    async def predict_quarterly(self, financial_ratios: Dict[str, float]) -> Dict:
+        """
+        Async wrapper for quarterly prediction - calls predict_quarterly_default_probability
+        
+        Args:
+            financial_ratios: Dictionary containing the 4 required financial ratios
+            
+        Returns:
+            Dictionary with prediction results
+        """
+        return self.predict_quarterly_default_probability(financial_ratios)
+
 quarterly_ml_model = QuarterlyMLModelService()

@@ -10,6 +10,9 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# Import the FastAPI app for direct uvicorn access
+from app.main import app
+
 def main():
     """Start the application server."""
     # Get configuration from environment

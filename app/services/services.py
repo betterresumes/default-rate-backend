@@ -124,7 +124,17 @@ class CompanyService:
     def get_or_create_company(self, symbol: str, name: str, market_cap: float, sector: str,
                              organization_id=None, created_by=None, is_global=False):
         """Get existing company or create new one with organization context"""
-        existing_company = self.db.query(Company).filter(Company.symbol == symbol.upper()).first()
+        # Check for existing company in the same organization context
+        if organization_id:
+            existing_company = self.db.query(Company).filter(
+                and_(Company.symbol == symbol.upper(), 
+                     Company.organization_id == organization_id)
+            ).first()
+        else:
+            existing_company = self.db.query(Company).filter(
+                and_(Company.symbol == symbol.upper(), 
+                     Company.organization_id.is_(None))
+            ).first()
         
         if existing_company:
             # Update existing company

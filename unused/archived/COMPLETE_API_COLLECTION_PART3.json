@@ -1,0 +1,467 @@
+{
+  "info": {
+    "name": "🏦 COMPLETE Financial Risk API - PART 3: Companies & Predictions",
+    "description": "Complete Postman collection for multi-tenant financial risk prediction system - PART 3: Companies & Predictions Management (17+ endpoints)",
+    "version": "1.0.0 - PRODUCTION READY",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000",
+      "type": "string",
+      "description": "🌐 Base URL for the API server"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string",
+      "description": "🔑 JWT access token for authentication"
+    },
+    {
+      "key": "userId",
+      "value": "",
+      "type": "string",
+      "description": "👤 Current user ID"
+    },
+    {
+      "key": "organizationId",
+      "value": "",
+      "type": "string",
+      "description": "🏢 Current organization ID"
+    },
+    {
+      "key": "tenantId",
+      "value": "",
+      "type": "string",
+      "description": "🏦 Current tenant ID"
+    },
+    {
+      "key": "companyId",
+      "value": "",
+      "type": "string",
+      "description": "🏭 Current company ID"
+    },
+    {
+      "key": "predictionId",
+      "value": "",
+      "type": "string",
+      "description": "📊 Current prediction ID"
+    },
+    {
+      "key": "jobId",
+      "value": "",
+      "type": "string",
+      "description": "⚙️ Current background job ID"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "🏭 Companies Management (4 endpoints)",
+      "description": "Company data management: list, get details, create, search functionality",
+      "item": [
+        {
+          "name": "List Companies",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/companies?page=1&size=20&sector=banking&search=hdfc&sort_by=revenue&sort_order=desc",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "companies"],
+              "query": [
+                {"key": "page", "value": "1"},
+                {"key": "size", "value": "20"},
+                {"key": "sector", "value": "banking"},
+                {"key": "search", "value": "hdfc"},
+                {"key": "sort_by", "value": "revenue"},
+                {"key": "sort_order", "value": "desc"}
+              ]
+            },
+            "description": "**📋 Get paginated list of companies** (filtered by organization access rules)\n\n🔒 **Authorization:** organization member\n\n📋 **Query Parameters:**\n- `page`, `size`: Pagination\n- `sector`: Filter by business sector\n- `search`: Search in company name/description\n- `sort_by`: revenue|employees|risk_score|name\n- `sort_order`: asc|desc\n\n✅ **Success Response (200):**\n```json\n{\n  \"companies\": [\n    {\n      \"id\": \"uuid\",\n      \"name\": \"HDFC Bank Limited\",\n      \"sector\": \"banking\",\n      \"industry\": \"Commercial Banking\",\n      \"revenue\": 50000000000,\n      \"employees\": 120000,\n      \"location\": {\n        \"country\": \"India\",\n        \"state\": \"Maharashtra\",\n        \"city\": \"Mumbai\"\n      },\n      \"risk_score\": 25.5,\n      \"risk_category\": \"low\",\n      \"last_analyzed\": \"2024-01-01T10:00:00Z\",\n      \"prediction_count\": 15,\n      \"financial_summary\": {\n        \"total_assets\": 18000000000000,\n        \"market_cap\": 9000000000000,\n        \"debt_to_equity\": 0.85\n      }\n    }\n  ],\n  \"pagination\": {\n    \"page\": 1,\n    \"size\": 20,\n    \"total\": 100,\n    \"pages\": 5\n  },\n  \"filters_applied\": {\n    \"sector\": \"banking\",\n    \"organization_access_rules\": true\n  }\n}\n```"
+          }
+        },
+        {
+          "name": "Get Company Details",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.company && response.company.id) {",
+                  "        pm.collectionVariables.set('companyId', response.company.id);",
+                  "        console.log('🏭 Company ID set:', response.company.id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/companies/{{companyId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "companies", "{{companyId}}"]
+            },
+            "description": "**📊 Get comprehensive company information**\n\n🔒 **Authorization:** organization member with company access\n\n✅ **Success Response (200):**\n```json\n{\n  \"company\": {\n    \"id\": \"uuid\",\n    \"name\": \"HDFC Bank Limited\",\n    \"legal_name\": \"Housing Development Finance Corporation Bank Limited\",\n    \"sector\": \"banking\",\n    \"industry\": \"Commercial Banking\",\n    \"sub_industry\": \"Diversified Banks\",\n    \"incorporation_date\": \"1994-08-01\",\n    \"headquarters\": {\n      \"address\": \"HDFC Bank Head Office, Senapati Bapat Marg\",\n      \"city\": \"Mumbai\",\n      \"state\": \"Maharashtra\",\n      \"country\": \"India\",\n      \"postal_code\": \"400013\"\n    },\n    \"contact_info\": {\n      \"website\": \"https://www.hdfcbank.com\",\n      \"phone\": \"+91-22-6652-6652\",\n      \"email\": \"investor.relations@hdfcbank.com\"\n    },\n    \"financial_data\": {\n      \"revenue\": 50000000000,\n      \"total_assets\": 18000000000000,\n      \"market_cap\": 9000000000000,\n      \"employees\": 120000,\n      \"debt_to_equity_ratio\": 0.85,\n      \"return_on_equity\": 18.5,\n      \"current_ratio\": 1.25,\n      \"last_updated\": \"2024-01-01T00:00:00Z\"\n    },\n    \"risk_assessment\": {\n      \"overall_score\": 25.5,\n      \"category\": \"low\",\n      \"factors\": {\n        \"financial_stability\": 85,\n        \"market_position\": 90,\n        \"operational_efficiency\": 88,\n        \"regulatory_compliance\": 92\n      },\n      \"last_assessed\": \"2024-01-01T10:00:00Z\"\n    },\n    \"business_profile\": {\n      \"description\": \"Leading private sector bank in India\",\n      \"key_products\": [\"Retail Banking\", \"Corporate Banking\", \"Investment Banking\"],\n      \"market_presence\": [\"India\", \"UAE\", \"UK\", \"USA\"],\n      \"competitive_advantages\": [\"Digital Banking\", \"Branch Network\", \"Customer Service\"]\n    }\n  },\n  \"access_info\": {\n    \"user_can_analyze\": true,\n    \"data_restrictions\": [],\n    \"available_prediction_types\": [\"annual\", \"quarterly\"]\n  },\n  \"recent_predictions\": [\n    {\n      \"id\": \"uuid\",\n      \"type\": \"annual\",\n      \"created_at\": \"2024-01-01T09:00:00Z\",\n      \"status\": \"completed\",\n      \"risk_score\": 25.5\n    }\n  ]\n}\n```"
+          }
+        },
+        {
+          "name": "Create Company",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.company && response.company.id) {",
+                  "        pm.collectionVariables.set('companyId', response.company.id);",
+                  "        console.log('🏭 New Company ID set:', response.company.id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"ICICI Bank Limited\",\n    \"legal_name\": \"Industrial Credit and Investment Corporation of India Bank Limited\",\n    \"sector\": \"banking\",\n    \"industry\": \"Commercial Banking\",\n    \"sub_industry\": \"Diversified Banks\",\n    \"incorporation_date\": \"1994-01-05\",\n    \"headquarters\": {\n        \"address\": \"ICICI Bank Towers, Bandra Kurla Complex\",\n        \"city\": \"Mumbai\",\n        \"state\": \"Maharashtra\",\n        \"country\": \"India\",\n        \"postal_code\": \"400051\"\n    },\n    \"contact_info\": {\n        \"website\": \"https://www.icicibank.com\",\n        \"phone\": \"+91-22-2653-1414\",\n        \"email\": \"investor_grievances@icicibank.com\"\n    },\n    \"financial_data\": {\n        \"revenue\": 45000000000,\n        \"total_assets\": 16000000000000,\n        \"market_cap\": 7500000000000,\n        \"employees\": 105000,\n        \"debt_to_equity_ratio\": 0.90,\n        \"return_on_equity\": 16.8,\n        \"current_ratio\": 1.20\n    },\n    \"business_profile\": {\n        \"description\": \"Second largest private sector bank in India\",\n        \"key_products\": [\"Retail Banking\", \"Corporate Banking\", \"Investment Banking\", \"Insurance\"],\n        \"market_presence\": [\"India\", \"UAE\", \"UK\", \"USA\", \"Canada\"],\n        \"competitive_advantages\": [\"Technology Innovation\", \"Digital Banking\", \"Comprehensive Financial Services\"]\n    }\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/companies",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "companies"]
+            },
+            "description": "**🏭 Create a new company record**\n\n🔒 **Authorization:** organization admin or tenant admin\n\n📋 **Request Body Schema:**\n```json\n{\n  \"name\": \"string\",              // Company name (required)\n  \"legal_name\": \"string\",        // Legal company name\n  \"sector\": \"string\",            // Business sector (required)\n  \"industry\": \"string\",          // Industry classification\n  \"sub_industry\": \"string\",      // Sub-industry classification\n  \"incorporation_date\": \"date\",  // Date of incorporation\n  \"headquarters\": {\n    \"address\": \"string\",\n    \"city\": \"string\",\n    \"state\": \"string\",\n    \"country\": \"string\",\n    \"postal_code\": \"string\"\n  },\n  \"contact_info\": {\n    \"website\": \"string\",\n    \"phone\": \"string\",\n    \"email\": \"string\"\n  },\n  \"financial_data\": {\n    \"revenue\": number,\n    \"total_assets\": number,\n    \"market_cap\": number,\n    \"employees\": number,\n    \"debt_to_equity_ratio\": number,\n    \"return_on_equity\": number,\n    \"current_ratio\": number\n  },\n  \"business_profile\": {\n    \"description\": \"string\",\n    \"key_products\": [\"string\"],\n    \"market_presence\": [\"string\"],\n    \"competitive_advantages\": [\"string\"]\n  }\n}\n```\n\n✅ **Success Response (201):**\n```json\n{\n  \"company\": {\n    \"id\": \"uuid\",\n    \"name\": \"ICICI Bank Limited\",\n    \"sector\": \"banking\",\n    \"created_at\": \"2024-01-01T12:00:00Z\",\n    \"created_by\": \"uuid\",\n    \"tenant_id\": \"uuid\"\n  },\n  \"message\": \"Company created successfully\"\n}\n```"
+          }
+        },
+        {
+          "name": "Search Companies",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/companies/search?q=bank&sector=banking&min_revenue=1000000000&max_risk_score=50&location=india&limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "companies", "search"],
+              "query": [
+                {"key": "q", "value": "bank"},
+                {"key": "sector", "value": "banking"},
+                {"key": "min_revenue", "value": "1000000000"},
+                {"key": "max_risk_score", "value": "50"},
+                {"key": "location", "value": "india"},
+                {"key": "limit", "value": "10"}
+              ]
+            },
+            "description": "**🔍 Advanced company search with multiple filters**\n\n🔒 **Authorization:** organization member\n\n📋 **Query Parameters:**\n- `q`: Search query (name, description)\n- `sector`: Business sector filter\n- `min_revenue`, `max_revenue`: Revenue range\n- `min_employees`, `max_employees`: Employee count range\n- `min_risk_score`, `max_risk_score`: Risk score range\n- `location`: Country/region filter\n- `limit`: Maximum results (default: 10)\n\n✅ **Success Response (200):**\n```json\n{\n  \"companies\": [\n    {\n      \"id\": \"uuid\",\n      \"name\": \"HDFC Bank Limited\",\n      \"sector\": \"banking\",\n      \"revenue\": 50000000000,\n      \"employees\": 120000,\n      \"risk_score\": 25.5,\n      \"location\": \"India\",\n      \"match_score\": 0.95,\n      \"highlighted_fields\": {\n        \"name\": \"<mark>HDFC Bank</mark> Limited\"\n      }\n    }\n  ],\n  \"search_metadata\": {\n    \"query\": \"bank\",\n    \"total_results\": 25,\n    \"search_time_ms\": 45,\n    \"filters_applied\": {\n      \"sector\": \"banking\",\n      \"min_revenue\": 1000000000,\n      \"location\": \"india\"\n    }\n  },\n  \"suggestions\": [\n    \"banking sector companies\",\n    \"financial institutions india\",\n    \"commercial banks\"\n  ]\n}\n```"
+          }
+        }
+      ]
+    },
+    {
+      "name": "📊 Predictions Management (13+ endpoints)",
+      "description": "Complete prediction lifecycle: annual/quarterly predictions, bulk operations, job management, history",
+      "item": [
+        {
+          "name": "Create Annual Prediction",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.prediction_id) {",
+                  "        pm.collectionVariables.set('predictionId', response.prediction_id);",
+                  "        console.log('📊 Prediction ID set:', response.prediction_id);",
+                  "    }",
+                  "    if (response.job_id) {",
+                  "        pm.collectionVariables.set('jobId', response.job_id);",
+                  "        console.log('⚙️ Job ID set:', response.job_id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"company_id\": \"{{companyId}}\",\n    \"prediction_year\": 2024,\n    \"model_version\": \"v2.1\",\n    \"include_scenarios\": true,\n    \"scenario_types\": [\"optimistic\", \"realistic\", \"pessimistic\"],\n    \"custom_parameters\": {\n        \"market_conditions\": \"stable\",\n        \"regulatory_environment\": \"normal\",\n        \"economic_outlook\": \"positive\"\n    },\n    \"notification_email\": \"analyst@hdfcbank.com\",\n    \"priority\": \"high\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/predictions/annual",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "predictions", "annual"]
+            },
+            "description": "**📈 Create annual financial risk prediction**\n\n🔒 **Authorization:** organization member with prediction permissions\n\n📋 **Request Body Schema:**\n```json\n{\n  \"company_id\": \"uuid\",           // Target company (required)\n  \"prediction_year\": number,      // Year for prediction (required)\n  \"model_version\": \"string\",      // ML model version (optional)\n  \"include_scenarios\": boolean,   // Include scenario analysis\n  \"scenario_types\": [\"optimistic\", \"realistic\", \"pessimistic\"],\n  \"custom_parameters\": {\n    \"market_conditions\": \"stable|volatile|uncertain\",\n    \"regulatory_environment\": \"normal|strict|relaxed\",\n    \"economic_outlook\": \"positive|neutral|negative\"\n  },\n  \"notification_email\": \"string\", // Email for completion notification\n  \"priority\": \"low|normal|high\"   // Processing priority\n}\n```\n\n✅ **Success Response (201):**\n```json\n{\n  \"prediction_id\": \"uuid\",\n  \"job_id\": \"uuid\",\n  \"company_id\": \"uuid\",\n  \"company_name\": \"HDFC Bank Limited\",\n  \"prediction_type\": \"annual\",\n  \"prediction_year\": 2024,\n  \"status\": \"queued\",\n  \"estimated_completion\": \"2024-01-01T12:15:00Z\",\n  \"model_version\": \"v2.1\",\n  \"created_at\": \"2024-01-01T12:00:00Z\",\n  \"created_by\": \"uuid\",\n  \"priority\": \"high\",\n  \"message\": \"Annual prediction job queued successfully\"\n}\n```"
+          }
+        },
+        {
+          "name": "Create Quarterly Prediction",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.prediction_id) {",
+                  "        pm.collectionVariables.set('predictionId', response.prediction_id);",
+                  "        console.log('📊 Quarterly Prediction ID set:', response.prediction_id);",
+                  "    }",
+                  "    if (response.job_id) {",
+                  "        pm.collectionVariables.set('jobId', response.job_id);",
+                  "        console.log('⚙️ Quarterly Job ID set:', response.job_id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"company_id\": \"{{companyId}}\",\n    \"year\": 2024,\n    \"quarter\": 1,\n    \"model_version\": \"v2.1\",\n    \"include_monthly_breakdown\": true,\n    \"risk_factors_focus\": [\"liquidity\", \"credit\", \"operational\"],\n    \"custom_parameters\": {\n        \"quarterly_adjustments\": true,\n        \"seasonal_factors\": true,\n        \"market_volatility\": \"medium\"\n    },\n    \"notification_email\": \"analyst@hdfcbank.com\",\n    \"priority\": \"normal\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/predictions/quarterly",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "predictions", "quarterly"]
+            },
+            "description": "**📊 Create quarterly financial risk prediction**\n\n🔒 **Authorization:** organization member with prediction permissions\n\n📋 **Request Body Schema:**\n```json\n{\n  \"company_id\": \"uuid\",              // Target company (required)\n  \"year\": number,                    // Year (required)\n  \"quarter\": 1|2|3|4,                // Quarter (required)\n  \"model_version\": \"string\",         // ML model version\n  \"include_monthly_breakdown\": boolean, // Include monthly analysis\n  \"risk_factors_focus\": [\"liquidity\", \"credit\", \"operational\", \"market\"],\n  \"custom_parameters\": {\n    \"quarterly_adjustments\": boolean,\n    \"seasonal_factors\": boolean,\n    \"market_volatility\": \"low|medium|high\"\n  },\n  \"notification_email\": \"string\",    // Completion notification\n  \"priority\": \"low|normal|high\"      // Processing priority\n}\n```\n\n✅ **Success Response (201):**\n```json\n{\n  \"prediction_id\": \"uuid\",\n  \"job_id\": \"uuid\",\n  \"company_id\": \"uuid\",\n  \"company_name\": \"HDFC Bank Limited\",\n  \"prediction_type\": \"quarterly\",\n  \"year\": 2024,\n  \"quarter\": 1,\n  \"status\": \"queued\",\n  \"estimated_completion\": \"2024-01-01T12:10:00Z\",\n  \"model_version\": \"v2.1\",\n  \"created_at\": \"2024-01-01T12:00:00Z\",\n  \"created_by\": \"uuid\",\n  \"priority\": \"normal\",\n  \"message\": \"Quarterly prediction job queued successfully\"\n}\n```"
+          }
+        },
+        {
+          "name": "Get Prediction Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/predictions/{{predictionId}}/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "predictions", "{{predictionId}}", "status"]
+            },
+            "description": "**⏱️ Get current status of prediction job**\n\n🔒 **Authorization:** prediction creator or organization admin\n\n✅ **Success Response (200):**\n```json\n{\n  \"prediction_id\": \"uuid\",\n  \"job_id\": \"uuid\",\n  \"status\": \"processing\",\n  \"progress\": {\n    \"percentage\": 65,\n    \"current_stage\": \"risk_calculation\",\n    \"stages_completed\": [\"data_preparation\", \"model_loading\"],\n    \"stages_remaining\": [\"scenario_analysis\", \"report_generation\"]\n  },\n  \"timing\": {\n    \"started_at\": \"2024-01-01T12:00:00Z\",\n    \"estimated_completion\": \"2024-01-01T12:15:00Z\",\n    \"elapsed_time\": \"8m 30s\",\n    \"remaining_time\": \"6m 30s\"\n  },\n  \"resource_usage\": {\n    \"cpu_usage\": \"45%\",\n    \"memory_usage\": \"2.1GB\",\n    \"processing_priority\": \"high\"\n  },\n  \"company_info\": {\n    \"company_id\": \"uuid\",\n    \"company_name\": \"HDFC Bank Limited\",\n    \"prediction_type\": \"annual\"\n  }\n}\n```"
+          }
+        },
+        {
+          "name": "Get Prediction Results",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/predictions/{{predictionId}}/results?include_details=true&format=json",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "predictions", "{{predictionId}}", "results"],
+              "query": [
+                {"key": "include_details", "value": "true"},
+                {"key": "format", "value": "json"}
+              ]
+            },
+            "description": "**📋 Get comprehensive prediction results**\n\n🔒 **Authorization:** prediction creator or organization member\n\n📋 **Query Parameters:**\n- `include_details`: Include detailed analysis\n- `format`: json|pdf|excel\n\n✅ **Success Response (200):**\n```json\n{\n  \"prediction\": {\n    \"id\": \"uuid\",\n    \"company_id\": \"uuid\",\n    \"company_name\": \"HDFC Bank Limited\",\n    \"prediction_type\": \"annual\",\n    \"prediction_year\": 2024,\n    \"model_version\": \"v2.1\",\n    \"status\": \"completed\",\n    \"created_at\": \"2024-01-01T12:00:00Z\",\n    \"completed_at\": \"2024-01-01T12:14:30Z\",\n    \"processing_time\": \"14m 30s\"\n  },\n  \"risk_assessment\": {\n    \"overall_risk_score\": 25.5,\n    \"risk_category\": \"low\",\n    \"confidence_level\": 92.3,\n    \"risk_factors\": {\n      \"credit_risk\": {\n        \"score\": 22.1,\n        \"weight\": 40,\n        \"contribution\": 8.84\n      },\n      \"liquidity_risk\": {\n        \"score\": 18.5,\n        \"weight\": 25,\n        \"contribution\": 4.63\n      },\n      \"operational_risk\": {\n        \"score\": 28.3,\n        \"weight\": 20,\n        \"contribution\": 5.66\n      },\n      \"market_risk\": {\n        \"score\": 35.2,\n        \"weight\": 15,\n        \"contribution\": 5.28\n      }\n    }\n  },\n  \"financial_projections\": {\n    \"revenue_forecast\": {\n      \"base_case\": 52000000000,\n      \"optimistic\": 55000000000,\n      \"pessimistic\": 48000000000,\n      \"growth_rate\": 4.0\n    },\n    \"profitability\": {\n      \"projected_net_income\": 35000000000,\n      \"roe_forecast\": 18.8,\n      \"cost_to_income_ratio\": 42.5\n    },\n    \"balance_sheet\": {\n      \"total_assets_forecast\": 19000000000000,\n      \"loan_growth_rate\": 12.5,\n      \"deposit_growth_rate\": 10.8\n    }\n  },\n  \"scenario_analysis\": {\n    \"optimistic\": {\n      \"risk_score\": 20.2,\n      \"key_assumptions\": [\"GDP growth 7%\", \"Stable rates\", \"Low NPAs\"]\n    },\n    \"realistic\": {\n      \"risk_score\": 25.5,\n      \"key_assumptions\": [\"GDP growth 6%\", \"Moderate volatility\", \"Controlled NPAs\"]\n    },\n    \"pessimistic\": {\n      \"risk_score\": 32.8,\n      \"key_assumptions\": [\"GDP growth 4%\", \"High volatility\", \"Rising NPAs\"]\n    }\n  },\n  \"recommendations\": [\n    {\n      \"category\": \"risk_management\",\n      \"priority\": \"medium\",\n      \"description\": \"Monitor credit portfolio concentration in specific sectors\",\n      \"impact\": \"Could reduce risk score by 2-3 points\"\n    },\n    {\n      \"category\": \"capital_optimization\",\n      \"priority\": \"low\",\n      \"description\": \"Consider optimizing capital allocation for better ROE\",\n      \"impact\": \"Potential 0.5% improvement in ROE\"\n    }\n  ],\n  \"metadata\": {\n    \"model_accuracy\": 94.2,\n    \"data_quality_score\": 88.5,\n    \"peer_comparison_available\": true,\n    \"regulatory_compliance_checked\": true\n  }\n}\n```"
+          }
+        },
+        {
+          "name": "List User Predictions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/predictions?page=1&size=20&status=completed&prediction_type=annual&company_id={{companyId}}&sort_by=created_at&sort_order=desc",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "predictions"],
+              "query": [
+                {"key": "page", "value": "1"},
+                {"key": "size", "value": "20"},
+                {"key": "status", "value": "completed"},
+                {"key": "prediction_type", "value": "annual"},
+                {"key": "company_id", "value": "{{companyId}}"},
+                {"key": "sort_by", "value": "created_at"},
+                {"key": "sort_order", "value": "desc"}
+              ]
+            },
+            "description": "**📋 Get list of predictions** (filtered by user access)\n\n🔒 **Authorization:** organization member\n\n📋 **Query Parameters:**\n- `page`, `size`: Pagination\n- `status`: queued|processing|completed|failed\n- `prediction_type`: annual|quarterly\n- `company_id`: Filter by specific company\n- `sort_by`: created_at|completed_at|company_name\n- `sort_order`: asc|desc\n\n✅ **Success Response (200):**\n```json\n{\n  \"predictions\": [\n    {\n      \"id\": \"uuid\",\n      \"company_id\": \"uuid\",\n      \"company_name\": \"HDFC Bank Limited\",\n      \"prediction_type\": \"annual\",\n      \"prediction_year\": 2024,\n      \"status\": \"completed\",\n      \"risk_score\": 25.5,\n      \"risk_category\": \"low\",\n      \"confidence_level\": 92.3,\n      \"created_at\": \"2024-01-01T12:00:00Z\",\n      \"completed_at\": \"2024-01-01T12:14:30Z\",\n      \"processing_time\": \"14m 30s\",\n      \"created_by\": \"uuid\",\n      \"model_version\": \"v2.1\"\n    }\n  ],\n  \"summary\": {\n    \"total_predictions\": 25,\n    \"completed\": 22,\n    \"processing\": 2,\n    \"failed\": 1,\n    \"avg_processing_time\": \"12m 45s\"\n  },\n  \"pagination\": {\n    \"page\": 1,\n    \"size\": 20,\n    \"total\": 25,\n    \"pages\": 2\n  }\n}\n```"
+          }
+        },
+        {
+          "name": "Delete Prediction",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/predictions/{{predictionId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "predictions", "{{predictionId}}"]
+            },
+            "description": "**🗑️ Delete prediction and all associated data**\n\n🔒 **Authorization:** prediction creator or organization admin\n\n⚠️ **Warning:** This action is irreversible\n\n✅ **Success Response (200):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Prediction deleted successfully\",\n  \"deleted_prediction_id\": \"uuid\",\n  \"company_name\": \"HDFC Bank Limited\",\n  \"prediction_type\": \"annual\",\n  \"data_cleanup\": {\n    \"results_removed\": true,\n    \"job_history_cleared\": true,\n    \"files_deleted\": 3\n  }\n}\n```"
+          }
+        },
+        {
+          "name": "Bulk Create Predictions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.bulk_job_id) {",
+                  "        pm.collectionVariables.set('jobId', response.bulk_job_id);",
+                  "        console.log('⚙️ Bulk Job ID set:', response.bulk_job_id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"company_ids\": [\n        \"{{companyId}}\",\n        \"company-id-2\",\n        \"company-id-3\"\n    ],\n    \"prediction_type\": \"annual\",\n    \"prediction_year\": 2024,\n    \"model_version\": \"v2.1\",\n    \"batch_size\": 5,\n    \"priority\": \"normal\",\n    \"notification_email\": \"analyst@hdfcbank.com\",\n    \"custom_parameters\": {\n        \"market_conditions\": \"stable\",\n        \"include_scenarios\": true,\n        \"scenario_types\": [\"realistic\", \"pessimistic\"]\n    }\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/predictions/bulk",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "predictions", "bulk"]
+            },
+            "description": "**⚡ Create predictions for multiple companies in batch**\n\n🔒 **Authorization:** organization admin or elevated permissions\n\n📋 **Request Body Schema:**\n```json\n{\n  \"company_ids\": [\"uuid\"],        // Array of company IDs (required)\n  \"prediction_type\": \"annual|quarterly\", // Type of predictions\n  \"prediction_year\": number,      // Year for predictions\n  \"quarter\": 1|2|3|4,             // Required for quarterly\n  \"model_version\": \"string\",      // ML model version\n  \"batch_size\": number,           // Concurrent processing limit\n  \"priority\": \"low|normal|high\",  // Processing priority\n  \"notification_email\": \"string\", // Completion notification\n  \"custom_parameters\": {}         // Common parameters for all predictions\n}\n```\n\n✅ **Success Response (200):**\n```json\n{\n  \"bulk_job_id\": \"uuid\",\n  \"total_companies\": 3,\n  \"predictions_queued\": 3,\n  \"predictions_failed\": 0,\n  \"batch_size\": 5,\n  \"estimated_completion\": \"2024-01-01T12:45:00Z\",\n  \"status\": \"queued\",\n  \"individual_predictions\": [\n    {\n      \"company_id\": \"uuid\",\n      \"company_name\": \"HDFC Bank Limited\",\n      \"prediction_id\": \"uuid\",\n      \"job_id\": \"uuid\",\n      \"status\": \"queued\"\n    }\n  ],\n  \"message\": \"Bulk prediction job created successfully\"\n}\n```"
+          }
+        },
+        {
+          "name": "Get Bulk Job Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/predictions/bulk/{{jobId}}/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "predictions", "bulk", "{{jobId}}", "status"]
+            },
+            "description": "**📊 Get status of bulk prediction job**\n\n🔒 **Authorization:** job creator or organization admin\n\n✅ **Success Response (200):**\n```json\n{\n  \"bulk_job_id\": \"uuid\",\n  \"status\": \"processing\",\n  \"progress\": {\n    \"total_predictions\": 3,\n    \"completed\": 1,\n    \"processing\": 1,\n    \"queued\": 1,\n    \"failed\": 0,\n    \"percentage\": 33.3\n  },\n  \"timing\": {\n    \"started_at\": \"2024-01-01T12:00:00Z\",\n    \"estimated_completion\": \"2024-01-01T12:45:00Z\",\n    \"elapsed_time\": \"15m 0s\",\n    \"avg_processing_time\": \"14m 30s\"\n  },\n  \"individual_status\": [\n    {\n      \"company_id\": \"uuid\",\n      \"company_name\": \"HDFC Bank Limited\",\n      \"prediction_id\": \"uuid\",\n      \"status\": \"completed\",\n      \"risk_score\": 25.5,\n      \"completed_at\": \"2024-01-01T12:14:30Z\"\n    },\n    {\n      \"company_id\": \"uuid2\",\n      \"company_name\": \"ICICI Bank Limited\",\n      \"prediction_id\": \"uuid2\",\n      \"status\": \"processing\",\n      \"progress\": 65\n    }\n  ]\n}\n```"
+          }
+        },
+        {
+          "name": "Cancel Prediction Job",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"reason\": \"User requested cancellation\",\n    \"force_cancel\": false\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/predictions/{{predictionId}}/cancel",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "predictions", "{{predictionId}}", "cancel"]
+            },
+            "description": "**❌ Cancel running prediction job**\n\n🔒 **Authorization:** prediction creator or organization admin\n\n📋 **Request Body Schema:**\n```json\n{\n  \"reason\": \"string\",      // Reason for cancellation (optional)\n  \"force_cancel\": boolean  // Force cancel even if in critical stage\n}\n```\n\n✅ **Success Response (200):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Prediction job cancelled successfully\",\n  \"prediction_id\": \"uuid\",\n  \"job_id\": \"uuid\",\n  \"previous_status\": \"processing\",\n  \"cancellation_time\": \"2024-01-01T12:30:00Z\",\n  \"reason\": \"User requested cancellation\",\n  \"partial_results_available\": false\n}\n```"
+          }
+        },
+        {
+          "name": "Get Prediction History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/predictions/{{predictionId}}/history",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "predictions", "{{predictionId}}", "history"]
+            },
+            "description": "**📚 Get complete prediction processing history**\n\n🔒 **Authorization:** prediction creator or organization admin\n\n✅ **Success Response (200):**\n```json\n{\n  \"prediction_id\": \"uuid\",\n  \"company_name\": \"HDFC Bank Limited\",\n  \"prediction_type\": \"annual\",\n  \"history\": [\n    {\n      \"timestamp\": \"2024-01-01T12:00:00Z\",\n      \"status\": \"queued\",\n      \"event\": \"job_created\",\n      \"details\": \"Prediction job created and queued for processing\",\n      \"user_id\": \"uuid\",\n      \"metadata\": {\n        \"priority\": \"high\",\n        \"model_version\": \"v2.1\"\n      }\n    },\n    {\n      \"timestamp\": \"2024-01-01T12:02:00Z\",\n      \"status\": \"processing\",\n      \"event\": \"processing_started\",\n      \"details\": \"Data preparation and model loading initiated\",\n      \"stage\": \"data_preparation\"\n    },\n    {\n      \"timestamp\": \"2024-01-01T12:14:30Z\",\n      \"status\": \"completed\",\n      \"event\": \"processing_completed\",\n      \"details\": \"Risk analysis completed successfully\",\n      \"results_summary\": {\n        \"risk_score\": 25.5,\n        \"confidence_level\": 92.3,\n        \"processing_time\": \"14m 30s\"\n      }\n    }\n  ],\n  \"performance_metrics\": {\n    \"total_processing_time\": \"14m 30s\",\n    \"queue_wait_time\": \"2m 0s\",\n    \"actual_processing_time\": \"12m 30s\",\n    \"model_accuracy\": 94.2\n  }\n}\n```"
+          }
+        },
+        {
+          "name": "Compare Predictions",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"prediction_ids\": [\n        \"{{predictionId}}\",\n        \"prediction-id-2\",\n        \"prediction-id-3\"\n    ],\n    \"comparison_type\": \"risk_scores\",\n    \"include_details\": true,\n    \"group_by\": \"company\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/predictions/compare",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "predictions", "compare"]
+            },
+            "description": "**📊 Compare multiple predictions side by side**\n\n🔒 **Authorization:** organization member with access to all predictions\n\n📋 **Request Body Schema:**\n```json\n{\n  \"prediction_ids\": [\"uuid\"],    // Array of prediction IDs (required)\n  \"comparison_type\": \"risk_scores|financial_projections|scenarios\",\n  \"include_details\": boolean,    // Include detailed breakdown\n  \"group_by\": \"company|date|type\" // Grouping strategy\n}\n```\n\n✅ **Success Response (200):**\n```json\n{\n  \"comparison_id\": \"uuid\",\n  \"comparison_type\": \"risk_scores\",\n  \"predictions_compared\": 3,\n  \"generated_at\": \"2024-01-01T12:00:00Z\",\n  \"summary\": {\n    \"avg_risk_score\": 28.7,\n    \"min_risk_score\": 25.5,\n    \"max_risk_score\": 32.1,\n    \"standard_deviation\": 3.2\n  },\n  \"detailed_comparison\": [\n    {\n      \"prediction_id\": \"uuid\",\n      \"company_name\": \"HDFC Bank Limited\",\n      \"prediction_date\": \"2024-01-01T12:14:30Z\",\n      \"risk_score\": 25.5,\n      \"risk_category\": \"low\",\n      \"key_metrics\": {\n        \"credit_risk\": 22.1,\n        \"liquidity_risk\": 18.5,\n        \"operational_risk\": 28.3\n      }\n    }\n  ],\n  \"insights\": [\n    \"HDFC Bank shows consistently lower risk across all categories\",\n    \"Operational risk varies significantly between predictions\",\n    \"All predictions show similar confidence levels (90%+)\"\n  ]\n}\n```"
+          }
+        },
+        {
+          "name": "Export Prediction Results",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/predictions/{{predictionId}}/export?format=pdf&include_charts=true&include_scenarios=true&template=detailed",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "predictions", "{{predictionId}}", "export"],
+              "query": [
+                {"key": "format", "value": "pdf"},
+                {"key": "include_charts", "value": "true"},
+                {"key": "include_scenarios", "value": "true"},
+                {"key": "template", "value": "detailed"}
+              ]
+            },
+            "description": "**📄 Export prediction results in various formats**\n\n🔒 **Authorization:** prediction creator or organization member\n\n📋 **Query Parameters:**\n- `format`: pdf|excel|json|csv\n- `include_charts`: Include visual charts\n- `include_scenarios`: Include scenario analysis\n- `template`: summary|detailed|executive\n\n✅ **Success Response (200):**\n```json\n{\n  \"export_id\": \"uuid\",\n  \"prediction_id\": \"uuid\",\n  \"format\": \"pdf\",\n  \"template\": \"detailed\",\n  \"file_info\": {\n    \"filename\": \"HDFC_Bank_Annual_Prediction_2024.pdf\",\n    \"file_size\": \"2.5MB\",\n    \"download_url\": \"https://api.example.com/downloads/uuid\",\n    \"expires_at\": \"2024-01-08T12:00:00Z\"\n  },\n  \"content_included\": {\n    \"executive_summary\": true,\n    \"risk_assessment\": true,\n    \"financial_projections\": true,\n    \"scenario_analysis\": true,\n    \"recommendations\": true,\n    \"charts_and_graphs\": true,\n    \"raw_data\": false\n  },\n  \"generated_at\": \"2024-01-01T12:00:00Z\",\n  \"message\": \"Export generated successfully. Download link expires in 7 days.\"\n}\n```"
+          }
+        },
+        {
+          "name": "Get Prediction Analytics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/predictions/analytics?period=month&organization_id={{organizationId}}&include_trends=true&group_by=company",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "predictions", "analytics"],
+              "query": [
+                {"key": "period", "value": "month"},
+                {"key": "organization_id", "value": "{{organizationId}}"},
+                {"key": "include_trends", "value": "true"},
+                {"key": "group_by", "value": "company"}
+              ]
+            },
+            "description": "**📈 Get prediction analytics and insights**\n\n🔒 **Authorization:** organization member\n\n📋 **Query Parameters:**\n- `period`: week|month|quarter|year\n- `organization_id`: Filter by organization\n- `include_trends`: Include trend analysis\n- `group_by`: company|sector|risk_category\n\n✅ **Success Response (200):**\n```json\n{\n  \"analytics_period\": \"month\",\n  \"organization_id\": \"uuid\",\n  \"generated_at\": \"2024-01-01T12:00:00Z\",\n  \"summary\": {\n    \"total_predictions\": 45,\n    \"completed_predictions\": 42,\n    \"avg_processing_time\": \"13m 45s\",\n    \"avg_risk_score\": 32.1,\n    \"success_rate\": 93.3\n  },\n  \"trends\": {\n    \"prediction_volume\": \"+25%\",\n    \"avg_risk_score_change\": \"-2.1%\",\n    \"processing_time_change\": \"-15%\",\n    \"success_rate_change\": \"+1.2%\"\n  },\n  \"risk_distribution\": {\n    \"low_risk\": {\n      \"count\": 28,\n      \"percentage\": 62.2,\n      \"avg_score\": 22.5\n    },\n    \"medium_risk\": {\n      \"count\": 14,\n      \"percentage\": 31.1,\n      \"avg_score\": 45.2\n    },\n    \"high_risk\": {\n      \"count\": 3,\n      \"percentage\": 6.7,\n      \"avg_score\": 72.8\n    }\n  },\n  \"top_companies_analyzed\": [\n    {\n      \"company_name\": \"HDFC Bank Limited\",\n      \"prediction_count\": 8,\n      \"avg_risk_score\": 25.5,\n      \"latest_prediction\": \"2024-01-01T12:14:30Z\"\n    }\n  ],\n  \"performance_insights\": [\n    \"Processing times have improved by 15% this month\",\n    \"62% of predictions fall in low-risk category\",\n    \"Banking sector shows consistently lower risk scores\"\n  ]\n}\n```"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,969 @@
+{
+  "info": {
+    "name": "🏦 Financial Risk API - Complete Collection (Part 2)",
+    "description": "Complete API collection for Financial Default Risk Prediction System v2.0.0\n\n## 🎯 Current 5-Role System\n\n### Role Hierarchy:\n1. **super_admin** - Full system access, can manage everything\n2. **tenant_admin** - Attached to 1 tenant, can manage multiple orgs within that tenant\n3. **org_admin** - Attached to 1 organization, can manage users in that org\n4. **org_member** - Attached to 1 organization, can access org resources and create predictions\n5. **user** - No organization attachment, limited access\n\n## 📋 Part 2 Sections:\n\n### 5. 🏛️ ORGANIZATION MANAGEMENT\n- Organization CRUD within tenants\n- Join token management\n- Whitelist management\n\n### 6. 👥 USER MANAGEMENT\n- Profile management\n- Admin user operations\n\n### 7. 🏭 COMPANIES\n- Company management with multi-tenant access\n\n### 8. 📊 PREDICTIONS\n- ML prediction endpoints with new role system\n- Bulk upload functionality\n\n### 9. 📋 API INFO\n- Health check and documentation",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "tenant_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "organization_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "user_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "company_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "prediction_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "🏛️ ORGANIZATION MANAGEMENT",
+      "item": [
+        {
+          "name": "1. List Organizations",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "List organizations based on role:\n\n- super_admin: All organizations\n- tenant_admin: Organizations in their tenant\n- org_admin: Organizations they manage\n- org_member: Organizations they belong to"
+          }
+        },
+        {
+          "name": "2. Create Organization",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"HDFC Retail Banking\",\n  \"description\": \"Retail Banking Division of HDFC\",\n  \"max_users\": 100,\n  \"join_enabled\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations"]
+            },
+            "description": "Create new organization (Tenant Admin or above)\n\nCreator becomes org_admin of the new organization"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('organization_id', response.id);",
+                  "    console.log('Organization ID saved:', response.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. Get Organization Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/{{organization_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "{{organization_id}}"]
+            },
+            "description": "Get organization details (Org Member or above)"
+          }
+        },
+        {
+          "name": "4. Update Organization",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"HDFC Retail Banking - Updated\",\n  \"description\": \"Updated description for retail banking\",\n  \"max_users\": 150,\n  \"join_enabled\": false\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/{{organization_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "{{organization_id}}"]
+            },
+            "description": "Update organization (Org Admin or above)"
+          }
+        },
+        {
+          "name": "5. Delete Organization",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/{{organization_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "{{organization_id}}"]
+            },
+            "description": "Delete organization (Tenant Admin or above)"
+          }
+        },
+        {
+          "name": "6. Regenerate Join Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/regenerate-token",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "{{organization_id}}", "regenerate-token"]
+            },
+            "description": "Regenerate organization join token (Org Admin or above)"
+          }
+        },
+        {
+          "name": "7. Get Organization Whitelist",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/whitelist",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "{{organization_id}}", "whitelist"]
+            },
+            "description": "Get organization email whitelist (Org Admin or above)"
+          }
+        },
+        {
+          "name": "8. Add to Whitelist",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"employee@hdfc.com\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/whitelist",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "{{organization_id}}", "whitelist"]
+            },
+            "description": "Add email to organization whitelist (Org Admin or above)"
+          }
+        },
+        {
+          "name": "9. Remove from Whitelist",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/whitelist/employee@hdfc.com",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "{{organization_id}}", "whitelist", "employee@hdfc.com"]
+            },
+            "description": "Remove email from whitelist (Org Admin or above)"
+          }
+        },
+        {
+          "name": "10. Get Organization Users",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/users?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "{{organization_id}}", "users"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Get organization users (Org Member or above)"
+          }
+        }
+      ],
+      "description": "Organization management endpoints - Role-based access control"
+    },
+    {
+      "name": "👥 USER MANAGEMENT",
+      "item": [
+        {
+          "name": "🔹 SELF-SERVICE",
+          "item": [
+            {
+              "name": "1. Get My Profile",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/v1/users/profile",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "users", "profile"]
+                },
+                "description": "Get current user profile (Any authenticated user)"
+              }
+            },
+            {
+              "name": "2. Update My Profile",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"first_name\": \"Updated\",\n  \"last_name\": \"Name\",\n  \"username\": \"updatedusername\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/v1/users/profile",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "users", "profile"]
+                },
+                "description": "Update current user profile (Any authenticated user)"
+              }
+            }
+          ],
+          "description": "Self-service user operations"
+        },
+        {
+          "name": "🔹 ADMIN OPERATIONS",
+          "item": [
+            {
+              "name": "3. List Users (Admin)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/v1/users?page=1&limit=10&role=org_member",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "users"],
+                  "query": [
+                    {
+                      "key": "page",
+                      "value": "1"
+                    },
+                    {
+                      "key": "limit",
+                      "value": "10"
+                    },
+                    {
+                      "key": "role",
+                      "value": "org_member"
+                    }
+                  ]
+                },
+                "description": "List users with role-based scoping (Admin roles)\n\nAccess based on role:\n- super_admin: All users\n- tenant_admin: Users in their tenant\n- org_admin: Users in their organization"
+              }
+            },
+            {
+              "name": "4. Create User (Admin)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"newuser@hdfc.com\",\n  \"password\": \"NewUserPass123\",\n  \"first_name\": \"New\",\n  \"last_name\": \"User\",\n  \"username\": \"newuser\",\n  \"role\": \"org_member\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/v1/users",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "users"]
+                },
+                "description": "Create new user (Admin roles)\n\nRoles assignable:\n- super_admin: Can assign any role\n- tenant_admin: Can assign user, org_member, org_admin, tenant_admin\n- org_admin: Can assign org_member, org_admin"
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "if (pm.response.code === 201) {",
+                      "    const response = pm.response.json();",
+                      "    pm.collectionVariables.set('user_id', response.id);",
+                      "    console.log('User ID saved:', response.id);",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ]
+            },
+            {
+              "name": "5. Get User Details (Admin)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/v1/users/{{user_id}}",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "users", "{{user_id}}"]
+                },
+                "description": "Get user details (Admin roles with scope restrictions)"
+              }
+            },
+            {
+              "name": "6. Update User (Admin)",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"first_name\": \"Updated\",\n  \"last_name\": \"User\",\n  \"username\": \"updateduser\",\n  \"is_active\": true\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/v1/users/{{user_id}}",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "users", "{{user_id}}"]
+                },
+                "description": "Update user information (Admin roles)"
+              }
+            },
+            {
+              "name": "7. Delete User (Admin)",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/v1/users/{{user_id}}",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "users", "{{user_id}}"]
+                },
+                "description": "Delete user (Admin roles)"
+              }
+            },
+            {
+              "name": "8. Update User Role (Admin)",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"role\": \"org_admin\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/v1/users/{{user_id}}/role",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "users", "{{user_id}}", "role"]
+                },
+                "description": "Update user role (Admin roles)\n\nValid roles: user, org_member, org_admin, tenant_admin, super_admin"
+              }
+            },
+            {
+              "name": "9. Activate User (Admin)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/v1/users/{{user_id}}/activate",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "users", "{{user_id}}", "activate"]
+                },
+                "description": "Activate user account (Admin roles)"
+              }
+            },
+            {
+              "name": "10. Deactivate User (Admin)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/v1/users/{{user_id}}/deactivate",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "users", "{{user_id}}", "deactivate"]
+                },
+                "description": "Deactivate user account (Admin roles)"
+              }
+            }
+          ],
+          "description": "Admin user management operations"
+        }
+      ],
+      "description": "User management endpoints - Self-service and admin operations"
+    },
+    {
+      "name": "🏭 COMPANIES",
+      "item": [
+        {
+          "name": "1. List Companies",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/companies?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "companies"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "List companies with role-based access (Org Member or above)\n\nAccess:\n- super_admin: All companies globally\n- tenant_admin: Global + tenant companies\n- org_admin/org_member: Global + organization companies"
+          }
+        },
+        {
+          "name": "2. Create Company",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Reliance Industries Ltd\",\n  \"symbol\": \"RELIANCE\",\n  \"industry\": \"Energy\",\n  \"sector\": \"Oil & Gas\",\n  \"description\": \"Reliance Industries Limited is an Indian multinational conglomerate\",\n  \"market_cap\": 1500000000000,\n  \"revenue\": 792756000000,\n  \"employees\": 236000,\n  \"founded_year\": 1973,\n  \"exchange\": \"NSE\",\n  \"currency\": \"INR\",\n  \"country\": \"India\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/companies",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "companies"]
+            },
+            "description": "Create a new company (Org Member or above)\n\nCompany is created within user's organization context"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('company_id', response.id);",
+                  "    console.log('Company ID saved:', response.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. Get Company Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/companies/{{company_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "companies", "{{company_id}}"]
+            },
+            "description": "Get company details by ID (Org Member or above)"
+          }
+        },
+        {
+          "name": "4. Search Companies by Symbol",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/companies/search?symbol=RELIANCE",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "companies", "search"],
+              "query": [
+                {
+                  "key": "symbol",
+                  "value": "RELIANCE"
+                }
+              ]
+            },
+            "description": "Search companies by symbol (Org Member or above)"
+          }
+        }
+      ],
+      "description": "Company management endpoints - Org Member+ access with multi-tenant support"
+    },
+    {
+      "name": "📊 PREDICTIONS",
+      "item": [
+        {
+          "name": "1. ⭐ Create Annual Prediction",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"company_symbol\": \"RELIANCE\",\n  \"company_name\": \"Reliance Industries Ltd\",\n  \"reporting_year\": 2024,\n  \"total_assets\": 2500000000000,\n  \"total_liabilities\": 1200000000000,\n  \"revenue\": 792756000000,\n  \"net_income\": 60705000000,\n  \"cash_flow\": 85000000000,\n  \"debt_to_equity\": 0.48,\n  \"current_ratio\": 1.2,\n  \"quick_ratio\": 0.9,\n  \"return_on_assets\": 0.024,\n  \"return_on_equity\": 0.046,\n  \"working_capital\": 300000000000,\n  \"retained_earnings\": 400000000000,\n  \"ebit\": 95000000000,\n  \"market_value_equity\": 1500000000000,\n  \"sales\": 792756000000,\n  \"sector\": \"Energy\",\n  \"market_cap\": 1500000000000\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/predictions/annual",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "predictions", "annual"]
+            },
+            "description": "Create annual financial default risk prediction (Org Member or above)\n\nAutomatically creates company if it doesn't exist"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('prediction_id', response.prediction_id);",
+                  "    pm.collectionVariables.set('company_id', response.company_id);",
+                  "    console.log('Prediction ID saved:', response.prediction_id);",
+                  "    console.log('Company ID saved:', response.company_id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. ⭐ Create Quarterly Prediction",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"company_symbol\": \"RELIANCE\",\n  \"company_name\": \"Reliance Industries Ltd\",\n  \"reporting_year\": 2024,\n  \"reporting_quarter\": \"Q1\",\n  \"total_assets\": 2500000000000,\n  \"total_liabilities\": 1200000000000,\n  \"revenue\": 198189000000,\n  \"net_income\": 15176250000,\n  \"cash_flow\": 21250000000,\n  \"debt_to_equity\": 0.48,\n  \"current_ratio\": 1.2,\n  \"quick_ratio\": 0.9,\n  \"return_on_assets\": 0.006,\n  \"return_on_equity\": 0.0115,\n  \"working_capital\": 300000000000,\n  \"retained_earnings\": 400000000000,\n  \"ebit\": 23750000000,\n  \"market_value_equity\": 1500000000000,\n  \"sales\": 198189000000,\n  \"sector\": \"Energy\",\n  \"market_cap\": 1500000000000\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/predictions/quarterly",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "predictions", "quarterly"]
+            },
+            "description": "Create quarterly financial default risk prediction (Org Member or above)\n\nAutomatically creates company if it doesn't exist"
+          }
+        },
+        {
+          "name": "3. Get Annual Predictions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/predictions/annual?page=1&limit=10&reporting_year=2024&company_symbol=RELIANCE",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "predictions", "annual"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "reporting_year",
+                  "value": "2024"
+                },
+                {
+                  "key": "company_symbol",
+                  "value": "RELIANCE"
+                }
+              ]
+            },
+            "description": "List annual predictions with filtering (Org Member or above)\n\nAccess based on organization context"
+          }
+        },
+        {
+          "name": "4. Get Quarterly Predictions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/predictions/quarterly?page=1&limit=10&reporting_year=2024&reporting_quarter=Q1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "predictions", "quarterly"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "reporting_year",
+                  "value": "2024"
+                },
+                {
+                  "key": "reporting_quarter",
+                  "value": "Q1"
+                }
+              ]
+            },
+            "description": "List quarterly predictions with filtering (Org Member or above)"
+          }
+        },
+        {
+          "name": "5. Get Company Predictions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/predictions/companies/{{company_id}}?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "predictions", "companies", "{{company_id}}"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Get all predictions for a specific company (Org Member or above)"
+          }
+        },
+        {
+          "name": "6. Bulk Upload Predictions (CSV)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "/path/to/predictions.csv"
+                },
+                {
+                  "key": "prediction_type",
+                  "value": "annual",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/predictions/bulk-upload",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "predictions", "bulk-upload"]
+            },
+            "description": "Bulk upload predictions via CSV (Org Member or above)\n\nSupported formats: annual, quarterly\nCreates companies automatically if they don't exist"
+          }
+        },
+        {
+          "name": "7. Get Bulk Upload Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/predictions/bulk-upload/status/{{upload_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "predictions", "bulk-upload", "status", "{{upload_id}}"]
+            },
+            "description": "Check bulk upload processing status (Org Member or above)"
+          }
+        },
+        {
+          "name": "8. Get Prediction Summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/predictions/summary?period=month",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "predictions", "summary"],
+              "query": [
+                {
+                  "key": "period",
+                  "value": "month"
+                }
+              ]
+            },
+            "description": "Get prediction analytics summary (Org Member or above)\n\nPeriods: day, week, month, year\nScoped to user's organization"
+          }
+        }
+      ],
+      "description": "Prediction endpoints - Financial default risk prediction with ML models (Org Member+ access)"
+    },
+    {
+      "name": "📋 API INFO",
+      "item": [
+        {
+          "name": "API Root - Service Info",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/",
+              "host": ["{{base_url}}"],
+              "path": [""]
+            },
+            "description": "Get API service information and structure"
+          }
+        },
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Health check endpoint for monitoring"
+          }
+        },
+        {
+          "name": "API Documentation",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/docs",
+              "host": ["{{base_url}}"],
+              "path": ["docs"]
+            },
+            "description": "Interactive API documentation (FastAPI Swagger UI)"
+          }
+        }
+      ],
+      "description": "API information and health endpoints"
+    }
+  ]
+}
