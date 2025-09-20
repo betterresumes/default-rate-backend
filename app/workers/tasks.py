@@ -5,28 +5,522 @@ import traceback
 import io
 import base64
 import math
-from typing import Dict, Any
+import uuid
+from datetime import datetime
+from typing import Dict, Any, List, Optional
 from celery import current_task
 from ..workers.celery_app import celery_app
-from ..core.database import get_session_local
-from ..services.services import CompanyService
-from ..schemas.schemas import CompanyCreate
+from ..core.database import get_session_local, BulkUploadJob, Company, AnnualPrediction, QuarterlyPrediction, User, Organization
 from ..services.ml_service import ml_model
-# from ..services.email_service import email_service  # Disabled for now
+from ..services.quarterly_ml_service import quarterly_ml_model
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def safe_float(value):
     """Convert value to float, handling None and NaN values"""
     if value is None:
-        return None
+        return 0
     try:
         float_val = float(value)
-        # Check if it's NaN or infinite
         if math.isnan(float_val) or math.isinf(float_val):
-            return None
+            return 0
         return float_val
     except (ValueError, TypeError):
-        return None
+        return 0
+
+
+def update_job_status(
+    job_id: str,
+    status: str,
+    processed_rows: Optional[int] = None,
+    successful_rows: Optional[int] = None,
+    failed_rows: Optional[int] = None,
+    error_message: Optional[str] = None,
+    error_details: Optional[Dict] = None
+):
+    """Update job status in database"""
+    SessionLocal = get_session_local()
+    db = SessionLocal()
+    
+    try:
+        job = db.query(BulkUploadJob).filter(BulkUploadJob.id == job_id).first()
+        if not job:
+            return
+        
+        job.status = status
+        
+        if processed_rows is not None:
+            job.processed_rows = processed_rows
+        if successful_rows is not None:
+            job.successful_rows = successful_rows
+        if failed_rows is not None:
+            job.failed_rows = failed_rows
+        if error_message is not None:
+            job.error_message = error_message
+        if error_details is not None:
+            import json
+            job.error_details = json.dumps(error_details)
+        
+        if status == 'processing' and job.started_at is None:
+            job.started_at = datetime.utcnow()
+        elif status in ['completed', 'failed']:
+            job.completed_at = datetime.utcnow()
+        
+        db.commit()
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating job status: {str(e)}")
+    finally:
+        db.close()
+
+
+def create_or_get_company(db, symbol: str, name: str, market_cap: float, sector: str, organization_id: Optional[str], user_id: str) -> Company:
+    """Create or get company with organization scoping"""
+    # Check for existing company in organization scope
+    if organization_id:
+        company = db.query(Company).filter(
+            Company.symbol == symbol.upper(),
+            Company.organization_id == organization_id
+        ).first()
+    else:
+        # Global scope
+        company = db.query(Company).filter(
+            Company.symbol == symbol.upper(),
+            Company.organization_id.is_(None)
+        ).first()
+    
+    if not company:
+        # Check if user can create global companies
+        is_global = False
+        if organization_id is None:
+            user = db.query(User).filter(User.id == user_id).first()
+            if user and user.role == "super_admin":
+                is_global = True
+            else:
+                raise Exception("Only super admin can create global companies")
+        
+        company = Company(
+            symbol=symbol.upper(),
+            name=name,
+            market_cap=safe_float(market_cap) * 1_000_000,  # Convert to actual value
+            sector=sector,
+            organization_id=organization_id,
+            created_by=user_id,
+            is_global=is_global
+        )
+        db.add(company)
+        db.flush()  # Get the ID without committing
+    else:
+        # Update existing company
+        company.name = name
+        company.market_cap = safe_float(market_cap) * 1_000_000
+        company.sector = sector
+    
+    return company
+
+
+@celery_app.task(bind=True, name="app.workers.tasks.process_annual_bulk_upload_task")
+def process_annual_bulk_upload_task(
+    self, 
+    job_id: str, 
+    data: List[Dict[str, Any]], 
+    user_id: str, 
+    organization_id: Optional[str]
+) -> Dict[str, Any]:
+    """
+    Celery task to process annual predictions bulk upload
+    
+    Args:
+        job_id: Bulk upload job ID
+        data: List of row data from Excel/CSV
+        user_id: ID of user who initiated upload
+        organization_id: Organization ID (None for super admin global uploads)
+        
+    Returns:
+        Dictionary with processing results
+    """
+    task_id = self.request.id
+    start_time = time.time()
+    
+    # Update job status to processing
+    update_job_status(job_id, 'processing')
+    
+    SessionLocal = get_session_local()
+    db = SessionLocal()
+    
+    successful_rows = 0
+    failed_rows = 0
+    error_details = []
+    total_rows = len(data)
+    
+    try:
+        self.update_state(
+            state="PROGRESS",
+            meta={
+                "status": "Processing annual predictions...",
+                "current": 0,
+                "total": total_rows,
+                "job_id": job_id
+            }
+        )
+        
+        for i, row in enumerate(data):
+            try:
+                # Create or get company
+                company = create_or_get_company(
+                    db=db,
+                    symbol=row['company_symbol'],
+                    name=row['company_name'],
+                    market_cap=safe_float(row['market_cap']),
+                    sector=row['sector'],
+                    organization_id=organization_id,
+                    user_id=user_id
+                )
+                
+                # Check if prediction already exists
+                existing_query = db.query(AnnualPrediction).filter(
+                    AnnualPrediction.company_id == company.id,
+                    AnnualPrediction.reporting_year == int(row['reporting_year'])
+                )
+                
+                if row.get('reporting_quarter'):
+                    existing_query = existing_query.filter(
+                        AnnualPrediction.reporting_quarter == int(row['reporting_quarter'])
+                    )
+                else:
+                    existing_query = existing_query.filter(
+                        AnnualPrediction.reporting_quarter.is_(None)
+                    )
+                
+                existing_prediction = existing_query.first()
+                if existing_prediction:
+                    failed_rows += 1
+                    error_details.append({
+                        'row': i + 1,
+                        'error': f"Prediction already exists for {row['company_symbol']} {row['reporting_year']}"
+                    })
+                    continue
+                
+                # Prepare financial data for ML model
+                financial_data = {
+                    'long_term_debt_to_total_capital': safe_float(row['long_term_debt_to_total_capital']),
+                    'total_debt_to_ebitda': safe_float(row['total_debt_to_ebitda']),
+                    'net_income_margin': safe_float(row['net_income_margin']),
+                    'ebit_to_interest_expense': safe_float(row['ebit_to_interest_expense']),
+                    'return_on_assets': safe_float(row['return_on_assets'])
+                }
+                
+                # Get ML prediction (direct call in Celery task)
+                ml_result = ml_model.predict_annual_default_probability(financial_data)
+                
+                # Create prediction
+                prediction = AnnualPrediction(
+                    id=uuid.uuid4(),
+                    company_id=company.id,
+                    organization_id=organization_id,
+                    reporting_year=int(row['reporting_year']),
+                    reporting_quarter=int(row['reporting_quarter']) if row.get('reporting_quarter') else None,
+                    long_term_debt_to_total_capital=safe_float(row['long_term_debt_to_total_capital']),
+                    total_debt_to_ebitda=safe_float(row['total_debt_to_ebitda']),
+                    net_income_margin=safe_float(row['net_income_margin']),
+                    ebit_to_interest_expense=safe_float(row['ebit_to_interest_expense']),
+                    return_on_assets=safe_float(row['return_on_assets']),
+                    probability=safe_float(ml_result['probability']),
+                    risk_level=ml_result['risk_level'],
+                    confidence=safe_float(ml_result['confidence']),
+                    predicted_at=datetime.utcnow(),
+                    created_by=user_id
+                )
+                
+                db.add(prediction)
+                successful_rows += 1
+                
+                # Commit every 50 rows and update progress
+                if (i + 1) % 50 == 0:
+                    db.commit()
+                    update_job_status(
+                        job_id, 
+                        'processing',
+                        processed_rows=i + 1,
+                        successful_rows=successful_rows,
+                        failed_rows=failed_rows
+                    )
+                    
+                    self.update_state(
+                        state="PROGRESS",
+                        meta={
+                            "status": f"Processed {i + 1}/{total_rows} rows",
+                            "current": i + 1,
+                            "total": total_rows,
+                            "successful": successful_rows,
+                            "failed": failed_rows,
+                            "job_id": job_id
+                        }
+                    )
+            
+            except Exception as e:
+                failed_rows += 1
+                error_details.append({
+                    'row': i + 1,
+                    'data': {k: str(v) for k, v in row.items()},  # Convert to string for JSON serialization
+                    'error': str(e)
+                })
+                logger.error(f"Error processing row {i + 1}: {str(e)}")
+                db.rollback()
+                continue
+        
+        # Final commit
+        db.commit()
+        
+        # Calculate processing time
+        processing_time = time.time() - start_time
+        
+        # Update job as completed
+        update_job_status(
+            job_id,
+            'completed',
+            processed_rows=total_rows,
+            successful_rows=successful_rows,
+            failed_rows=failed_rows,
+            error_details={'errors': error_details[:100]}  # Limit to first 100 errors
+        )
+        
+        result = {
+            "status": "completed",
+            "job_id": job_id,
+            "total_rows": total_rows,
+            "successful_rows": successful_rows,
+            "failed_rows": failed_rows,
+            "processing_time_seconds": round(processing_time, 2),
+            "errors": error_details[:10]  # Return first 10 errors
+        }
+        
+        return result
+        
+    except Exception as e:
+        db.rollback()
+        error_msg = str(e)
+        logger.error(f"Bulk upload job {job_id} failed: {error_msg}")
+        
+        update_job_status(
+            job_id,
+            'failed',
+            error_message=error_msg,
+            error_details={'errors': error_details}
+        )
+        
+        self.update_state(
+            state="FAILURE",
+            meta={
+                "status": f"Job failed: {error_msg}",
+                "job_id": job_id,
+                "error": error_msg
+            }
+        )
+        
+        raise Exception(f"Annual bulk upload failed: {error_msg}")
+        
+    finally:
+        db.close()
+
+
+@celery_app.task(bind=True, name="app.workers.tasks.process_quarterly_bulk_upload_task")
+def process_quarterly_bulk_upload_task(
+    self, 
+    job_id: str, 
+    data: List[Dict[str, Any]], 
+    user_id: str, 
+    organization_id: Optional[str]
+) -> Dict[str, Any]:
+    """
+    Celery task to process quarterly predictions bulk upload
+    
+    Args:
+        job_id: Bulk upload job ID
+        data: List of row data from Excel/CSV
+        user_id: ID of user who initiated upload
+        organization_id: Organization ID (None for super admin global uploads)
+        
+    Returns:
+        Dictionary with processing results
+    """
+    task_id = self.request.id
+    start_time = time.time()
+    
+    # Update job status to processing
+    update_job_status(job_id, 'processing')
+    
+    SessionLocal = get_session_local()
+    db = SessionLocal()
+    
+    successful_rows = 0
+    failed_rows = 0
+    error_details = []
+    total_rows = len(data)
+    
+    try:
+        self.update_state(
+            state="PROGRESS",
+            meta={
+                "status": "Processing quarterly predictions...",
+                "current": 0,
+                "total": total_rows,
+                "job_id": job_id
+            }
+        )
+        
+        for i, row in enumerate(data):
+            try:
+                # Create or get company
+                company = create_or_get_company(
+                    db=db,
+                    symbol=row['company_symbol'],
+                    name=row['company_name'],
+                    market_cap=safe_float(row['market_cap']),
+                    sector=row['sector'],
+                    organization_id=organization_id,
+                    user_id=user_id
+                )
+                
+                # Check if prediction already exists
+                existing_prediction = db.query(QuarterlyPrediction).filter(
+                    QuarterlyPrediction.company_id == company.id,
+                    QuarterlyPrediction.reporting_year == int(row['reporting_year']),
+                    QuarterlyPrediction.reporting_quarter == int(row['reporting_quarter'])
+                ).first()
+                
+                if existing_prediction:
+                    failed_rows += 1
+                    error_details.append({
+                        'row': i + 1,
+                        'error': f"Prediction already exists for {row['company_symbol']} {row['reporting_year']} {row['reporting_quarter']}"
+                    })
+                    continue
+                
+                # Prepare financial data for ML model
+                financial_data = {
+                    'total_debt_to_ebitda': safe_float(row['total_debt_to_ebitda']),
+                    'sga_margin': safe_float(row['sga_margin']),
+                    'long_term_debt_to_total_capital': safe_float(row['long_term_debt_to_total_capital']),
+                    'return_on_capital': safe_float(row['return_on_capital'])
+                }
+                
+                # Get ML prediction (direct call in Celery task)
+                ml_result = quarterly_ml_model.predict_quarterly_default_probability(financial_data)
+                
+                # Create prediction
+                prediction = QuarterlyPrediction(
+                    id=uuid.uuid4(),
+                    company_id=company.id,
+                    organization_id=organization_id,
+                    reporting_year=int(row['reporting_year']),
+                    reporting_quarter=int(row['reporting_quarter']),
+                    total_debt_to_ebitda=safe_float(row['total_debt_to_ebitda']),
+                    sga_margin=safe_float(row['sga_margin']),
+                    long_term_debt_to_total_capital=safe_float(row['long_term_debt_to_total_capital']),
+                    return_on_capital=safe_float(row['return_on_capital']),
+                    logistic_probability=safe_float(ml_result.get('logistic_probability', 0)),
+                    gbm_probability=safe_float(ml_result.get('gbm_probability', 0)),
+                    ensemble_probability=safe_float(ml_result.get('ensemble_probability', 0)),
+                    risk_level=ml_result['risk_level'],
+                    confidence=safe_float(ml_result['confidence']),
+                    predicted_at=datetime.utcnow(),
+                    created_by=user_id
+                )
+                
+                db.add(prediction)
+                successful_rows += 1
+                
+                # Commit every 50 rows and update progress
+                if (i + 1) % 50 == 0:
+                    db.commit()
+                    update_job_status(
+                        job_id, 
+                        'processing',
+                        processed_rows=i + 1,
+                        successful_rows=successful_rows,
+                        failed_rows=failed_rows
+                    )
+                    
+                    self.update_state(
+                        state="PROGRESS",
+                        meta={
+                            "status": f"Processed {i + 1}/{total_rows} rows",
+                            "current": i + 1,
+                            "total": total_rows,
+                            "successful": successful_rows,
+                            "failed": failed_rows,
+                            "job_id": job_id
+                        }
+                    )
+            
+            except Exception as e:
+                failed_rows += 1
+                error_details.append({
+                    'row': i + 1,
+                    'data': {k: str(v) for k, v in row.items()},  # Convert to string for JSON serialization
+                    'error': str(e)
+                })
+                logger.error(f"Error processing row {i + 1}: {str(e)}")
+                db.rollback()
+                continue
+        
+        # Final commit
+        db.commit()
+        
+        # Calculate processing time
+        processing_time = time.time() - start_time
+        
+        # Update job as completed
+        update_job_status(
+            job_id,
+            'completed',
+            processed_rows=total_rows,
+            successful_rows=successful_rows,
+            failed_rows=failed_rows,
+            error_details={'errors': error_details[:100]}  # Limit to first 100 errors
+        )
+        
+        result = {
+            "status": "completed",
+            "job_id": job_id,
+            "total_rows": total_rows,
+            "successful_rows": successful_rows,
+            "failed_rows": failed_rows,
+            "processing_time_seconds": round(processing_time, 2),
+            "errors": error_details[:10]  # Return first 10 errors
+        }
+        
+        return result
+        
+    except Exception as e:
+        db.rollback()
+        error_msg = str(e)
+        logger.error(f"Bulk upload job {job_id} failed: {error_msg}")
+        
+        update_job_status(
+            job_id,
+            'failed',
+            error_message=error_msg,
+            error_details={'errors': error_details}
+        )
+        
+        self.update_state(
+            state="FAILURE",
+            meta={
+                "status": f"Job failed: {error_msg}",
+                "job_id": job_id,
+                "error": error_msg
+            }
+        )
+        
+        raise Exception(f"Quarterly bulk upload failed: {error_msg}")
+        
+    finally:
+        db.close()
 
 
 @celery_app.task(name="app.workers.tasks.send_verification_email_task")

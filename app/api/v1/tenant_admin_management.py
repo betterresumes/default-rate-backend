@@ -525,10 +525,9 @@ async def assign_user_to_organization(
         # Assign user to organization
         user.organization_id = organization.id
         user.tenant_id = organization.tenant_id
-        user.role = assignment.role
         user.updated_at = datetime.utcnow()
         
-        # Set appropriate global role based on org role
+        # Set appropriate role based on org role
         if assignment.role == "org_admin":
             user.role = "org_admin"
         else:

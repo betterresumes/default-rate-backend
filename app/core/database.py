@@ -35,7 +35,7 @@ class Tenant(Base):
     
     # Relationships
     organizations = relationship("Organization", back_populates="tenant")
-    tenant_admins = relationship("User", back_populates="tenant", foreign_keys="User.tenant_id")
+    tenant_admins = relationship("User", back_populates="assigned_tenant", foreign_keys="User.tenant_id")
     creator = relationship("User", foreign_keys=[created_by])
 
 # ========================================
@@ -72,7 +72,7 @@ class Organization(Base):
     
     # Relationships
     tenant = relationship("Tenant", back_populates="organizations")
-    users = relationship("User", back_populates="organization", foreign_keys="User.organization_id")
+    users = relationship("User", back_populates="assigned_organization", foreign_keys="User.organization_id")
     companies = relationship("Company", back_populates="organization")
     whitelist_entries = relationship("OrganizationMemberWhitelist", back_populates="organization", cascade="all, delete-orphan")
     creator = relationship("User", foreign_keys=[created_by])
@@ -140,8 +140,8 @@ class User(Base):
     last_login = Column(DateTime, nullable=True)
     
     # Relationships
-    tenant = relationship("Tenant", back_populates="tenant_admins", foreign_keys=[tenant_id])
-    organization = relationship("Organization", back_populates="users", foreign_keys=[organization_id])
+    assigned_tenant = relationship("Tenant", back_populates="tenant_admins", foreign_keys=[tenant_id])
+    assigned_organization = relationship("Organization", back_populates="users", foreign_keys=[organization_id])
 
 # ========================================
 # REMOVED: EMAIL VERIFICATION TABLES
@@ -285,7 +285,8 @@ class BulkUploadJob(Base):
     
     # Job details
     job_type = Column(String(50), nullable=False, index=True)  # 'annual' or 'quarterly'
-    status = Column(String(20), default='pending', index=True)  # pending, processing, completed, failed
+    status = Column(String(20), default='pending', index=True)  # pending, queued, processing, completed, failed
+    celery_task_id = Column(String(255), nullable=True, index=True)  # Celery task ID for tracking
     
     # File information
     original_filename = Column(String(255), nullable=False)

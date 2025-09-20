@@ -7,7 +7,7 @@ import uuid
 import math
 
 # Core imports
-from ...core.database import get_db, User, Company, AnnualPrediction, QuarterlyPrediction
+from ...core.database import get_db, User, Company, Organization, AnnualPrediction, QuarterlyPrediction
 from ...schemas.schemas import (
     AnnualPredictionRequest, QuarterlyPredictionRequest
 )
@@ -188,19 +188,30 @@ async def create_annual_prediction(
         db.commit()
         db.refresh(prediction)
         
+        # Get organization name for response (if applicable)
+        organization_name = None
+        if organization_id:
+            org = db.query(Organization).filter(Organization.id == organization_id).first()
+            organization_name = org.name if org else None
+        
         return {
             "success": True,
             "message": f"Annual prediction created for {request.company_symbol}",
             "prediction": {
                 "id": str(prediction.id),
+                "company_id": str(company.id),
                 "company_symbol": request.company_symbol,
                 "company_name": request.company_name,
                 "reporting_year": request.reporting_year,
+                "reporting_quarter": prediction.reporting_quarter,
                 "probability": float(ml_result['probability']),
                 "risk_level": ml_result['risk_level'],
                 "confidence": float(ml_result['confidence']),
+                "organization_id": str(organization_id) if organization_id else None,
+                "organization_name": organization_name,
                 "organization_access": "global" if is_global else "organization",
-                "created_by": current_user.email,
+                "created_by": str(current_user.id),
+                "created_by_email": current_user.email,
                 "created_at": prediction.created_at.isoformat()
             }
         }
@@ -296,11 +307,18 @@ async def create_quarterly_prediction(
         db.commit()
         db.refresh(prediction)
         
+        # Get organization name for response (if applicable)
+        organization_name = None
+        if organization_id:
+            org = db.query(Organization).filter(Organization.id == organization_id).first()
+            organization_name = org.name if org else None
+        
         return {
             "success": True,
             "message": f"Quarterly prediction created for {request.company_symbol}",
             "prediction": {
                 "id": str(prediction.id),
+                "company_id": str(company.id),
                 "company_symbol": request.company_symbol,
                 "company_name": request.company_name,
                 "reporting_year": request.reporting_year,
@@ -310,8 +328,11 @@ async def create_quarterly_prediction(
                 "ensemble_probability": float(ml_result.get('ensemble_probability', 0)),
                 "risk_level": ml_result['risk_level'],
                 "confidence": float(ml_result['confidence']),
+                "organization_id": str(organization_id) if organization_id else None,
+                "organization_name": organization_name,
                 "organization_access": "global" if is_global else "organization",
-                "created_by": current_user.email,
+                "created_by": str(current_user.id),
+                "created_by_email": current_user.email,
                 "created_at": prediction.created_at.isoformat()
             }
         }

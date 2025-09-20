@@ -1,21 +1,22 @@
 #!/bin/bash
 
 # Celery Worker Startup Script 
-# This is optional - only needed for background jobs
+# This is required for robust background job processing
 
 echo "🔄 Starting Celery Worker for Background Jobs..."
 
 # Change to backend directory to fix import paths
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 
 # Set environment variables
 export PYTHONPATH="$(pwd):${PYTHONPATH}"
 
-# Start Celery worker with production settings
-exec celery -A src.celery_app worker \
+# Start Celery worker with macOS-compatible settings
+exec celery -A app.workers.celery_app worker \
     --loglevel=info \
-    --concurrency=2 \
-    --queues=bulk_predictions \
+    --pool=solo \
+    --concurrency=1 \
+    --queues=bulk_predictions,emails \
     --hostname=worker@%h \
     --max-tasks-per-child=100 \
     --time-limit=1800 \

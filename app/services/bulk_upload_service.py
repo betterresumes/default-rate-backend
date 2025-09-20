@@ -120,7 +120,7 @@ class BulkUploadService:
             company = Company(
                 symbol=symbol,
                 name=name,
-                market_cap=market_cap * 1_000_000,  # Convert to actual value
+                market_cap=self.safe_float(market_cap) * 1_000_000,  # Convert to actual value
                 sector=sector,
                 organization_id=organization_id
             )
@@ -129,7 +129,7 @@ class BulkUploadService:
         else:
             # Update existing company
             company.name = name
-            company.market_cap = market_cap * 1_000_000
+            company.market_cap = self.safe_float(market_cap) * 1_000_000
             company.sector = sector
         
         return company
@@ -159,18 +159,18 @@ class BulkUploadService:
                         db=db,
                         symbol=row['company_symbol'],
                         name=row['company_name'],
-                        market_cap=float(row['market_cap']),
+                        market_cap=self.safe_float(row['market_cap']),
                         sector=row['sector'],
                         organization_id=organization_id
                     )
                     
                     # Prepare financial data for ML model
                     financial_data = {
-                        'long_term_debt_to_total_capital': float(row['long_term_debt_to_total_capital']),
-                        'total_debt_to_ebitda': float(row['total_debt_to_ebitda']),
-                        'net_income_margin': float(row['net_income_margin']),
-                        'ebit_to_interest_expense': float(row['ebit_to_interest_expense']),
-                        'return_on_assets': float(row['return_on_assets'])
+                        'long_term_debt_to_total_capital': self.safe_float(row['long_term_debt_to_total_capital']),
+                        'total_debt_to_ebitda': self.safe_float(row['total_debt_to_ebitda']),
+                        'net_income_margin': self.safe_float(row['net_income_margin']),
+                        'ebit_to_interest_expense': self.safe_float(row['ebit_to_interest_expense']),
+                        'return_on_assets': self.safe_float(row['return_on_assets'])
                     }
                     
                     # Get ML prediction
@@ -182,14 +182,14 @@ class BulkUploadService:
                         organization_id=organization_id,
                         reporting_year=int(row['reporting_year']),
                         reporting_quarter=int(row['reporting_quarter']),
-                        long_term_debt_to_total_capital=float(row['long_term_debt_to_total_capital']),
-                        total_debt_to_ebitda=float(row['total_debt_to_ebitda']),
-                        net_income_margin=float(row['net_income_margin']),
-                        ebit_to_interest_expense=float(row['ebit_to_interest_expense']),
-                        return_on_assets=float(row['return_on_assets']),
-                        probability=float(ml_result['probability']),
+                        long_term_debt_to_total_capital=self.safe_float(row['long_term_debt_to_total_capital']),
+                        total_debt_to_ebitda=self.safe_float(row['total_debt_to_ebitda']),
+                        net_income_margin=self.safe_float(row['net_income_margin']),
+                        ebit_to_interest_expense=self.safe_float(row['ebit_to_interest_expense']),
+                        return_on_assets=self.safe_float(row['return_on_assets']),
+                        probability=self.safe_float(ml_result['probability']),
                         risk_level=ml_result['risk_level'],
-                        confidence=float(ml_result['confidence']),
+                        confidence=self.safe_float(ml_result['confidence']),
                         predicted_at=datetime.utcnow(),
                         created_by=user_id
                     )
@@ -269,17 +269,17 @@ class BulkUploadService:
                         db=db,
                         symbol=row['company_symbol'],
                         name=row['company_name'],
-                        market_cap=float(row['market_cap']),
+                        market_cap=self.safe_float(row['market_cap']),
                         sector=row['sector'],
                         organization_id=organization_id
                     )
                     
                     # Prepare financial data for ML model
                     financial_data = {
-                        'total_debt_to_ebitda': float(row['total_debt_to_ebitda']),
-                        'sga_margin': float(row['sga_margin']),
-                        'long_term_debt_to_total_capital': float(row['long_term_debt_to_total_capital']),
-                        'return_on_capital': float(row['return_on_capital'])
+                        'total_debt_to_ebitda': self.safe_float(row['total_debt_to_ebitda']),
+                        'sga_margin': self.safe_float(row['sga_margin']),
+                        'long_term_debt_to_total_capital': self.safe_float(row['long_term_debt_to_total_capital']),
+                        'return_on_capital': self.safe_float(row['return_on_capital'])
                     }
                     
                     # Get ML prediction
@@ -291,15 +291,15 @@ class BulkUploadService:
                         organization_id=organization_id,
                         reporting_year=int(row['reporting_year']),
                         reporting_quarter=int(row['reporting_quarter']),
-                        total_debt_to_ebitda=float(row['total_debt_to_ebitda']),
-                        sga_margin=float(row['sga_margin']),
-                        long_term_debt_to_total_capital=float(row['long_term_debt_to_total_capital']),
-                        return_on_capital=float(row['return_on_capital']),
-                        logistic_probability=float(ml_result.get('logistic_probability', 0)),
-                        gbm_probability=float(ml_result.get('gbm_probability', 0)),
-                        ensemble_probability=float(ml_result.get('ensemble_probability', 0)),
+                        total_debt_to_ebitda=self.safe_float(row['total_debt_to_ebitda']),
+                        sga_margin=self.safe_float(row['sga_margin']),
+                        long_term_debt_to_total_capital=self.safe_float(row['long_term_debt_to_total_capital']),
+                        return_on_capital=self.safe_float(row['return_on_capital']),
+                        logistic_probability=self.safe_float(ml_result.get('logistic_probability', 0)),
+                        gbm_probability=self.safe_float(ml_result.get('gbm_probability', 0)),
+                        ensemble_probability=self.safe_float(ml_result.get('ensemble_probability', 0)),
                         risk_level=ml_result['risk_level'],
-                        confidence=float(ml_result['confidence']),
+                        confidence=self.safe_float(ml_result['confidence']),
                         predicted_at=datetime.utcnow(),
                         created_by=user_id
                     )
@@ -354,6 +354,35 @@ class BulkUploadService:
         finally:
             db.close()
     
+    def safe_float(self, value):
+        """Convert value to float, handling None and NaN values"""
+        if value is None:
+            return 0
+        try:
+            import math
+            float_val = float(value)
+            if math.isnan(float_val) or math.isinf(float_val):
+                return 0
+            return float_val
+        except (ValueError, TypeError):
+            return 0
+    
+    def safe_progress_percentage(self, processed_rows, total_rows):
+        """Calculate progress percentage safely"""
+        if not total_rows or total_rows <= 0:
+            return 0
+        if processed_rows is None:
+            return 0
+        
+        try:
+            import math
+            percentage = (processed_rows / total_rows) * 100
+            if math.isnan(percentage) or math.isinf(percentage):
+                return 0
+            return round(percentage, 2)
+        except (ValueError, TypeError, ZeroDivisionError):
+            return 0
+
     async def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Get job status and details"""
         SessionLocal = get_session_local()
@@ -369,16 +398,16 @@ class BulkUploadService:
                 'status': job.status,
                 'job_type': job.job_type,
                 'original_filename': job.original_filename,
-                'total_rows': job.total_rows,
-                'processed_rows': job.processed_rows,
-                'successful_rows': job.successful_rows,
-                'failed_rows': job.failed_rows,
+                'total_rows': job.total_rows or 0,
+                'processed_rows': job.processed_rows or 0,
+                'successful_rows': job.successful_rows or 0,
+                'failed_rows': job.failed_rows or 0,
                 'error_message': job.error_message,
                 'error_details': json.loads(job.error_details) if job.error_details else None,
                 'created_at': job.created_at.isoformat() if job.created_at else None,
                 'started_at': job.started_at.isoformat() if job.started_at else None,
                 'completed_at': job.completed_at.isoformat() if job.completed_at else None,
-                'progress_percentage': round((job.processed_rows / job.total_rows) * 100, 2) if job.total_rows > 0 else 0
+                'progress_percentage': self.safe_progress_percentage(job.processed_rows, job.total_rows)
             }
             
         except Exception as e:

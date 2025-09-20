@@ -37,6 +37,10 @@ celery_app.conf.update(
     task_default_queue="bulk_predictions",
     task_routes={
         "app.workers.tasks.process_bulk_excel_task": {"queue": "bulk_predictions"},
+        "app.workers.tasks.process_annual_bulk_upload_task": {"queue": "bulk_predictions"},
+        "app.workers.tasks.process_quarterly_bulk_upload_task": {"queue": "bulk_predictions"},
+        "app.workers.tasks.send_verification_email_task": {"queue": "emails"},
+        "app.workers.tasks.send_password_reset_email_task": {"queue": "emails"},
     },
     broker_connection_retry_on_startup=True,
     broker_connection_retry=True

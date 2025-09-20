@@ -296,11 +296,18 @@ async def create_annual_prediction(
         db.commit()
         db.refresh(prediction)
         
+        # Get organization name for response (if applicable)
+        organization_name = None
+        if organization_id:
+            org = db.query(Organization).filter(Organization.id == organization_id).first()
+            organization_name = org.name if org else None
+        
         return {
             "success": True,
             "message": f"Annual prediction created for {request.company_symbol}",
             "prediction": {
                 "id": str(prediction.id),
+                "company_id": str(company.id),
                 "company_symbol": request.company_symbol,
                 "company_name": request.company_name,
                 "reporting_year": request.reporting_year,
@@ -308,8 +315,11 @@ async def create_annual_prediction(
                 "probability": float(ml_result['probability']),
                 "risk_level": ml_result['risk_level'],
                 "confidence": float(ml_result['confidence']),
+                "organization_id": str(organization_id) if organization_id else None,
+                "organization_name": organization_name,
                 "organization_access": "global" if is_global else "organization",
-                "created_by": current_user.email,
+                "created_by": str(current_user.id),
+                "created_by_email": current_user.email,
                 "created_at": prediction.created_at.isoformat()
             }
         }
@@ -826,9 +836,9 @@ async def bulk_upload_annual_async(
             raise HTTPException(status_code=400, detail="File contains too many rows (max 10,000)")
         
         # Create bulk upload job
-        from app.services.bulk_upload_service import bulk_upload_service
+        from app.services.celery_bulk_upload_service import celery_bulk_upload_service
         
-        job_id = await bulk_upload_service.create_bulk_upload_job(
+        job_id = await celery_bulk_upload_service.create_bulk_upload_job(
             user_id=str(current_user.id),
             organization_id=organization_id,
             job_type='annual',
@@ -837,9 +847,8 @@ async def bulk_upload_annual_async(
             total_rows=total_rows
         )
         
-        # Start background processing
-        background_tasks.add_task(
-            bulk_upload_service.process_annual_bulk_upload,
+        # Start Celery background processing
+        task_id = await celery_bulk_upload_service.process_annual_bulk_upload(
             job_id=job_id,
             data=data,
             user_id=str(current_user.id),
@@ -848,8 +857,9 @@ async def bulk_upload_annual_async(
         
         return {
             "success": True,
-            "message": "Bulk upload job started successfully",
+            "message": "Bulk upload job started successfully using Celery workers",
             "job_id": job_id,
+            "task_id": task_id,
             "total_rows": total_rows,
             "estimated_time_minutes": max(1, total_rows // 100)  # Rough estimate
         }
@@ -920,9 +930,9 @@ async def bulk_upload_quarterly_async(
             raise HTTPException(status_code=400, detail="File contains too many rows (max 10,000)")
         
         # Create bulk upload job
-        from app.services.bulk_upload_service import bulk_upload_service
+        from app.services.celery_bulk_upload_service import celery_bulk_upload_service
         
-        job_id = await bulk_upload_service.create_bulk_upload_job(
+        job_id = await celery_bulk_upload_service.create_bulk_upload_job(
             user_id=str(current_user.id),
             organization_id=organization_id,
             job_type='quarterly',
@@ -931,9 +941,8 @@ async def bulk_upload_quarterly_async(
             total_rows=total_rows
         )
         
-        # Start background processing
-        background_tasks.add_task(
-            bulk_upload_service.process_quarterly_bulk_upload,
+        # Start Celery background processing
+        task_id = await celery_bulk_upload_service.process_quarterly_bulk_upload(
             job_id=job_id,
             data=data,
             user_id=str(current_user.id),
@@ -942,8 +951,9 @@ async def bulk_upload_quarterly_async(
         
         return {
             "success": True,
-            "message": "Bulk upload job started successfully",
+            "message": "Bulk upload job started successfully using Celery workers",
             "job_id": job_id,
+            "task_id": task_id,
             "total_rows": total_rows,
             "estimated_time_minutes": max(1, total_rows // 100)
         }
@@ -968,9 +978,9 @@ async def get_bulk_upload_job_status(
                 detail="You need to be an organization member or higher to view job status"
             )
 
-        from app.services.bulk_upload_service import bulk_upload_service
+        from app.services.celery_bulk_upload_service import celery_bulk_upload_service
         
-        job_status = await bulk_upload_service.get_job_status(job_id)
+        job_status = await celery_bulk_upload_service.get_job_status(job_id)
         
         if not job_status:
             raise HTTPException(status_code=404, detail="Job not found")
@@ -1027,19 +1037,28 @@ async def list_bulk_upload_jobs(
         
         job_list = []
         for job in jobs:
+            # Safe calculation of progress percentage
+            progress_percentage = 0
+            if job.total_rows and job.total_rows > 0 and job.processed_rows is not None:
+                try:
+                    progress = (job.processed_rows / job.total_rows) * 100
+                    progress_percentage = round(progress, 2) if not (math.isnan(progress) or math.isinf(progress)) else 0
+                except (ZeroDivisionError, TypeError):
+                    progress_percentage = 0
+            
             job_data = {
                 'id': str(job.id),
                 'status': job.status,
                 'job_type': job.job_type,
                 'original_filename': job.original_filename,
-                'total_rows': job.total_rows,
-                'processed_rows': job.processed_rows,
-                'successful_rows': job.successful_rows,
-                'failed_rows': job.failed_rows,
+                'total_rows': job.total_rows or 0,
+                'processed_rows': job.processed_rows or 0,
+                'successful_rows': job.successful_rows or 0,
+                'failed_rows': job.failed_rows or 0,
                 'created_at': job.created_at.isoformat() if job.created_at else None,
                 'started_at': job.started_at.isoformat() if job.started_at else None,
                 'completed_at': job.completed_at.isoformat() if job.completed_at else None,
-                'progress_percentage': round((job.processed_rows / job.total_rows) * 100, 2) if job.total_rows > 0 else 0
+                'progress_percentage': progress_percentage
             }
             job_list.append(job_data)
         
@@ -1132,11 +1151,21 @@ async def update_annual_prediction(
         db.commit()
         db.refresh(prediction)
         
+        # Get organization name for response (if applicable)
+        organization_name = None
+        if prediction.organization_id:
+            org = db.query(Organization).filter(Organization.id == prediction.organization_id).first()
+            organization_name = org.name if org else None
+        
+        # Determine if this is global access
+        is_global = prediction.organization_id is None
+        
         return {
             "success": True,
             "message": f"Annual prediction updated for {request.company_symbol}",
             "prediction": {
                 "id": str(prediction.id),
+                "company_id": str(prediction.company_id),
                 "company_symbol": request.company_symbol,
                 "company_name": request.company_name,
                 "reporting_year": request.reporting_year,
@@ -1144,6 +1173,12 @@ async def update_annual_prediction(
                 "probability": float(ml_result['probability']),
                 "risk_level": ml_result['risk_level'],
                 "confidence": float(ml_result['confidence']),
+                "organization_id": str(prediction.organization_id) if prediction.organization_id else None,
+                "organization_name": organization_name,
+                "organization_access": "global" if is_global else "organization",
+                "created_by": str(prediction.created_by),
+                "created_by_email": current_user.email,
+                "created_at": prediction.created_at.isoformat(),
                 "updated_at": prediction.updated_at.isoformat()
             }
         }
