@@ -6,6 +6,12 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.sql import func
+import uuid
+import os
+from datetime import datetime
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.sql import func
 from datetime import datetime
 import os
 import uuid
@@ -195,6 +201,7 @@ class AnnualPrediction(Base):
     organization_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True, index=True)
     # NULL organization_id = accessible to all users (super admin data)
     # Non-NULL organization_id = only accessible to org members
+    is_global = Column(Boolean, default=False, index=True)  # Global data created by super admin
     
     # Time period - matching existing schema
     reporting_year = Column(String(10), nullable=False)
@@ -238,6 +245,7 @@ class QuarterlyPrediction(Base):
     organization_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True, index=True)
     # NULL organization_id = accessible to all users (super admin data)
     # Non-NULL organization_id = only accessible to org members
+    is_global = Column(Boolean, default=False, index=True)  # Global data created by super admin
     
     # Time period - matching existing schema
     reporting_year = Column(String(10), nullable=False)

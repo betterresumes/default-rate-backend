@@ -148,10 +148,10 @@ curl -X PUT "http://localhost:8000/api/v1/users/profile" \
 Alternative endpoint for current user info.
 
 #### GET /api/v1/users (Admin Only)
-List all users with pagination.
+List all users with pagination and filtering.
 
 ```bash
-curl -X GET "http://localhost:8000/api/v1/users?skip=0&limit=20" \
+curl -X GET "http://localhost:8000/api/v1/users?page=1&limit=20&search=john&role=org_member&is_active=true" \
   -H "Authorization: Bearer ADMIN_TOKEN"
 ```
 
@@ -225,10 +225,10 @@ curl -X POST "http://localhost:8000/api/v1/organizations" \
 ```
 
 #### GET /api/v1/organizations
-List accessible organizations.
+List accessible organizations with pagination and filtering.
 
 ```bash
-curl -X GET "http://localhost:8000/api/v1/organizations?skip=0&limit=10" \
+curl -X GET "http://localhost:8000/api/v1/organizations?page=1&limit=10&search=HDFC&is_active=true" \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
@@ -276,31 +276,52 @@ curl -X POST "http://localhost:8000/api/v1/organizations/{org_id}/whitelist" \
 ### 5. 🏭 Company Management
 
 #### GET /api/v1/companies
-List accessible companies.
+List accessible companies with pagination and filtering.
 
 ```bash
-curl -X GET "http://localhost:8000/api/v1/companies?skip=0&limit=10&sector=Banking" \
+curl -X GET "http://localhost:8000/api/v1/companies?page=1&limit=10&sector=Banking&search=HDFC&sort_by=name&sort_order=asc" \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
 **Response**:
 ```json
 {
-  "companies": [
+  "items": [
     {
       "id": "company-uuid",
       "symbol": "HDFC",
       "name": "HDFC Bank Limited",
       "market_cap": 5000000000.00,
       "sector": "Banking",
-      "is_global": false,
-      "organization_id": "org-uuid",
-      "created_at": "2024-01-01T00:00:00Z"
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-01T00:00:00Z",
+      "annual_predictions": [
+        {
+          "id": "prediction-uuid",
+          "reporting_year": "2024",
+          "probability": 0.1234,
+          "risk_level": "LOW",
+          "confidence": 0.89,
+          "created_at": "2024-01-15T14:30:00Z"
+        }
+      ],
+      "quarterly_predictions": [
+        {
+          "id": "prediction-uuid",
+          "reporting_year": "2024", 
+          "reporting_quarter": "Q1",
+          "probability": 0.1567,
+          "risk_level": "LOW",
+          "confidence": 0.91,
+          "created_at": "2024-01-15T14:30:00Z"
+        }
+      ]
     }
   ],
   "total": 1,
-  "skip": 0,
-  "limit": 10
+  "page": 1,
+  "size": 10,
+  "pages": 1
 }
 ```
 
@@ -333,84 +354,183 @@ curl -X GET "http://localhost:8000/api/v1/companies/search/HDFC" \
 ### 6. 📊 Predictions - Core Operations
 
 #### POST /api/v1/predictions/annual
-Create annual default risk prediction.
+Create annual default risk prediction with comprehensive company data.
 
 ```bash
 curl -X POST "http://localhost:8000/api/v1/predictions/annual" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ORG_MEMBER_TOKEN" \
   -d '{
-    "company_id": "company-uuid",
+    "company_symbol": "HDFC",
+    "company_name": "HDFC Bank Limited",
+    "market_cap": 5000000000.0,
+    "sector": "Banking",
     "reporting_year": "2024",
-    "financial_metrics": {
-      "long_term_debt_to_total_capital": 0.35,
-      "total_debt_to_ebitda": 2.5,
-      "net_income_margin": 0.15,
-      "ebit_to_interest_expense": 5.2,
-      "return_on_assets": 0.08
-    }
+    "reporting_quarter": "Q1",
+    "long_term_debt_to_total_capital": 0.35,
+    "total_debt_to_ebitda": 2.5,
+    "net_income_margin": 0.15,
+    "ebit_to_interest_expense": 5.2,
+    "return_on_assets": 0.08
   }'
 ```
 
 **Response**:
 ```json
 {
-  "id": "prediction-uuid",
-  "company_id": "company-uuid",
-  "company_name": "HDFC Bank Limited",
-  "reporting_year": "2024",
-  "financial_metrics": {
-    "long_term_debt_to_total_capital": 0.35,
-    "total_debt_to_ebitda": 2.5,
-    "net_income_margin": 0.15,
-    "ebit_to_interest_expense": 5.2,
-    "return_on_assets": 0.08
+  "success": true,
+  "message": "Annual prediction created successfully",
+  "prediction_id": "prediction-uuid",
+  "company": {
+    "id": "company-uuid",
+    "symbol": "HDFC",
+    "name": "HDFC Bank Limited",
+    "sector": "Banking"
   },
-  "prediction_results": {
+  "prediction": {
     "probability": 0.1234,
     "risk_level": "LOW",
     "confidence": 0.89,
-    "predicted_at": "2024-01-15T14:30:00Z"
+    "reporting_year": "2024",
+    "reporting_quarter": "Q1",
+    "created_at": "2024-01-15T14:30:00Z"
   },
-  "created_by": "user-uuid",
-  "created_at": "2024-01-15T14:30:00Z"
+  "created_by": "user-uuid"
 }
 ```
 
 #### POST /api/v1/predictions/quarterly
-Create quarterly default risk prediction.
+Create quarterly default risk prediction with comprehensive company data.
 
 ```bash
 curl -X POST "http://localhost:8000/api/v1/predictions/quarterly" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ORG_MEMBER_TOKEN" \
   -d '{
-    "company_id": "company-uuid",
+    "company_symbol": "HDFC",
+    "company_name": "HDFC Bank Limited",
+    "market_cap": 5000000000.0,
+    "sector": "Banking",
     "reporting_year": "2024",
     "reporting_quarter": "Q1",
-    "financial_metrics": {
-      "total_debt_to_ebitda": 2.3,
-      "sga_margin": 0.25,
-      "long_term_debt_to_total_capital": 0.32,
-      "return_on_capital": 0.12
-    }
+    "total_debt_to_ebitda": 2.3,
+    "sga_margin": 0.25,
+    "long_term_debt_to_total_capital": 0.32,
+    "return_on_capital": 0.12
   }'
 ```
 
+**Response**:
+```json
+{
+  "success": true,
+  "message": "Quarterly prediction created successfully",
+  "prediction_id": "prediction-uuid",
+  "company": {
+    "id": "company-uuid",
+    "symbol": "HDFC",
+    "name": "HDFC Bank Limited",
+    "sector": "Banking"
+  },
+  "prediction": {
+    "probability": 0.1567,
+    "risk_level": "LOW",
+    "confidence": 0.91,
+    "reporting_year": "2024",
+    "reporting_quarter": "Q1",
+    "created_at": "2024-01-15T14:30:00Z"
+  },
+  "created_by": "user-uuid"
+}
+```
+
 #### GET /api/v1/predictions/annual
-Get annual predictions with filtering.
+Get annual predictions with filtering and pagination.
 
 ```bash
-curl -X GET "http://localhost:8000/api/v1/predictions/annual?company_id=uuid&year=2024&skip=0&limit=10" \
+curl -X GET "http://localhost:8000/api/v1/predictions/annual?page=1&size=10&company_symbol=HDFC&reporting_year=2024" \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
+**Response**:
+```json
+{
+  "success": true,
+  "predictions": [
+    {
+      "id": "prediction-uuid",
+      "company": {
+        "id": "company-uuid",
+        "symbol": "HDFC",
+        "name": "HDFC Bank Limited",
+        "sector": "Banking"
+      },
+      "reporting_year": "2024",
+      "reporting_quarter": "Q1",
+      "probability": 0.1234,
+      "risk_level": "LOW",
+      "confidence": 0.89,
+      "financial_ratios": {
+        "long_term_debt_to_total_capital": 0.35,
+        "total_debt_to_ebitda": 2.5,
+        "net_income_margin": 0.15,
+        "ebit_to_interest_expense": 5.2,
+        "return_on_assets": 0.08
+      },
+      "created_at": "2024-01-15T14:30:00Z"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "size": 10,
+    "total": 1,
+    "pages": 1
+  }
+}
+```
+
 #### GET /api/v1/predictions/quarterly
-Get quarterly predictions.
+Get quarterly predictions with filtering and pagination.
 
 ```bash
-curl -X GET "http://localhost:8000/api/v1/predictions/quarterly?company_id=uuid&year=2024&quarter=Q1" \
+curl -X GET "http://localhost:8000/api/v1/predictions/quarterly?page=1&size=10&company_symbol=HDFC&reporting_year=2024&reporting_quarter=Q1" \
   -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+**Response**:
+```json
+{
+  "success": true,
+  "predictions": [
+    {
+      "id": "prediction-uuid", 
+      "company": {
+        "id": "company-uuid",
+        "symbol": "HDFC",
+        "name": "HDFC Bank Limited",
+        "sector": "Banking"
+      },
+      "reporting_year": "2024",
+      "reporting_quarter": "Q1",
+      "probability": 0.1567,
+      "risk_level": "LOW",
+      "confidence": 0.91,
+      "financial_ratios": {
+        "total_debt_to_ebitda": 2.3,
+        "sga_margin": 0.25,
+        "long_term_debt_to_total_capital": 0.32,
+        "return_on_capital": 0.12
+      },
+      "created_at": "2024-01-15T14:30:00Z"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "size": 10,
+    "total": 1,
+    "pages": 1
+  }
+}
 ```
 
 ### 7. 📋 Bulk Operations
@@ -457,6 +577,50 @@ curl -X POST "http://localhost:8000/api/v1/predictions/quarterly/bulk-upload-asy
 
 ### 8. ⚙️ Job Management
 
+#### POST /api/v1/predictions/bulk-upload
+Synchronous bulk prediction upload from CSV file.
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/predictions/bulk-upload" \
+  -H "Authorization: Bearer ORG_MEMBER_TOKEN" \
+  -F "file=@predictions.csv" \
+  -F "prediction_type=annual"
+```
+
+**CSV Format**:
+```csv
+company_symbol,company_name,market_cap,sector,reporting_year,reporting_quarter,long_term_debt_to_total_capital,total_debt_to_ebitda,net_income_margin,ebit_to_interest_expense,return_on_assets
+HDFC,HDFC Bank Limited,5000000000,Banking,2024,Q1,0.35,2.5,0.15,5.2,0.08
+```
+
+#### POST /api/v1/predictions/annual/bulk-upload-async
+Asynchronous bulk upload for annual predictions.
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/predictions/annual/bulk-upload-async" \
+  -H "Authorization: Bearer ORG_MEMBER_TOKEN" \
+  -F "file=@annual_predictions.csv"
+```
+
+**Response**:
+```json
+{
+  "success": true,
+  "job_id": "job-uuid-123",
+  "message": "Bulk upload job started. Use job_id to check status.",
+  "status_url": "/api/v1/predictions/jobs/job-uuid-123/status"
+}
+```
+
+#### POST /api/v1/predictions/quarterly/bulk-upload-async
+Asynchronous bulk upload for quarterly predictions.
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/predictions/quarterly/bulk-upload-async" \
+  -H "Authorization: Bearer ORG_MEMBER_TOKEN" \
+  -F "file=@quarterly_predictions.csv"
+```
+
 #### GET /api/v1/predictions/jobs/{job_id}/status
 Get bulk upload job status.
 
@@ -500,6 +664,55 @@ List all jobs for current user/organization.
 ```bash
 curl -X GET "http://localhost:8000/api/v1/predictions/jobs?status=completed&skip=0&limit=10" \
   -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### 8.1 ✏️ Prediction Management
+
+#### PUT /api/v1/predictions/annual/{prediction_id}
+Update an annual prediction.
+
+```bash
+curl -X PUT "http://localhost:8000/api/v1/predictions/annual/prediction-uuid" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ORG_MEMBER_TOKEN" \
+  -d '{
+    "long_term_debt_to_total_capital": 0.40,
+    "total_debt_to_ebitda": 2.8,
+    "net_income_margin": 0.18,
+    "ebit_to_interest_expense": 5.5,
+    "return_on_assets": 0.09
+  }'
+```
+
+#### DELETE /api/v1/predictions/annual/{prediction_id}
+Delete an annual prediction.
+
+```bash
+curl -X DELETE "http://localhost:8000/api/v1/predictions/annual/prediction-uuid" \
+  -H "Authorization: Bearer ORG_MEMBER_TOKEN"
+```
+
+#### PUT /api/v1/predictions/quarterly/{prediction_id}
+Update a quarterly prediction.
+
+```bash
+curl -X PUT "http://localhost:8000/api/v1/predictions/quarterly/prediction-uuid" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ORG_MEMBER_TOKEN" \
+  -d '{
+    "total_debt_to_ebitda": 2.1,
+    "sga_margin": 0.22,
+    "long_term_debt_to_total_capital": 0.30,
+    "return_on_capital": 0.14
+  }'
+```
+
+#### DELETE /api/v1/predictions/quarterly/{prediction_id}
+Delete a quarterly prediction.
+
+```bash
+curl -X DELETE "http://localhost:8000/api/v1/predictions/quarterly/prediction-uuid" \
+  -H "Authorization: Bearer ORG_MEMBER_TOKEN"
 ```
 
 ### 9. 👑 Super Admin Operations
