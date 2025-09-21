@@ -2,16 +2,7 @@
 
 **Financial Default Risk Prediction API - Multi-Tenant v2.0.0**
 
-## 🎯 **SUMMARY: 59 Total Endpoints Across 8 Sections**
-
-This document provides the complete and accurate API specification for the Financial Default Risk Prediction System. All endpoints are verified against the actual implementation and include correct parameter names, request/response formats, and access controls.
-
-### 🔑 **Key Features:**
-- **Multi-tenant architecture** with role-based access control
-- **Real-time ML predictions** for financial default risk
-- **Bulk processing capabilities** with async job management
-- **Comprehensive user/organization management**
-- **Production-ready authentication** with JWT tokens
+## 🎯 **SUMMARY: 60 Total Endpoints Across 8 Sections**
 
 ---
 
@@ -120,32 +111,34 @@ This document provides the complete and accurate API specification for the Finan
 
 ---
 
-## **8. 📊 PREDICTIONS** (13 endpoints) - *Org Members + Above*
+## **8. 📊 PREDICTIONS** (15 endpoints) - *Org Members + Above*
 
 ### Core Prediction APIs (High Priority)
 | Method | Endpoint | Description | Access Level | Priority |
 |--------|----------|-------------|--------------|----------|
-| POST | `/api/v1/predictions/annual` | **Create annual prediction** | Members + | ⭐ HIGH |
-| POST | `/api/v1/predictions/quarterly` | **Create quarterly prediction** | Members + | ⭐ HIGH |
-| GET | `/api/v1/predictions/annual` | **Get annual predictions** | Members + | ⭐ HIGH |
-| GET | `/api/v1/predictions/quarterly` | **Get quarterly predictions** | Members + | ⭐ HIGH |
+| POST | `/api/v1/predictions/unified-predict` | **Main prediction API** | Members + | ⭐ HIGH |
+| GET | `/api/v1/predictions/companies` | **Get companies with predictions** | Members + | ⭐ HIGH |
+| GET | `/api/v1/predictions/summary` | **Get summary stats** | Members + | ⭐ HIGH |
+
+### Individual Prediction Types (Optional)
+| Method | Endpoint | Description | Access Level |
+|--------|----------|-------------|--------------|
+| POST | `/api/v1/predictions/predict-annual` | Annual predictions | Members + |
+| POST | `/api/v1/predictions/predict-quarterly` | Quarterly predictions | Members + |
 
 ### Bulk Operations (Advanced Users)
 | Method | Endpoint | Description | Access Level |
 |--------|----------|-------------|--------------|
-| POST | `/api/v1/predictions/bulk-upload` | Bulk upload (sync) | Members + |
-| POST | `/api/v1/predictions/annual/bulk-upload-async` | Bulk upload annual (async) | Members + |
-| POST | `/api/v1/predictions/quarterly/bulk-upload-async` | Bulk upload quarterly (async) | Members + |
-| GET | `/api/v1/predictions/jobs/{job_id}/status` | Get job status | Members + |
-| GET | `/api/v1/predictions/jobs` | List user jobs | Members + |
+| POST | `/api/v1/predictions/bulk-predict` | Bulk predict from file | Members + |
+| POST | `/api/v1/predictions/bulk-predict-async` | Bulk predict async | Members + |
+| GET | `/api/v1/predictions/job-status/{job_id}` | Get job status | Members + |
+| GET | `/api/v1/predictions/job-result/{job_id}` | Get job result | Members + |
 
 ### Management Operations
 | Method | Endpoint | Description | Access Level |
 |--------|----------|-------------|--------------|
-| PUT | `/api/v1/predictions/annual/{prediction_id}` | Update annual prediction | Members + |
-| DELETE | `/api/v1/predictions/annual/{prediction_id}` | Delete annual prediction | Members + |
-| PUT | `/api/v1/predictions/quarterly/{prediction_id}` | Update quarterly prediction | Members + |
-| DELETE | `/api/v1/predictions/quarterly/{prediction_id}` | Delete quarterly prediction | Members + |
+| PUT | `/api/v1/predictions/update/{company_id}` | Update company prediction | Members + |
+| DELETE | `/api/v1/predictions/delete/{company_id}` | Delete company and predictions | Members + |
 
 ---
 
@@ -224,24 +217,24 @@ GET /api/v1/predictions/summary
 2. `POST /api/v1/tenant-admin/assign-existing-user` - Fix HDFC setup ⭐
 3. `POST /api/v1/organizations` - Create organizations
 4. `POST /api/v1/companies/` - Add companies
-5. `POST /api/v1/predictions/annual` - Run annual predictions ⭐
-6. `POST /api/v1/predictions/quarterly` - Run quarterly predictions ⭐
-7. `GET /api/v1/predictions/annual` - View prediction results
+5. `POST /api/v1/predictions/unified-predict` - Run predictions ⭐
+6. `GET /api/v1/predictions/companies` - View results
+7. `GET /api/v1/predictions/summary` - View statistics
 
 ---
 
 ## 📊 **ENDPOINT COUNT BY SECTION**
 
-- **Predictions**: 13 endpoints (23%)
-- **Organization Management**: 10 endpoints (18%)
-- **User Management**: 11 endpoints (19%)
-- **Tenant Management**: 6 endpoints (11%)
-- **User Authentication**: 5 endpoints (9%)
-- **Admin Authentication**: 5 endpoints (9%)
+- **Predictions**: 15 endpoints (26%)
+- **Organization Management**: 10 endpoints (17%)
+- **User Management**: 9 endpoints (15%)
+- **Tenant Management**: 7 endpoints (12%)
+- **User Authentication**: 5 endpoints (8%)
+- **Admin Authentication**: 5 endpoints (8%)
 - **Companies**: 4 endpoints (7%)
-- **Tenant Admin Management**: 5 endpoints (9%)
+- **Tenant Admin Management**: 5 endpoints (8%)
 
-**Total: 59 endpoints across 8 sections**
+**Total: 60 endpoints across 8 sections**
 
 ---
 
