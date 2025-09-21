@@ -60,21 +60,8 @@ async def update_current_user_profile(
 async def get_current_user_profile_me(
     current_user: User = Depends(get_current_active_user)
 ):
-    """Get current user profile information (alternative endpoint). Any authenticated user can access this."""
+    """Get current user profile information (alternative endpoint)."""
     return UserResponse.from_orm(current_user)
-
-@router.get("/debug-auth")
-async def debug_auth(
-    current_user: User = Depends(get_current_active_user)
-):
-    """Debug endpoint to test authentication."""
-    return {
-        "message": "Authentication successful",
-        "user_id": str(current_user.id),
-        "email": current_user.email,
-        "role": current_user.role,
-        "is_active": current_user.is_active
-    }
 
 @router.post("", response_model=UserResponse)
 async def create_user(

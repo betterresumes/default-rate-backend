@@ -6,12 +6,6 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.sql import func
-import uuid
-import os
-from datetime import datetime
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
-from sqlalchemy.sql import func
 from datetime import datetime
 import os
 import uuid
@@ -41,7 +35,7 @@ class Tenant(Base):
     
     # Relationships
     organizations = relationship("Organization", back_populates="tenant")
-    tenant_admins = relationship("User", back_populates="assigned_tenant", foreign_keys="User.tenant_id")
+    tenant_admins = relationship("User", back_populates="tenant", foreign_keys="User.tenant_id")
     creator = relationship("User", foreign_keys=[created_by])
 
 # ========================================
@@ -78,7 +72,7 @@ class Organization(Base):
     
     # Relationships
     tenant = relationship("Tenant", back_populates="organizations")
-    users = relationship("User", back_populates="assigned_organization", foreign_keys="User.organization_id")
+    users = relationship("User", back_populates="organization", foreign_keys="User.organization_id")
     companies = relationship("Company", back_populates="organization")
     whitelist_entries = relationship("OrganizationMemberWhitelist", back_populates="organization", cascade="all, delete-orphan")
     creator = relationship("User", foreign_keys=[created_by])
@@ -146,8 +140,8 @@ class User(Base):
     last_login = Column(DateTime, nullable=True)
     
     # Relationships
-    assigned_tenant = relationship("Tenant", back_populates="tenant_admins", foreign_keys=[tenant_id])
-    assigned_organization = relationship("Organization", back_populates="users", foreign_keys=[organization_id])
+    tenant = relationship("Tenant", back_populates="tenant_admins", foreign_keys=[tenant_id])
+    organization = relationship("Organization", back_populates="users", foreign_keys=[organization_id])
 
 # ========================================
 # REMOVED: EMAIL VERIFICATION TABLES
@@ -201,7 +195,6 @@ class AnnualPrediction(Base):
     organization_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True, index=True)
     # NULL organization_id = accessible to all users (super admin data)
     # Non-NULL organization_id = only accessible to org members
-    is_global = Column(Boolean, default=False, index=True)  # Global data created by super admin
     
     # Time period - matching existing schema
     reporting_year = Column(String(10), nullable=False)
@@ -245,7 +238,6 @@ class QuarterlyPrediction(Base):
     organization_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True, index=True)
     # NULL organization_id = accessible to all users (super admin data)
     # Non-NULL organization_id = only accessible to org members
-    is_global = Column(Boolean, default=False, index=True)  # Global data created by super admin
     
     # Time period - matching existing schema
     reporting_year = Column(String(10), nullable=False)
@@ -293,8 +285,7 @@ class BulkUploadJob(Base):
     
     # Job details
     job_type = Column(String(50), nullable=False, index=True)  # 'annual' or 'quarterly'
-    status = Column(String(20), default='pending', index=True)  # pending, queued, processing, completed, failed
-    celery_task_id = Column(String(255), nullable=True, index=True)  # Celery task ID for tracking
+    status = Column(String(20), default='pending', index=True)  # pending, processing, completed, failed
     
     # File information
     original_filename = Column(String(255), nullable=False)
