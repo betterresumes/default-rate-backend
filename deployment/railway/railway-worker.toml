@@ -8,10 +8,14 @@ dockerfilePath = "Dockerfile"
 [deploy]
 startCommand = "./scripts/start-worker.sh"
 restartPolicyType = "always"
+healthcheckTimeout = 300
 
 [environments.production]
 variables = { 
-  DEBUG = "False", 
+  DEBUG = "false",
   PYTHONUNBUFFERED = "1",
-  PYTHONPATH = "/app"
+  PYTHONPATH = "/app",
+  CELERY_BROKER_URL = "$REDIS_URL",
+  CELERY_RESULT_BACKEND = "$REDIS_URL",
+  DATABASE_URL = "$DATABASE_URL"
 }

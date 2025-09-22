@@ -56,12 +56,193 @@ async def update_current_user_profile(
     
     return UserResponse.from_orm(current_user)
 
-@router.get("/me", response_model=UserResponse)
+@router.get("/me")
 async def get_current_user_profile_me(
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Get current user profile information (alternative endpoint)."""
-    return UserResponse.from_orm(current_user)
+    """Get comprehensive current user profile information based on role and access level."""
+    
+    # Base user information
+    user_info = {
+        "id": str(current_user.id),
+        "email": current_user.email,
+        "username": current_user.username,
+        "full_name": current_user.full_name,
+        "role": current_user.role,
+        "organization_id": str(current_user.organization_id) if current_user.organization_id else None,
+        "tenant_id": str(current_user.tenant_id) if current_user.tenant_id else None,
+        "is_active": current_user.is_active,
+        "created_at": current_user.created_at.isoformat(),
+        "last_login": current_user.last_login.isoformat() if current_user.last_login else None
+    }
+    
+    # Role-based additional information
+    if current_user.role == "super_admin":
+        # Super Admin: Get all tenants and their organizations
+        tenants = db.query(Tenant).all()
+        tenant_list = []
+        
+        for tenant in tenants:
+            tenant_orgs = db.query(Organization).filter(Organization.tenant_id == tenant.id).all()
+            tenant_info = {
+                "id": str(tenant.id),
+                "name": tenant.name,
+                "slug": tenant.slug,
+                "domain": tenant.domain,
+                "description": tenant.description,
+                "is_active": tenant.is_active,
+                "organizations": [
+                    {
+                        "id": str(org.id),
+                        "name": org.name,
+                        "slug": org.slug,
+                        "domain": org.domain,
+                        "is_active": org.is_active,
+                        "member_count": db.query(User).filter(User.organization_id == org.id).count()
+                    }
+                    for org in tenant_orgs
+                ]
+            }
+            tenant_list.append(tenant_info)
+        
+        user_info.update({
+            "access_level": "global",
+            "permissions": [
+                "manage_all_tenants",
+                "manage_all_organizations", 
+                "manage_all_users",
+                "view_all_predictions",
+                "create_global_predictions"
+            ],
+            "tenants": tenant_list,
+            "total_tenants": len(tenant_list),
+            "total_organizations": sum(len(t["organizations"]) for t in tenant_list)
+        })
+    
+    elif current_user.role == "tenant_admin":
+        # Tenant Admin: Get their tenant and all organizations within it
+        if current_user.tenant_id:
+            tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+            tenant_orgs = db.query(Organization).filter(Organization.tenant_id == current_user.tenant_id).all()
+            
+            if tenant:
+                user_info.update({
+                    "access_level": "tenant",
+                    "permissions": [
+                        "manage_tenant_organizations",
+                        "manage_tenant_users",
+                        "view_tenant_predictions"
+                    ],
+                    "tenant": {
+                        "id": str(tenant.id),
+                        "name": tenant.name,
+                        "slug": tenant.slug,
+                        "domain": tenant.domain,
+                        "description": tenant.description,
+                        "is_active": tenant.is_active,
+                        "created_at": tenant.created_at.isoformat(),
+                        "total_organizations": len(tenant_orgs),
+                        "total_users": db.query(User).filter(User.tenant_id == tenant.id).count()
+                    },
+                    "organizations": [
+                        {
+                            "id": str(org.id),
+                            "name": org.name,
+                            "slug": org.slug,
+                            "domain": org.domain,
+                            "is_active": org.is_active,
+                            "allow_global_data_access": org.allow_global_data_access,
+                            "member_count": db.query(User).filter(User.organization_id == org.id).count(),
+                            "admin_email": db.query(User).filter(
+                                and_(User.organization_id == org.id, User.role == "org_admin")
+                            ).first().email if db.query(User).filter(
+                                and_(User.organization_id == org.id, User.role == "org_admin")
+                            ).first() else None
+                        }
+                        for org in tenant_orgs
+                    ]
+                })
+    
+    elif current_user.role in ["org_admin", "org_member"]:
+        # Org Admin/Member: Get their organization details
+        if current_user.organization_id:
+            organization = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
+            
+            if organization:
+                # Get organization members
+                org_members = db.query(User).filter(User.organization_id == organization.id).all()
+                
+                # Get tenant information if available
+                tenant_info = None
+                if organization.tenant_id:
+                    tenant = db.query(Tenant).filter(Tenant.id == organization.tenant_id).first()
+                    if tenant:
+                        tenant_info = {
+                            "id": str(tenant.id),
+                            "name": tenant.name,
+                            "domain": tenant.domain
+                        }
+                
+                permissions = []
+                if current_user.role == "org_admin":
+                    permissions = [
+                        "manage_organization_users",
+                        "manage_organization_predictions",
+                        "bulk_upload_predictions"
+                    ]
+                else:  # org_member
+                    permissions = [
+                        "create_predictions",
+                        "view_organization_predictions",
+                        "update_own_predictions"
+                    ]
+                
+                user_info.update({
+                    "access_level": "organization",
+                    "permissions": permissions,
+                    "organization": {
+                        "id": str(organization.id),
+                        "name": organization.name,
+                        "slug": organization.slug,
+                        "domain": organization.domain,
+                        "description": organization.description,
+                        "is_active": organization.is_active,
+                        "allow_global_data_access": organization.allow_global_data_access,
+                        "join_enabled": organization.join_enabled,
+                        "default_role": organization.default_role,
+                        "max_users": organization.max_users,
+                        "current_users": len(org_members),
+                        "created_at": organization.created_at.isoformat(),
+                        "join_token": organization.join_token if current_user.role == "org_admin" else None
+                    },
+                    "tenant": tenant_info,
+                    "organization_members": [
+                        {
+                            "id": str(member.id),
+                            "email": member.email,
+                            "full_name": member.full_name,
+                            "role": member.role,
+                            "is_active": member.is_active,
+                            "joined_at": member.created_at.isoformat()
+                        }
+                        for member in org_members
+                    ] if current_user.role == "org_admin" else None  # Only admins see all members
+                })
+    
+    else:  # Regular user without organization
+        user_info.update({
+            "access_level": "personal",
+            "permissions": [
+                "create_personal_predictions",
+                "view_personal_predictions",
+                "view_global_predictions"
+            ],
+            "organization": None,
+            "tenant": None
+        })
+    
+    return user_info
 
 @router.post("", response_model=UserResponse)
 async def create_user(

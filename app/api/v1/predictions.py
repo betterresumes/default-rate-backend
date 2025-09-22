@@ -167,7 +167,7 @@ def create_or_get_company(db: Session, company_symbol: str, company_name: str,
     company = Company(
         symbol=company_symbol.upper(),
         name=company_name,
-        market_cap=market_cap * 1_000_000,  # Convert millions to actual value
+        market_cap=market_cap,  # Market cap should be stored as-is (already in millions)
         sector=sector,
         organization_id=final_org_id,
         created_by=created_by,
@@ -1328,7 +1328,7 @@ async def update_annual_prediction(
         # Update company information
         company = prediction.company
         company.name = request.company_name
-        company.market_cap = request.market_cap * 1_000_000
+        company.market_cap = request.market_cap  # Market cap should be stored as-is (already in millions)
         company.sector = request.sector
         
         # Prepare data for ML model
@@ -1376,11 +1376,25 @@ async def update_annual_prediction(
                 "company_id": str(prediction.company_id),
                 "company_symbol": request.company_symbol,
                 "company_name": request.company_name,
+                "sector": request.sector,
+                "market_cap": float(request.market_cap),
                 "reporting_year": request.reporting_year,
                 "reporting_quarter": request.reporting_quarter,
+                
+                # Financial input ratios (updated values)
+                "long_term_debt_to_total_capital": float(request.long_term_debt_to_total_capital),
+                "total_debt_to_ebitda": float(request.total_debt_to_ebitda),
+                "net_income_margin": float(request.net_income_margin),
+                "ebit_to_interest_expense": float(request.ebit_to_interest_expense),
+                "return_on_assets": float(request.return_on_assets),
+                
+                # ML prediction results (updated values)
                 "probability": float(ml_result['probability']),
                 "risk_level": ml_result['risk_level'],
                 "confidence": float(ml_result['confidence']),
+                "predicted_at": prediction.predicted_at.isoformat(),
+                
+                # Organization context
                 "organization_id": str(prediction.organization_id) if prediction.organization_id else None,
                 "organization_name": organization_name,
                 "organization_access": "global" if is_global else "organization",
@@ -1479,7 +1493,7 @@ async def update_quarterly_prediction(
         # Update company information
         company = prediction.company
         company.name = request.company_name
-        company.market_cap = request.market_cap * 1_000_000
+        company.market_cap = request.market_cap  # Market cap should be stored as-is (already in millions)
         company.sector = request.sector
         
         # Prepare data for ML model
@@ -1510,20 +1524,49 @@ async def update_quarterly_prediction(
         db.commit()
         db.refresh(prediction)
         
+        # Get organization name for response (if applicable)
+        organization_name = None
+        if prediction.organization_id:
+            org = db.query(Organization).filter(Organization.id == prediction.organization_id).first()
+            organization_name = org.name if org else None
+        
+        # Determine if this is global access
+        is_global = prediction.organization_id is None
+        
         return {
             "success": True,
             "message": f"Quarterly prediction updated for {request.company_symbol}",
             "prediction": {
                 "id": str(prediction.id),
+                "company_id": str(prediction.company_id),
                 "company_symbol": request.company_symbol,
                 "company_name": request.company_name,
+                "sector": request.sector,
+                "market_cap": float(request.market_cap),
                 "reporting_year": request.reporting_year,
                 "reporting_quarter": request.reporting_quarter,
+                
+                # Financial input ratios (updated values)
+                "total_debt_to_ebitda": float(request.total_debt_to_ebitda),
+                "sga_margin": float(request.sga_margin),
+                "long_term_debt_to_total_capital": float(request.long_term_debt_to_total_capital),
+                "return_on_capital": float(request.return_on_capital),
+                
+                # ML prediction results (updated values)
                 "logistic_probability": float(ml_result.get('logistic_probability', 0)),
                 "gbm_probability": float(ml_result.get('gbm_probability', 0)),
                 "ensemble_probability": float(ml_result.get('ensemble_probability', 0)),
                 "risk_level": ml_result['risk_level'],
                 "confidence": float(ml_result['confidence']),
+                "predicted_at": prediction.predicted_at.isoformat(),
+                
+                # Organization context
+                "organization_id": str(prediction.organization_id) if prediction.organization_id else None,
+                "organization_name": organization_name,
+                "organization_access": "global" if is_global else "organization",
+                "created_by": str(prediction.created_by),
+                "created_by_email": current_user.email,
+                "created_at": prediction.created_at.isoformat(),
                 "updated_at": prediction.updated_at.isoformat()
             }
         }
