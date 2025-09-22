@@ -1,8 +1,13 @@
 import os
+import sys
 from celery import Celery
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Fix for macOS fork safety issues
+if sys.platform == 'darwin':
+    os.environ.setdefault('OBJC_DISABLE_INITIALIZE_FORK_SAFETY', 'YES')
 
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = os.getenv("REDIS_PORT", "6379")
@@ -35,6 +40,9 @@ celery_app.conf.update(
     task_acks_late=True,
     worker_disable_rate_limits=False,
     task_default_queue="bulk_predictions",
+    # macOS-specific settings
+    worker_pool="threads",  # Use threads instead of prefork on macOS
+    worker_pool_restarts=True,
     task_routes={
         "app.workers.tasks.process_bulk_excel_task": {"queue": "bulk_predictions"},
         "app.workers.tasks.process_annual_bulk_upload_task": {"queue": "bulk_predictions"},

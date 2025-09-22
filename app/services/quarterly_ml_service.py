@@ -44,21 +44,37 @@ class QuarterlyMLModelService:
 
     def binned_runscoring(self, df: pd.DataFrame, value_col: str, scoring_info: Dict) -> pd.DataFrame:
         """Apply binned scoring to a column based on scoring information"""
-        df[value_col] = pd.to_numeric(df[value_col].replace('NM', np.nan), errors='coerce')
+        # Handle None values first, then replace 'NM' with NaN and convert to numeric
+        df[value_col] = df[value_col].replace([None, 'NM', 'N/A', ''], np.nan)
+        df[value_col] = pd.to_numeric(df[value_col], errors='coerce')
 
         intervals = scoring_info[value_col]['intervals']
         rates = scoring_info[value_col]['rates']
 
         def assign_rate(x):
-            if pd.isna(x):
-                return rates[intervals.index("Missing")]
+            if pd.isna(x) or x is None:
+                # Find "Missing" category in intervals
+                if "Missing" in intervals:
+                    return rates[intervals.index("Missing")]
+                else:
+                    # If no "Missing" category, use first rate as default
+                    return rates[0] if rates else 0.0
             for idx, iv in enumerate(intervals):
                 if iv == "Missing":
                     continue
                 low, high = iv
                 if low < x <= high:
                     return rates[idx]
-            return None  
+            
+            # FIXED: Instead of returning None, handle out-of-range values
+            # If value doesn't fall in any bin, treat it as missing and assign missing rate
+            if "Missing" in intervals:
+                return rates[intervals.index("Missing")]
+            else:
+                # If no "Missing" category, use the rate from the first non-missing interval
+                # This provides a sensible fallback for extreme values
+                non_missing_rates = [rate for idx, rate in enumerate(rates) if intervals[idx] != "Missing"]
+                return non_missing_rates[0] if non_missing_rates else 0.0
 
         prefix = 'bin_'
         new_column_name = f"{prefix}{value_col}"
@@ -106,9 +122,10 @@ class QuarterlyMLModelService:
                 'return_on_capital': 'return on capital'
             }
 
+            # Check for missing fields - only check if key exists, allow None/NaN values
             missing_fields = []
             for field in required_fields.keys():
-                if field not in financial_ratios or financial_ratios[field] is None:
+                if field not in financial_ratios:
                     missing_fields.append(field)
             
             if missing_fields:
@@ -130,7 +147,9 @@ class QuarterlyMLModelService:
                 financial_ratios['return_on_capital']
             ]
 
+            # Create DataFrame and convert None to NaN for proper handling
             df = pd.DataFrame([values], columns=single_variables)
+            df = df.replace({None: np.nan})
             
             df_binned = df.copy()
             for value_col in single_variables:
@@ -143,10 +162,17 @@ class QuarterlyMLModelService:
                 'bin_return on capital'
             ]
 
+            # Ensure all binned features are numeric (required for LightGBM)
             X_logistic = df_binned[binned_features]
+            for col in binned_features:
+                X_logistic[col] = pd.to_numeric(X_logistic[col], errors='coerce')
+            
             logistic_probability = self.logistic_model.predict_proba(X_logistic)[:, 1][0]
 
+            # Ensure original features are numeric for GBM
             X_gbm = df[single_variables]
+            for col in single_variables:
+                X_gbm[col] = pd.to_numeric(X_gbm[col], errors='coerce')
             gbm_probability = self.gbm_model.predict(X_gbm)[0]
 
             ensemble_probability = (logistic_probability + gbm_probability) / 2

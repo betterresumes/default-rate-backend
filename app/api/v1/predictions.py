@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, status, Body
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, or_
+from sqlalchemy import func, and_, or_, exists, desc, case, text
 from typing import Dict, List, Optional
 from datetime import datetime
 import uuid
@@ -13,7 +13,7 @@ import pandas as pd
 import io
 
 # Core imports
-from ...core.database import get_db, User, Company, AnnualPrediction, QuarterlyPrediction, Organization, BulkUploadJob
+from ...core.database import get_db, User, Company, AnnualPrediction, QuarterlyPrediction, Organization, BulkUploadJob, Tenant
 from ...schemas.schemas import (
     AnnualPredictionRequest, QuarterlyPredictionRequest
 )
@@ -31,6 +31,8 @@ def get_user_access_level(user: User):
     """Get the access level for data created by this user"""
     if user.role == "super_admin":
         return "system"  # System-wide data
+    elif user.role == "tenant_admin":
+        return "organization"  # Tenant admin creates org-level data visible to all orgs in tenant
     elif user.role in ["org_admin", "org_member"] and user.organization_id:
         return "organization"  # Organization data
     else:
@@ -52,8 +54,23 @@ def get_data_access_filter(user: User, prediction_model):
         )
     )
     
-    # Organization data: if user is in an organization
-    if user.organization_id:
+    # Organization data: depends on user role
+    if user.role == "tenant_admin" and user.tenant_id:
+        # Tenant admin sees all organization data within their tenant
+        from sqlalchemy import exists
+        conditions.append(
+            and_(
+                prediction_model.access_level == "organization",
+                exists().where(
+                    and_(
+                        Organization.id == prediction_model.organization_id,
+                        Organization.tenant_id == user.tenant_id
+                    )
+                )
+            )
+        )
+    elif user.organization_id:
+        # Regular org users see only their organization data
         conditions.append(
             and_(
                 prediction_model.access_level == "organization",
@@ -70,7 +87,9 @@ def get_organization_context(current_user: User):
     """Get organization context based on user role for access control"""
     if current_user.role == "super_admin":
         return None  # System-wide access (organization_id = None)
-    elif current_user.role in ["tenant_admin", "org_admin", "org_member"]:
+    elif current_user.role == "tenant_admin":
+        return None  # Tenant admin creates data visible to all orgs in tenant
+    elif current_user.role in ["org_admin", "org_member"]:
         return current_user.organization_id  # Restricted to their organization
     else:
         return current_user.organization_id  # Could be None for basic users
@@ -1578,3 +1597,808 @@ async def delete_quarterly_prediction(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error deleting quarterly prediction: {str(e)}")
+
+# ========================================
+# SUPER ADMIN STATISTICS API
+# ========================================
+
+@router.get("/stats")
+async def get_prediction_statistics(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(current_verified_user)
+):
+    """Get comprehensive prediction statistics - Available to all authenticated users"""
+    try:
+        # All authenticated users can access platform statistics
+        pass  # Removed super admin restriction
+
+        # === BASIC COUNTS ===
+        total_annual = db.query(AnnualPrediction).count()
+        total_quarterly = db.query(QuarterlyPrediction).count()
+        total_companies = db.query(Company).count()
+        total_users = db.query(User).count()
+        total_organizations = db.query(Organization).count()
+
+        # === ACCESS LEVEL BREAKDOWN ===
+        # Annual predictions by access level
+        annual_by_access = {
+            "personal": db.query(AnnualPrediction).filter(AnnualPrediction.access_level == "personal").count(),
+            "organization": db.query(AnnualPrediction).filter(AnnualPrediction.access_level == "organization").count(),
+            "system": db.query(AnnualPrediction).filter(AnnualPrediction.access_level == "system").count()
+        }
+
+        # Quarterly predictions by access level
+        quarterly_by_access = {
+            "personal": db.query(QuarterlyPrediction).filter(QuarterlyPrediction.access_level == "personal").count(),
+            "organization": db.query(QuarterlyPrediction).filter(QuarterlyPrediction.access_level == "organization").count(),
+            "system": db.query(QuarterlyPrediction).filter(QuarterlyPrediction.access_level == "system").count()
+        }
+
+        # === ORGANIZATION BREAKDOWN ===
+        org_stats = []
+        organizations = db.query(Organization).all()
+        
+        for org in organizations:
+            org_annual_count = db.query(AnnualPrediction).filter(
+                AnnualPrediction.organization_id == org.id
+            ).count()
+            
+            org_quarterly_count = db.query(QuarterlyPrediction).filter(
+                QuarterlyPrediction.organization_id == org.id
+            ).count()
+            
+            org_user_count = db.query(User).filter(User.organization_id == org.id).count()
+            
+            org_stats.append({
+                "organization_id": str(org.id),
+                "organization_name": org.name,
+                "organization_domain": org.domain,
+                "user_count": org_user_count,
+                "annual_predictions": org_annual_count,
+                "quarterly_predictions": org_quarterly_count,
+                "total_predictions": org_annual_count + org_quarterly_count
+            })
+
+        # === USER ROLE BREAKDOWN ===
+        user_role_stats = {}
+        for role in ["super_admin", "tenant_admin", "org_admin", "org_member", "user"]:
+            role_users = db.query(User).filter(User.role == role).all()
+            role_count = len(role_users)
+            
+            # Count predictions by users with this role
+            role_annual_count = 0
+            role_quarterly_count = 0
+            
+            for user in role_users:
+                role_annual_count += db.query(AnnualPrediction).filter(
+                    AnnualPrediction.created_by == str(user.id)
+                ).count()
+                
+                role_quarterly_count += db.query(QuarterlyPrediction).filter(
+                    QuarterlyPrediction.created_by == str(user.id)
+                ).count()
+            
+            user_role_stats[role] = {
+                "user_count": role_count,
+                "annual_predictions": role_annual_count,
+                "quarterly_predictions": role_quarterly_count,
+                "total_predictions": role_annual_count + role_quarterly_count
+            }
+
+        # === TOP CONTRIBUTORS ===
+        # Get users who created the most predictions using simple ORM queries
+        user_contributions = {}
+        all_users = db.query(User).all()
+        
+        for user in all_users:
+            annual_count = db.query(AnnualPrediction).filter(
+                AnnualPrediction.created_by == str(user.id)
+            ).count()
+            
+            quarterly_count = db.query(QuarterlyPrediction).filter(
+                QuarterlyPrediction.created_by == str(user.id)
+            ).count()
+            
+            total_count = annual_count + quarterly_count
+            
+            if total_count > 0:  # Only include users who have made predictions
+                # Get organization name
+                org_name = None
+                if user.organization_id:
+                    org = db.query(Organization).filter(Organization.id == user.organization_id).first()
+                    org_name = org.name if org else None
+                
+                user_contributions[user.id] = {
+                    "user_id": str(user.id),
+                    "full_name": user.full_name,
+                    "email": user.email,
+                    "role": user.role,
+                    "organization_name": org_name or "No Organization",
+                    "annual_predictions": annual_count,
+                    "quarterly_predictions": quarterly_count,
+                    "total_predictions": total_count
+                }
+        
+        # Sort by total predictions and take top 10
+        top_contributors = sorted(
+            user_contributions.values(), 
+            key=lambda x: x["total_predictions"], 
+            reverse=True
+        )[:10]
+
+        # === COMPANY BREAKDOWN ===
+        # Most predicted companies using simple ORM queries
+        company_contributions = {}
+        all_companies = db.query(Company).all()
+        
+        for company in all_companies:
+            annual_count = db.query(AnnualPrediction).filter(
+                AnnualPrediction.company_id == company.id
+            ).count()
+            
+            quarterly_count = db.query(QuarterlyPrediction).filter(
+                QuarterlyPrediction.company_id == company.id
+            ).count()
+            
+            total_count = annual_count + quarterly_count
+            
+            if total_count > 0:  # Only include companies with predictions
+                company_contributions[company.id] = {
+                    "company_id": str(company.id),
+                    "symbol": company.symbol,
+                    "name": company.name,
+                    "sector": company.sector,
+                    "access_level": company.access_level,
+                    "annual_predictions": annual_count,
+                    "quarterly_predictions": quarterly_count,
+                    "total_predictions": total_count
+                }
+        
+        # Sort by total predictions and take top 10
+        top_companies = sorted(
+            company_contributions.values(), 
+            key=lambda x: x["total_predictions"], 
+            reverse=True
+        )[:10]
+
+        # === RECENT ACTIVITY ===
+        # Get recent predictions (last 7 days)
+        from datetime import datetime, timedelta
+        
+        seven_days_ago = datetime.now() - timedelta(days=7)
+        
+        recent_annual = db.query(AnnualPrediction).filter(
+            AnnualPrediction.created_at >= seven_days_ago
+        ).count()
+        
+        recent_quarterly = db.query(QuarterlyPrediction).filter(
+            QuarterlyPrediction.created_at >= seven_days_ago
+        ).count()
+
+        # === COMPILE RESPONSE ===
+        return {
+            "success": True,
+            "generated_at": datetime.now().isoformat(),
+            "summary": {
+                "total_predictions": total_annual + total_quarterly,
+                "annual_predictions": total_annual,
+                "quarterly_predictions": total_quarterly,
+                "total_companies": total_companies,
+                "total_users": total_users,
+                "total_organizations": total_organizations,
+                "recent_activity": {
+                    "last_7_days": {
+                        "annual": recent_annual,
+                        "quarterly": recent_quarterly,
+                        "total": recent_annual + recent_quarterly
+                    }
+                }
+            },
+            "breakdown": {
+                "by_access_level": {
+                    "annual": annual_by_access,
+                    "quarterly": quarterly_by_access,
+                    "combined": {
+                        "personal": annual_by_access["personal"] + quarterly_by_access["personal"],
+                        "organization": annual_by_access["organization"] + quarterly_by_access["organization"],
+                        "system": annual_by_access["system"] + quarterly_by_access["system"]
+                    }
+                },
+                "by_organization": org_stats,
+                "by_user_role": user_role_stats
+            },
+            "insights": {
+                "top_contributors": top_contributors,
+                "most_predicted_companies": top_companies
+            },
+            "metadata": {
+                "access_level_explanation": {
+                    "personal": "Only creator can see - private data",
+                    "organization": "All org members can see - shared data",
+                    "system": "Everyone can see - public data"
+                },
+                "note": "Statistics generated for super admin dashboard"
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generating statistics: {str(e)}")
+
+# ========================================
+# DASHBOARD API
+# ========================================
+
+@router.post("/dashboard")
+async def get_dashboard_statistics(
+    request: Dict = Body(...),
+    current_user: User = Depends(current_verified_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get comprehensive dashboard statistics based on user role and request data
+    
+    POST request allows passing organization details and system context
+    Returns both user-specific data and platform-wide statistics
+    
+    Request body can include:
+    {
+        "include_platform_stats": true,
+        "organization_filter": "optional_org_id",
+        "custom_scope": "personal|organization|tenant|system"
+    }
+    """
+    
+    try:
+        # Extract request parameters
+        include_platform_stats = request.get("include_platform_stats", True)
+        organization_filter = request.get("organization_filter")
+        custom_scope = request.get("custom_scope")
+        
+        # Get high risk threshold
+        HIGH_RISK_THRESHOLD = 0.15
+        
+        # Determine effective scope
+        effective_scope = custom_scope or _determine_user_scope(current_user)
+        
+        # Get user-specific dashboard data
+        user_dashboard = await _get_optimized_user_dashboard(db, current_user, effective_scope, organization_filter)
+        
+        # Add platform-wide statistics if requested
+        if include_platform_stats:
+            platform_stats = await _get_optimized_platform_stats(db)
+            user_dashboard["platform_statistics"] = platform_stats
+        
+        return user_dashboard
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generating dashboard: {str(e)}")
+
+
+def _determine_user_scope(user: User) -> str:
+    """Determine the appropriate scope for a user"""
+    if user.role == "super_admin":
+        return "system"
+    elif user.role == "tenant_admin":
+        return "tenant"
+    elif user.role in ["org_admin", "org_member"]:
+        return "organization"
+    else:
+        return "personal"
+
+
+async def _get_optimized_platform_stats(db: Session) -> dict:
+    """Get optimized platform-wide statistics using single query"""
+    
+    # Single optimized query for all platform metrics
+    platform_query = text("""
+        WITH platform_metrics AS (
+            SELECT 
+                -- Companies count
+                (SELECT COUNT(*) FROM companies) as total_companies,
+                -- Users count
+                (SELECT COUNT(*) FROM users) as total_users,
+                -- Organizations count  
+                (SELECT COUNT(*) FROM organizations) as total_organizations,
+                -- Tenants count
+                (SELECT COUNT(*) FROM tenants) as total_tenants
+        ),
+        prediction_metrics AS (
+            SELECT 
+                COUNT(*) as total_annual,
+                AVG(probability) as avg_annual_rate,
+                COUNT(CASE WHEN probability > 0.15 THEN 1 END) as high_risk_annual
+            FROM annual_predictions 
+            WHERE probability IS NOT NULL
+        ),
+        quarterly_metrics AS (
+            SELECT 
+                COUNT(*) as total_quarterly,
+                AVG(logistic_probability) as avg_quarterly_rate,
+                COUNT(CASE WHEN logistic_probability > 0.15 THEN 1 END) as high_risk_quarterly
+            FROM quarterly_predictions 
+            WHERE logistic_probability IS NOT NULL
+        ),
+        sector_metrics AS (
+            SELECT COUNT(DISTINCT sector) as total_sectors
+            FROM companies 
+            WHERE sector IS NOT NULL
+        )
+        SELECT 
+            pm.total_companies,
+            pm.total_users,
+            pm.total_organizations,
+            pm.total_tenants,
+            anm.total_annual,
+            qm.total_quarterly,
+            anm.total_annual + qm.total_quarterly as total_predictions,
+            CASE 
+                WHEN (anm.total_annual + qm.total_quarterly) > 0 
+                THEN ((anm.avg_annual_rate * anm.total_annual) + (qm.avg_quarterly_rate * qm.total_quarterly)) / (anm.total_annual + qm.total_quarterly)
+                ELSE 0 
+            END as overall_avg_rate,
+            anm.high_risk_annual + qm.high_risk_quarterly as total_high_risk,
+            sm.total_sectors
+        FROM platform_metrics pm
+        CROSS JOIN prediction_metrics anm
+        CROSS JOIN quarterly_metrics qm
+        CROSS JOIN sector_metrics sm
+    """)
+    
+    result = db.execute(platform_query).fetchone()
+    
+    return {
+        "total_companies": result.total_companies or 0,
+        "total_users": result.total_users or 0,
+        "total_organizations": result.total_organizations or 0,
+        "total_tenants": result.total_tenants or 0,
+        "total_predictions": result.total_predictions or 0,
+        "annual_predictions": result.total_annual or 0,
+        "quarterly_predictions": result.total_quarterly or 0,
+        "average_default_rate": round(result.overall_avg_rate or 0, 4),
+        "high_risk_companies": result.total_high_risk or 0,
+        "sectors_covered": result.total_sectors or 0
+    }
+
+
+async def _get_optimized_user_dashboard(db: Session, user: User, scope: str, org_filter: str = None):
+    """Get optimized user dashboard data based on scope"""
+    
+    if scope == "system":
+        return await _get_super_admin_dashboard(db)
+    elif scope == "tenant":
+        return await _get_tenant_admin_dashboard(db, user)
+    elif scope == "organization":
+        return await _get_organization_dashboard(db, user, org_filter)
+    else:
+        return await _get_personal_dashboard(db, user)
+
+
+async def _get_personal_dashboard(db: Session, user: User):
+    """Dashboard for personal users - only their own data"""
+    
+    # Get companies created by user
+    companies = db.query(Company).filter(
+        Company.created_by == str(user.id),
+        Company.access_level == "personal"
+    ).all()
+    
+    if not companies:
+        return {
+            "scope": "personal",
+            "user_name": user.full_name,
+            "total_companies": 0,
+            "total_predictions": 0,
+            "average_default_rate": 0,
+            "high_risk_companies": 0,
+            "sectors_covered": 0,
+            "data_scope": "Only companies and predictions you created"
+        }
+    
+    company_ids = [c.id for c in companies]
+    
+    # Get all predictions for user's companies
+    annual_predictions = db.query(AnnualPrediction).filter(
+        AnnualPrediction.company_id.in_(company_ids),
+        AnnualPrediction.access_level == "personal"
+    ).all()
+    
+    quarterly_predictions = db.query(QuarterlyPrediction).filter(
+        QuarterlyPrediction.company_id.in_(company_ids),
+        QuarterlyPrediction.access_level == "personal"
+    ).all()
+    
+    # Calculate metrics
+    total_predictions = len(annual_predictions) + len(quarterly_predictions)
+    
+    # Average default rate
+    probabilities = []
+    for pred in annual_predictions:
+        if pred.probability is not None:
+            probabilities.append(float(pred.probability))
+    for pred in quarterly_predictions:
+        if pred.logistic_probability is not None:
+            probabilities.append(float(pred.logistic_probability))
+    
+    avg_default_rate = sum(probabilities) / len(probabilities) if probabilities else 0
+    
+    # High risk companies (latest prediction per company)
+    high_risk_companies = 0
+    for company in companies:
+        latest_annual = db.query(AnnualPrediction).filter(
+            AnnualPrediction.company_id == company.id
+        ).order_by(AnnualPrediction.created_at.desc()).first()
+        
+        latest_quarterly = db.query(QuarterlyPrediction).filter(
+            QuarterlyPrediction.company_id == company.id
+        ).order_by(QuarterlyPrediction.created_at.desc()).first()
+        
+        latest_prob = 0
+        if latest_annual and latest_quarterly:
+            if latest_annual.created_at > latest_quarterly.created_at:
+                latest_prob = float(latest_annual.probability or 0)
+            else:
+                latest_prob = float(latest_quarterly.logistic_probability or 0)
+        elif latest_annual:
+            latest_prob = float(latest_annual.probability or 0)
+        elif latest_quarterly:
+            latest_prob = float(latest_quarterly.logistic_probability or 0)
+            
+        if latest_prob > 0.15:
+            high_risk_companies += 1
+    
+    # Calculate sectors
+    sectors = set([c.sector for c in companies if c.sector])
+    
+    return {
+        "scope": "personal",
+        "user_name": user.full_name,
+        "total_companies": len(companies),
+        "total_predictions": total_predictions,
+        "average_default_rate": round(avg_default_rate, 4),
+        "high_risk_companies": high_risk_companies,
+        "sectors_covered": len(sectors),
+        "data_scope": "Only companies and predictions you created"
+    }
+
+
+async def _get_organization_dashboard(db: Session, user: User, org_filter: str = None):
+    """Dashboard for organization users - all data within their organization"""
+    
+    # Use org_filter if provided, otherwise use user's organization
+    target_org_id = org_filter if org_filter else user.organization_id
+    
+    if not target_org_id:
+        raise HTTPException(status_code=400, detail="No organization specified")
+    
+    # Get organization info
+    organization = db.query(Organization).filter(Organization.id == target_org_id).first()
+    if not organization:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    
+    # Get all companies in the organization
+    companies = db.query(Company).filter(
+        Company.organization_id == target_org_id,
+        Company.access_level == "organization"
+    ).all()
+    
+    if not companies:
+        return {
+            "scope": "organization",
+            "user_name": user.full_name,
+            "organization_name": organization.name,
+            "total_companies": 0,
+            "total_predictions": 0,
+            "average_default_rate": 0,
+            "high_risk_companies": 0,
+            "sectors_covered": 0,
+            "data_scope": f"All data within {organization.name}"
+        }
+    
+    company_ids = [c.id for c in companies]
+    
+    # Get all predictions for organization's companies
+    annual_predictions = db.query(AnnualPrediction).filter(
+        AnnualPrediction.company_id.in_(company_ids),
+        AnnualPrediction.access_level == "organization"
+    ).all()
+    
+    quarterly_predictions = db.query(QuarterlyPrediction).filter(
+        QuarterlyPrediction.company_id.in_(company_ids),
+        QuarterlyPrediction.access_level == "organization"
+    ).all()
+    
+    # Calculate metrics
+    total_predictions = len(annual_predictions) + len(quarterly_predictions)
+    
+    # Average default rate
+    probabilities = []
+    for pred in annual_predictions:
+        if pred.probability is not None:
+            probabilities.append(float(pred.probability))
+    for pred in quarterly_predictions:
+        if pred.logistic_probability is not None:
+            probabilities.append(float(pred.logistic_probability))
+    
+    avg_default_rate = sum(probabilities) / len(probabilities) if probabilities else 0
+    
+    # High risk companies (latest prediction per company)
+    high_risk_companies = 0
+    for company in companies:
+        latest_annual = db.query(AnnualPrediction).filter(
+            AnnualPrediction.company_id == company.id
+        ).order_by(AnnualPrediction.created_at.desc()).first()
+        
+        latest_quarterly = db.query(QuarterlyPrediction).filter(
+            QuarterlyPrediction.company_id == company.id
+        ).order_by(QuarterlyPrediction.created_at.desc()).first()
+        
+        latest_prob = 0
+        if latest_annual and latest_quarterly:
+            if latest_annual.created_at > latest_quarterly.created_at:
+                latest_prob = float(latest_annual.probability or 0)
+            else:
+                latest_prob = float(latest_quarterly.logistic_probability or 0)
+        elif latest_annual:
+            latest_prob = float(latest_annual.probability or 0)
+        elif latest_quarterly:
+            latest_prob = float(latest_quarterly.logistic_probability or 0)
+            
+        if latest_prob > 0.15:
+            high_risk_companies += 1
+    
+    # Sectors covered
+    sectors = set([c.sector for c in companies if c.sector])
+    
+    return {
+        "scope": "organization",
+        "user_name": user.full_name,
+        "organization_name": organization.name,
+        "total_companies": len(companies),
+        "total_predictions": total_predictions,
+        "average_default_rate": round(avg_default_rate, 4),
+        "high_risk_companies": high_risk_companies,
+        "sectors_covered": len(sectors),
+        "data_scope": f"All data within {organization.name}"
+    }
+
+
+async def _get_tenant_admin_dashboard(db: Session, user: User):
+    """Highly optimized dashboard for tenant admin - all orgs in tenant + breakdown"""
+    
+    if not user.tenant_id:
+        raise HTTPException(status_code=400, detail="User not associated with a tenant")
+    
+    # Get tenant info
+    tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    # Single complex query to get all org metrics at once
+    org_metrics = db.execute(text("""
+        WITH org_companies AS (
+            SELECT 
+                o.id as org_id,
+                o.name as org_name,
+                c.id as company_id,
+                c.sector
+            FROM organizations o
+            LEFT JOIN companies c ON c.organization_id = o.id 
+                AND c.access_level = 'organization'
+            WHERE o.tenant_id = :tenant_id
+        ),
+        org_predictions AS (
+            SELECT 
+                oc.org_id,
+                oc.org_name,
+                oc.company_id,
+                ap.probability as prob_value,
+                ap.created_at,
+                'annual' as pred_type
+            FROM org_companies oc
+            JOIN annual_predictions ap ON ap.company_id = oc.company_id
+                AND ap.access_level = 'organization'
+            WHERE ap.probability IS NOT NULL
+            
+            UNION ALL
+            
+            SELECT 
+                oc.org_id,
+                oc.org_name,
+                oc.company_id,
+                qp.logistic_probability as prob_value,
+                qp.created_at,
+                'quarterly' as pred_type
+            FROM org_companies oc
+            JOIN quarterly_predictions qp ON qp.company_id = oc.company_id
+                AND qp.access_level = 'organization'  
+            WHERE qp.logistic_probability IS NOT NULL
+        ),
+        latest_per_company AS (
+            SELECT 
+                org_id,
+                company_id,
+                prob_value,
+                ROW_NUMBER() OVER (PARTITION BY org_id, company_id ORDER BY created_at DESC) as rn
+            FROM org_predictions
+        ),
+        org_stats AS (
+            SELECT 
+                oc.org_id,
+                oc.org_name,
+                COUNT(DISTINCT oc.company_id) as total_companies,
+                COUNT(DISTINCT CASE WHEN oc.sector IS NOT NULL THEN oc.sector END) as sectors_covered,
+                COUNT(op.prob_value) as total_predictions,
+                AVG(op.prob_value) as avg_default_rate,
+                COUNT(DISTINCT CASE 
+                    WHEN lpc.rn = 1 AND lpc.prob_value > 0.15 
+                    THEN lpc.company_id 
+                END) as high_risk_companies
+            FROM org_companies oc
+            LEFT JOIN org_predictions op ON op.org_id = oc.org_id
+            LEFT JOIN latest_per_company lpc ON lpc.org_id = oc.org_id 
+                AND lpc.company_id = oc.company_id
+            GROUP BY oc.org_id, oc.org_name
+        ),
+        tenant_totals AS (
+            SELECT 
+                SUM(total_companies) as total_companies,
+                SUM(total_predictions) as total_predictions,
+                SUM(sectors_covered) as total_sectors,
+                SUM(high_risk_companies) as total_high_risk,
+                SUM(total_predictions * avg_default_rate) / NULLIF(SUM(total_predictions), 0) as overall_avg_rate
+            FROM org_stats
+        )
+        SELECT 
+            os.*,
+            tt.total_companies as tenant_total_companies,
+            tt.total_predictions as tenant_total_predictions, 
+            tt.total_sectors as tenant_total_sectors,
+            tt.total_high_risk as tenant_total_high_risk,
+            tt.overall_avg_rate as tenant_avg_rate
+        FROM org_stats os
+        CROSS JOIN tenant_totals tt
+        ORDER BY os.org_name
+    """), {"tenant_id": str(user.tenant_id)}).fetchall()
+    
+    if not org_metrics:
+        return {
+            "scope": "tenant",
+            "user_name": user.full_name,
+            "tenant_name": tenant.name,
+            "total_companies": 0,
+            "total_predictions": 0,
+            "average_default_rate": 0,
+            "high_risk_companies": 0,
+            "sectors_covered": 0,
+            "organizations_breakdown": [],
+            "data_scope": f"All organizations within {tenant.name}"
+        }
+    
+    # Build organization breakdown from results
+    organizations_breakdown = []
+    tenant_metrics = org_metrics[0]  # All rows have same tenant totals
+    
+    for row in org_metrics:
+        organizations_breakdown.append({
+            "org_name": row.org_name,
+            "companies": row.total_companies,
+            "predictions": row.total_predictions,
+            "avg_default_rate": round(row.avg_default_rate or 0, 4),
+            "high_risk_companies": row.high_risk_companies,
+            "sectors_covered": row.sectors_covered
+        })
+    
+    return {
+        "scope": "tenant",
+        "user_name": user.full_name,
+        "tenant_name": tenant.name,
+        "total_companies": tenant_metrics.tenant_total_companies or 0,
+        "total_predictions": tenant_metrics.tenant_total_predictions or 0,
+        "average_default_rate": round(tenant_metrics.tenant_avg_rate or 0, 4),
+        "high_risk_companies": tenant_metrics.tenant_total_high_risk or 0,
+        "sectors_covered": tenant_metrics.tenant_total_sectors or 0,
+        "organizations_breakdown": organizations_breakdown,
+        "data_scope": f"All organizations within {tenant.name}"
+    }
+
+
+async def _get_super_admin_dashboard(db: Session):
+    """Dashboard for super admin - system-wide data + tenant breakdown"""
+    
+    # Simplified approach without complex SQL
+    all_companies = db.query(Company).all()
+    all_annual = db.query(AnnualPrediction).all()
+    all_quarterly = db.query(QuarterlyPrediction).all()
+    
+    total_predictions = len(all_annual) + len(all_quarterly)
+    
+    # Calculate overall metrics
+    all_probabilities = []
+    for pred in all_annual:
+        if pred.probability is not None:
+            all_probabilities.append(float(pred.probability))
+    for pred in all_quarterly:
+        if pred.logistic_probability is not None:
+            all_probabilities.append(float(pred.logistic_probability))
+    
+    overall_avg_rate = sum(all_probabilities) / len(all_probabilities) if all_probabilities else 0
+    
+    # High risk companies (latest prediction per company across all)
+    total_high_risk = 0
+    for company in all_companies:
+        latest_annual = db.query(AnnualPrediction).filter(
+            AnnualPrediction.company_id == company.id
+        ).order_by(AnnualPrediction.created_at.desc()).first()
+        
+        latest_quarterly = db.query(QuarterlyPrediction).filter(
+            QuarterlyPrediction.company_id == company.id
+        ).order_by(QuarterlyPrediction.created_at.desc()).first()
+        
+        latest_prob = 0
+        if latest_annual and latest_quarterly:
+            if latest_annual.created_at > latest_quarterly.created_at:
+                latest_prob = float(latest_annual.probability or 0)
+            else:
+                latest_prob = float(latest_quarterly.logistic_probability or 0)
+        elif latest_annual:
+            latest_prob = float(latest_annual.probability or 0)
+        elif latest_quarterly:
+            latest_prob = float(latest_quarterly.logistic_probability or 0)
+            
+        if latest_prob > 0.15:
+            total_high_risk += 1
+    
+    # All sectors
+    all_sectors = set([c.sector for c in all_companies if c.sector])
+    
+    # Tenant breakdown
+    tenants = db.query(Tenant).all()
+    tenants_breakdown = []
+    
+    for tenant in tenants:
+        # Get organizations in this tenant
+        tenant_orgs = db.query(Organization).filter(Organization.tenant_id == tenant.id).all()
+        
+        # Count companies and predictions for this tenant
+        tenant_companies = 0
+        tenant_predictions = 0
+        
+        for org in tenant_orgs:
+            org_companies = db.query(Company).filter(
+                Company.organization_id == org.id,
+                Company.access_level == "organization"
+            ).count()
+            
+            # Count predictions by joining with companies
+            org_annual = db.query(AnnualPrediction).join(Company).filter(
+                Company.organization_id == org.id,
+                AnnualPrediction.access_level == "organization"
+            ).count()
+            
+            org_quarterly = db.query(QuarterlyPrediction).join(Company).filter(
+                Company.organization_id == org.id,
+                QuarterlyPrediction.access_level == "organization"
+            ).count()
+            
+            tenant_companies += org_companies
+            tenant_predictions += org_annual + org_quarterly
+        
+        tenants_breakdown.append({
+            "tenant_name": tenant.name,
+            "companies": tenant_companies,
+            "predictions": tenant_predictions,
+            "organizations_count": len(tenant_orgs)
+        })
+    
+    return {
+        "scope": "system",
+        "total_companies": len(all_companies),
+        "total_predictions": total_predictions,
+        "average_default_rate": round(overall_avg_rate, 4),
+        "high_risk_companies": total_high_risk,
+        "sectors_covered": len(all_sectors),
+        "tenants_breakdown": tenants_breakdown,
+        "data_scope": "Entire system across all tenants and access levels"
+    }
