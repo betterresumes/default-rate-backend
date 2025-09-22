@@ -6,13 +6,13 @@
 echo "🔄 Starting Celery Worker for Background Jobs..."
 
 # Change to backend directory to fix import paths
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 
 # Set environment variables
 export PYTHONPATH="$(pwd):${PYTHONPATH}"
 
 # Start Celery worker with production settings
-exec celery -A src.celery_app worker \
+exec celery -A app.workers.celery_app worker \
     --loglevel=info \
     --concurrency=2 \
     --queues=bulk_predictions \

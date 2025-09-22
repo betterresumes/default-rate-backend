@@ -62,9 +62,6 @@ class Organization(Base):
     join_created_at = Column(DateTime, default=func.now())
     max_users = Column(Integer, default=500)  # Maximum number of users allowed in organization
     
-    # Global Data Access Control
-    allow_global_data_access = Column(Boolean, default=False)  # Controls if org users can see global predictions/companies
-    
     # Metadata
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=func.now())
@@ -161,9 +158,9 @@ class Company(Base):
     market_cap = Column(Numeric(precision=20, scale=2), nullable=False)
     sector = Column(String(100), nullable=False)
     
-    # Organization relationship
+    # Simplified 3-level access control
     organization_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True, index=True)
-    is_global = Column(Boolean, default=False, index=True)  # Global companies visible to all orgs
+    access_level = Column(String(20), default="personal", nullable=False, index=True)  # personal, organization, system
     
     # Metadata
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
@@ -191,10 +188,9 @@ class AnnualPrediction(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
     
-    # Multi-tenant context
+    # Simplified 3-level access control
     organization_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True, index=True)
-    # NULL organization_id = accessible to all users (super admin data)
-    # Non-NULL organization_id = only accessible to org members
+    access_level = Column(String(20), default="personal", nullable=False, index=True)  # personal, organization, system
     
     # Time period - matching existing schema
     reporting_year = Column(String(10), nullable=False)
@@ -234,10 +230,9 @@ class QuarterlyPrediction(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
     
-    # Multi-tenant context
+    # Simplified 3-level access control
     organization_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True, index=True)
-    # NULL organization_id = accessible to all users (super admin data)
-    # Non-NULL organization_id = only accessible to org members
+    access_level = Column(String(20), default="personal", nullable=False, index=True)  # personal, organization, system
     
     # Time period - matching existing schema
     reporting_year = Column(String(10), nullable=False)

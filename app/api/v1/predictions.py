@@ -4,6 +4,10 @@ from sqlalchemy import func, and_, or_
 from typing import Dict, List, Optional
 from datetime import datetime
 import uuid
+import pandas as pd
+import io
+import math
+import uuid
 import math
 import pandas as pd
 import io
@@ -20,158 +24,89 @@ from .auth_multi_tenant import get_current_active_user as current_verified_user
 router = APIRouter()
 
 # ========================================
-# ACCESS CONTROL HELPERS
+# SIMPLIFIED ACCESS CONTROL HELPERS  
 # ========================================
+
+def get_user_access_level(user: User):
+    """Get the access level for data created by this user"""
+    if user.role == "super_admin":
+        return "system"  # System-wide data
+    elif user.role in ["org_admin", "org_member"] and user.organization_id:
+        return "organization"  # Organization data
+    else:
+        return "personal"  # Personal data only
+
+def get_data_access_filter(user: User, prediction_model):
+    """Get simple 3-level access filter for predictions"""
+    conditions = []
+    
+    if user.role == "super_admin":
+        # Super admin sees everything
+        return None
+    
+    # Personal data: only what the user created
+    conditions.append(
+        and_(
+            prediction_model.access_level == "personal",
+            prediction_model.created_by == str(user.id)
+        )
+    )
+    
+    # Organization data: if user is in an organization
+    if user.organization_id:
+        conditions.append(
+            and_(
+                prediction_model.access_level == "organization",
+                prediction_model.organization_id == user.organization_id
+            )
+        )
+    
+    # System data: everyone can see it
+    conditions.append(prediction_model.access_level == "system")
+    
+    return or_(*conditions)
 
 def get_organization_context(current_user: User):
     """Get organization context based on user role for access control"""
     if current_user.role == "super_admin":
-        return None  # Global access (organization_id = None)
-    elif current_user.role in ["tenant_admin", "org_admin", "org_member"] and current_user.organization_id:
+        return None  # System-wide access (organization_id = None)
+    elif current_user.role in ["tenant_admin", "org_admin", "org_member"]:
         return current_user.organization_id  # Restricted to their organization
     else:
-        # Regular users without org create their own private data
-        # Use a special identifier to create user-specific companies
-        return f"user_{current_user.id}"  # Private user space
-
-def get_prediction_organization_filter(user: User, db: Session):
-    """Get filter conditions for predictions based on user's organization access"""
-    if user.role == "super_admin":
-        # Super admins see everything
-        return None
-    
-    if user.role == "tenant_admin" and user.tenant_id:
-        # Tenant admins see predictions from orgs in their tenant + global data
-        tenant_org_ids = db.query(Organization.id).filter(Organization.tenant_id == user.tenant_id).all()
-        tenant_org_ids = [str(org.id) for org in tenant_org_ids]
-        if tenant_org_ids:
-            # Show predictions from tenant organizations + global predictions
-            return or_(
-                AnnualPrediction.organization_id.in_(tenant_org_ids),
-                AnnualPrediction.organization_id.is_(None)  # Global predictions
-            )
-        else:
-            # No orgs in tenant, only global
-            return AnnualPrediction.organization_id.is_(None)
-    
-    if user.organization_id:
-        # Users with organization see their org data + global data (if allowed) + their own private data
-        user_org = db.query(Organization).filter(Organization.id == user.organization_id).first()
-        
-        conditions = [
-            AnnualPrediction.organization_id == user.organization_id,  # Org data
-            and_(AnnualPrediction.created_by == str(user.id), AnnualPrediction.organization_id.is_(None))  # Own private data
-        ]
-        
-        if user_org and user_org.allow_global_data_access:
-            # Add global data if organization allows it (check company.is_global through join)
-            # Note: This will be applied in the main query where the join with Company is already established
-            conditions.append(AnnualPrediction.organization_id.is_(None))
-        
-        return or_(*conditions)
-    else:
-        # Users without organization see only their own private data + global data (if they want)
-        return or_(
-            and_(AnnualPrediction.created_by == str(user.id), AnnualPrediction.organization_id.is_(None)),  # Own private data
-            AnnualPrediction.organization_id.is_(None)  # All global data (company.is_global filtering happens in main query)
-        )
-
-def get_quarterly_prediction_organization_filter(user: User, db: Session):
-    """Get filter conditions for quarterly predictions based on user's organization access"""
-    if user.role == "super_admin":
-        # Super admins see everything
-        return None
-    
-    if user.role == "tenant_admin" and user.tenant_id:
-        # Tenant admins see predictions from orgs in their tenant + global data
-        tenant_org_ids = db.query(Organization.id).filter(Organization.tenant_id == user.tenant_id).all()
-        tenant_org_ids = [str(org.id) for org in tenant_org_ids]
-        if tenant_org_ids:
-            # Show predictions from tenant organizations + global predictions
-            return or_(
-                QuarterlyPrediction.organization_id.in_(tenant_org_ids),
-                QuarterlyPrediction.organization_id.is_(None)  # Global predictions
-            )
-        else:
-            # No orgs in tenant, only global
-            return QuarterlyPrediction.organization_id.is_(None)
-    
-    if user.organization_id:
-        # Users with organization see their org data + global data (if allowed) + their own private data
-        user_org = db.query(Organization).filter(Organization.id == user.organization_id).first()
-        
-        conditions = [
-            QuarterlyPrediction.organization_id == user.organization_id,  # Org data
-            and_(QuarterlyPrediction.created_by == str(user.id), QuarterlyPrediction.organization_id.is_(None))  # Own private data
-        ]
-        
-        if user_org and user_org.allow_global_data_access:
-            # Add global data if organization allows it (check company.is_global through join)
-            # Note: This will be applied in the main query where the join with Company is already established
-            conditions.append(QuarterlyPrediction.organization_id.is_(None))
-        
-        return or_(*conditions)
-    else:
-        # Users without organization see only their own private data + global data
-        return or_(
-            and_(QuarterlyPrediction.created_by == str(user.id), QuarterlyPrediction.organization_id.is_(None)),  # Own private data
-            QuarterlyPrediction.organization_id.is_(None)  # All global data (company.is_global filtering happens in main query)
-        )
+        return current_user.organization_id  # Could be None for basic users
 
 def create_or_get_company(db: Session, company_symbol: str, company_name: str, 
-                         market_cap: float, sector: str, organization_id: Optional[str],
-                         created_by: str, is_global: bool = False):
-    """Create company if it doesn't exist, or get existing one with proper scoped access control"""
+                         market_cap: float, sector: str, user: User):
+    """Create company with simplified access control"""
     
-    # Handle different access scopes for company lookup
-    if organization_id is None:
-        # Super admin creating global company - check for existing global company
-        existing_company = db.query(Company).filter(
-            Company.symbol == company_symbol.upper(),
-            Company.is_global == True
-        ).first()
-    elif str(organization_id).startswith("user_"):
-        # Regular user without org - check for existing user-specific company
-        user_id = organization_id.replace("user_", "")
-        existing_company = db.query(Company).filter(
-            Company.symbol == company_symbol.upper(),
-            Company.created_by == user_id,
-            Company.organization_id.is_(None),  # User-specific companies have no org
-            Company.is_global == False
-        ).first()
-    else:
-        # Organization user - check for existing company within their organization
-        existing_company = db.query(Company).filter(
-            Company.symbol == company_symbol.upper(),
-            Company.organization_id == organization_id
-        ).first()
+    access_level = get_user_access_level(user)
+    organization_id = user.organization_id if access_level == "organization" else None
+    
+    # Check for existing company in the same access scope
+    query = db.query(Company).filter(
+        Company.symbol == company_symbol.upper(),
+        Company.access_level == access_level
+    )
+    
+    if access_level == "organization" and organization_id:
+        query = query.filter(Company.organization_id == organization_id)
+    elif access_level == "personal":
+        query = query.filter(Company.created_by == str(user.id))
+    
+    existing_company = query.first()
     
     if existing_company:
-        # Company exists within the same scope - return it
         return existing_company
     
-    # Create new company based on user access level
-    if organization_id is None:
-        # Super admin creates global companies
-        is_global = True
-        final_org_id = None
-    elif str(organization_id).startswith("user_"):
-        # Regular user without org creates private company
-        is_global = False
-        final_org_id = None  # User-specific companies have no organization
-    else:
-        # Organization-specific company
-        is_global = False
-        final_org_id = organization_id
-    
+    # Create new company
     company = Company(
         symbol=company_symbol.upper(),
         name=company_name,
-        market_cap=market_cap,  # Market cap should be stored as-is (already in millions)
+        market_cap=market_cap,
         sector=sector,
-        organization_id=final_org_id,
-        created_by=created_by,
-        is_global=is_global
+        access_level=access_level,
+        organization_id=organization_id,
+        created_by=str(user.id)
     )
     
     db.add(company)
@@ -179,7 +114,7 @@ def create_or_get_company(db: Session, company_symbol: str, company_name: str,
     db.refresh(company)
     return company
 
-def check_user_permissions(user: User, required_role: str = "org_member"):
+def check_user_permissions(user: User, required_role: str = "user"):
     """Check if user has required permissions based on 5-role hierarchy"""
     role_hierarchy = {
         "user": 0,
@@ -199,6 +134,7 @@ def safe_float(value):
     if value is None:
         return None
     try:
+        import math
         float_val = float(value)
         if math.isnan(float_val) or math.isinf(float_val):
             return None
@@ -216,51 +152,43 @@ async def create_annual_prediction(
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
-    """Create annual prediction with comprehensive data including company creation"""
+    """Create annual prediction with simplified 3-level access control"""
     try:
-        # Check permissions (allow regular users to create predictions)
+        # Check permissions
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
                 detail="Authentication required to create predictions"
             )
 
-        # Get organization context based on user role
-        organization_context = get_organization_context(current_user)
-        is_global = current_user.role == "super_admin"
+        # Get user's access level
+        access_level = get_user_access_level(current_user)
+        organization_id = current_user.organization_id if access_level == "organization" else None
         
-        # Determine final organization_id for the prediction
-        if current_user.role == "super_admin":
-            final_org_id = None  # Global predictions
-        elif current_user.organization_id:
-            final_org_id = current_user.organization_id  # Organization predictions
-        else:
-            final_org_id = None  # User-specific predictions (no org)
-        
-        # Create or get company with proper access control
+        # Create or get company
         company = create_or_get_company(
             db=db,
             company_symbol=request.company_symbol,
             company_name=request.company_name,
             market_cap=request.market_cap,
             sector=request.sector,
-            organization_id=organization_context,
-            created_by=str(current_user.id),
-            is_global=is_global
+            user=current_user
         )
         
-        # Check if prediction already exists for this company/year/quarter combination within the same scope
+        # Check if prediction already exists
         existing_query = db.query(AnnualPrediction).filter(
             AnnualPrediction.company_id == company.id,
             AnnualPrediction.reporting_year == request.reporting_year,
-            AnnualPrediction.organization_id == final_org_id  # Scope to organization context
+            AnnualPrediction.access_level == access_level
         )
         
-        # For user-specific predictions (no org), also check by created_by to ensure user isolation
-        if final_org_id is None and current_user.role != "super_admin":
+        # Add specific filters based on access level
+        if access_level == "organization":
+            existing_query = existing_query.filter(AnnualPrediction.organization_id == organization_id)
+        elif access_level == "personal":
             existing_query = existing_query.filter(AnnualPrediction.created_by == str(current_user.id))
         
-        # If quarter is provided, check for that specific quarter, otherwise check for null quarter
+        # Check for quarter
         if request.reporting_quarter:
             existing_query = existing_query.filter(AnnualPrediction.reporting_quarter == request.reporting_quarter)
         else:
@@ -270,10 +198,9 @@ async def create_annual_prediction(
         
         if existing_prediction:
             quarter_text = f" {request.reporting_quarter}" if request.reporting_quarter else ""
-            scope_text = "global" if current_user.role == "super_admin" else ("organization" if final_org_id else "personal")
             raise HTTPException(
                 status_code=400,
-                detail=f"Annual prediction for {request.company_symbol} in {request.reporting_year}{quarter_text} already exists in your {scope_text} scope"
+                detail=f"Annual prediction for {request.company_symbol} in {request.reporting_year}{quarter_text} already exists in your {access_level} scope"
             )
         
         # Prepare data for ML model
@@ -292,9 +219,10 @@ async def create_annual_prediction(
         prediction = AnnualPrediction(
             id=uuid.uuid4(),
             company_id=company.id,
-            organization_id=final_org_id,
+            organization_id=organization_id,
+            access_level=access_level,
             reporting_year=request.reporting_year,
-            reporting_quarter=request.reporting_quarter,  # Can be None for annual-only predictions
+            reporting_quarter=request.reporting_quarter,
             
             # Financial input data
             long_term_debt_to_total_capital=request.long_term_debt_to_total_capital,
@@ -310,7 +238,7 @@ async def create_annual_prediction(
             predicted_at=datetime.utcnow(),
             
             # Metadata
-            created_by=current_user.id
+            created_by=str(current_user.id)
         )
         
         db.add(prediction)
@@ -319,8 +247,8 @@ async def create_annual_prediction(
         
         # Get organization name for response (if applicable)
         organization_name = None
-        if final_org_id:
-            org = db.query(Organization).filter(Organization.id == final_org_id).first()
+        if organization_id:
+            org = db.query(Organization).filter(Organization.id == organization_id).first()
             organization_name = org.name if org else None
         
         return {
@@ -348,10 +276,10 @@ async def create_annual_prediction(
                 "risk_level": ml_result['risk_level'],
                 "confidence": float(ml_result['confidence']),
                 
-                # Organization context
-                "organization_id": str(final_org_id) if final_org_id else None,
+                # Simplified access control
+                "access_level": access_level,
+                "organization_id": str(organization_id) if organization_id else None,
                 "organization_name": organization_name,
-                "organization_access": "global" if company.is_global else ("organization" if final_org_id else "personal"),
                 "created_by": str(current_user.id),
                 "created_by_email": current_user.email,
                 "created_at": prediction.created_at.isoformat()
@@ -370,59 +298,140 @@ async def create_quarterly_prediction(
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
-    """Create quarterly prediction with comprehensive data including company creation"""
+    """Create quarterly prediction with simplified 3-level access control"""
     try:
-        # Check permissions (allow regular users to create predictions)
+        # Check permissions
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
                 detail="Authentication required to create predictions"
             )
 
-        # Get organization context based on user role
-        organization_context = get_organization_context(current_user)
-        is_global = current_user.role == "super_admin"
+        # Get user's access level
+        access_level = get_user_access_level(current_user)
+        organization_id = current_user.organization_id if access_level == "organization" else None
         
-        # Determine final organization_id for the prediction
-        if current_user.role == "super_admin":
-            final_org_id = None  # Global predictions
-        elif current_user.organization_id:
-            final_org_id = current_user.organization_id  # Organization predictions
-        else:
-            final_org_id = None  # User-specific predictions (no org)
-        
-        # Create or get company with proper access control
+        # Create or get company
         company = create_or_get_company(
             db=db,
             company_symbol=request.company_symbol,
             company_name=request.company_name,
             market_cap=request.market_cap,
             sector=request.sector,
-            organization_id=organization_context,
-            created_by=str(current_user.id),
-            is_global=is_global
+            user=current_user
         )
         
-        # Check if prediction already exists for this company/year/quarter within the same scope
+        # Check if prediction already exists
         existing_query = db.query(QuarterlyPrediction).filter(
             QuarterlyPrediction.company_id == company.id,
             QuarterlyPrediction.reporting_year == request.reporting_year,
             QuarterlyPrediction.reporting_quarter == request.reporting_quarter,
-            QuarterlyPrediction.organization_id == final_org_id  # Scope to organization context
+            QuarterlyPrediction.access_level == access_level
         )
         
-        # For user-specific predictions (no org), also check by created_by to ensure user isolation
-        if final_org_id is None and current_user.role != "super_admin":
+        # Add specific filters based on access level
+        if access_level == "organization":
+            existing_query = existing_query.filter(QuarterlyPrediction.organization_id == organization_id)
+        elif access_level == "personal":
             existing_query = existing_query.filter(QuarterlyPrediction.created_by == str(current_user.id))
         
         existing_prediction = existing_query.first()
         
         if existing_prediction:
-            scope_text = "global" if current_user.role == "super_admin" else ("organization" if final_org_id else "personal")
             raise HTTPException(
                 status_code=400,
-                detail=f"Quarterly prediction for {request.company_symbol} in {request.reporting_year} {request.reporting_quarter} already exists in your {scope_text} scope"
+                detail=f"Quarterly prediction for {request.company_symbol} in {request.reporting_year} {request.reporting_quarter} already exists in your {access_level} scope"
             )
+        
+        # Prepare data for ML model
+        financial_data = {
+            'total_debt_to_ebitda': request.total_debt_to_ebitda,
+            'sga_margin': request.sga_margin,
+            'long_term_debt_to_total_capital': request.long_term_debt_to_total_capital,
+            'return_on_capital': request.return_on_capital
+        }
+        
+        # Get ML prediction
+        ml_result = await quarterly_ml_model.predict_quarterly(financial_data)
+        
+        # Create prediction record
+        prediction = QuarterlyPrediction(
+            id=uuid.uuid4(),
+            company_id=company.id,
+            organization_id=organization_id,
+            access_level=access_level,
+            reporting_year=request.reporting_year,
+            reporting_quarter=request.reporting_quarter,
+            
+            # Financial input data
+            total_debt_to_ebitda=request.total_debt_to_ebitda,
+            sga_margin=request.sga_margin,
+            long_term_debt_to_total_capital=request.long_term_debt_to_total_capital,
+            return_on_capital=request.return_on_capital,
+            
+            # ML prediction results
+            logistic_probability=ml_result.get('logistic_probability'),
+            gbm_probability=ml_result.get('gbm_probability'),
+            ensemble_probability=ml_result.get('ensemble_probability'),
+            risk_level=ml_result['risk_level'],
+            confidence=ml_result['confidence'],
+            predicted_at=datetime.utcnow(),
+            
+            # Metadata
+            created_by=str(current_user.id)
+        )
+        
+        db.add(prediction)
+        db.commit()
+        db.refresh(prediction)
+        
+        # Get organization name if applicable
+        organization_name = None
+        if organization_id:
+            org = db.query(Organization).filter(Organization.id == organization_id).first()
+            organization_name = org.name if org else None
+        
+        return {
+            "success": True,
+            "message": f"Quarterly prediction created for {request.company_symbol}",
+            "prediction": {
+                "id": str(prediction.id),
+                "company_id": str(company.id),
+                "company_symbol": request.company_symbol,
+                "company_name": request.company_name,
+                "sector": request.sector,
+                "market_cap": float(request.market_cap),
+                "reporting_year": request.reporting_year,
+                "reporting_quarter": request.reporting_quarter,
+                
+                # Financial input ratios
+                "total_debt_to_ebitda": float(request.total_debt_to_ebitda),
+                "sga_margin": float(request.sga_margin),
+                "long_term_debt_to_total_capital": float(request.long_term_debt_to_total_capital),
+                "return_on_capital": float(request.return_on_capital),
+                
+                # ML prediction results
+                "logistic_probability": float(ml_result.get('logistic_probability', 0)),
+                "gbm_probability": float(ml_result.get('gbm_probability', 0)),
+                "ensemble_probability": float(ml_result.get('ensemble_probability', 0)),
+                "risk_level": ml_result['risk_level'],
+                "confidence": float(ml_result['confidence']),
+                
+                # Simplified access control
+                "access_level": access_level,
+                "organization_id": str(organization_id) if organization_id else None,
+                "organization_name": organization_name,
+                "created_by": str(current_user.id),
+                "created_by_email": current_user.email,
+                "created_at": prediction.created_at.isoformat()
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error creating quarterly prediction: {str(e)}")
         
         # Prepare data for ML model
         financial_data = {
@@ -497,11 +506,12 @@ async def create_quarterly_prediction(
                 "risk_level": ml_result['risk_level'],
                 "confidence": float(ml_result['confidence']),
                 
-                # Organization context
-                "organization_id": str(final_org_id) if final_org_id else None,
+                # Simplified access control
+                "access_level": access_level,
+                "organization_id": str(organization_id) if organization_id else None,
                 "organization_name": organization_name,
-                "organization_access": "global" if company.is_global else ("organization" if final_org_id else "personal"),
-                "created_by": current_user.email,
+                "created_by": str(current_user.id),
+                "created_by_email": current_user.email,
                 "created_at": prediction.created_at.isoformat()
             }
         }
@@ -525,19 +535,16 @@ async def get_annual_predictions(
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
-    """Get paginated annual predictions with filtering"""
+    """Get paginated annual predictions with simplified 3-level access control"""
     try:
-        # Check permissions (allow regular users to view predictions)
+        # Check permissions
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
                 detail="Authentication required to view predictions"
             )
 
-        # Get organization context for access control
-        organization_id = get_organization_context(current_user)
-        
-        # Build query with access control using joins for performance
+        # Build query with joins for performance
         query = db.query(
             AnnualPrediction,
             Company,
@@ -551,32 +558,10 @@ async def get_annual_predictions(
             User, AnnualPrediction.created_by == User.id
         )
         
-        # Apply organization-based access control directly
-        if current_user.role == "super_admin":
-            # Super admin can see everything - no additional filters needed
-            pass
-        elif current_user.organization_id:
-            # Users with organization see their org data + global data (if allowed) + their own private data
-            user_org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
-            
-            conditions = [
-                AnnualPrediction.organization_id == current_user.organization_id,  # Org data
-                and_(AnnualPrediction.created_by == str(current_user.id), AnnualPrediction.organization_id.is_(None))  # Own private data
-            ]
-            
-            if user_org and user_org.allow_global_data_access:
-                # Add global data if organization allows it
-                conditions.append(and_(AnnualPrediction.organization_id.is_(None), Company.is_global == True))
-            
-            query = query.filter(or_(*conditions))
-        else:
-            # Users without organization see their own private data + global data
-            query = query.filter(
-                or_(
-                    and_(AnnualPrediction.created_by == str(current_user.id), AnnualPrediction.organization_id.is_(None)),  # Own private data
-                    and_(AnnualPrediction.organization_id.is_(None), Company.is_global == True)  # Global data
-                )
-            )
+        # Apply simplified 3-level access control
+        access_filter = get_data_access_filter(current_user, AnnualPrediction)
+        if access_filter is not None:
+            query = query.filter(access_filter)
         
         # Apply additional filters
         if company_symbol:
@@ -589,7 +574,7 @@ async def get_annual_predictions(
         skip = (page - 1) * size
         results = query.offset(skip).limit(size).all()
         
-        # Format response with pre-loaded data
+        # Format response with simplified access control info
         prediction_data = []
         for pred, company, organization, creator in results:            
             prediction_data.append({
@@ -614,10 +599,10 @@ async def get_annual_predictions(
                 "risk_level": pred.risk_level,
                 "confidence": safe_float(pred.confidence),
                 
-                # Organization context (from joins)
+                # Simplified access control
+                "access_level": pred.access_level,
                 "organization_id": str(pred.organization_id) if pred.organization_id else None,
                 "organization_name": organization.name if organization else None,
-                "organization_access": "global" if company.is_global else ("organization" if pred.organization_id else "personal"),
                 "created_by": str(pred.created_by),
                 "created_by_email": creator.email if creator else None,
                 "created_at": pred.created_at.isoformat(),
@@ -650,19 +635,16 @@ async def get_quarterly_predictions(
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
-    """Get paginated quarterly predictions with filtering"""
+    """Get paginated quarterly predictions with simplified 3-level access control"""
     try:
-        # Check permissions (allow regular users to view predictions)
+        # Check permissions
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
                 detail="Authentication required to view predictions"
             )
 
-        # Get organization context for access control
-        organization_context = get_organization_context(current_user)
-        
-        # Optimized query with joins to prevent N+1 queries
+        # Optimized query with joins
         query = db.query(
             QuarterlyPrediction,
             Company,
@@ -676,32 +658,10 @@ async def get_quarterly_predictions(
             User, QuarterlyPrediction.created_by == User.id
         )
         
-        # Apply organization-based access control directly
-        if current_user.role == "super_admin":
-            # Super admin can see everything - no additional filters needed
-            pass
-        elif current_user.organization_id:
-            # Users with organization see their org data + global data (if allowed) + their own private data
-            user_org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
-            
-            conditions = [
-                QuarterlyPrediction.organization_id == current_user.organization_id,  # Org data
-                and_(QuarterlyPrediction.created_by == str(current_user.id), QuarterlyPrediction.organization_id.is_(None))  # Own private data
-            ]
-            
-            if user_org and user_org.allow_global_data_access:
-                # Add global data if organization allows it
-                conditions.append(and_(QuarterlyPrediction.organization_id.is_(None), Company.is_global == True))
-            
-            query = query.filter(or_(*conditions))
-        else:
-            # Users without organization see their own private data + global data
-            query = query.filter(
-                or_(
-                    and_(QuarterlyPrediction.created_by == str(current_user.id), QuarterlyPrediction.organization_id.is_(None)),  # Own private data
-                    and_(QuarterlyPrediction.organization_id.is_(None), Company.is_global == True)  # Global data
-                )
-            )
+        # Apply simplified 3-level access control
+        access_filter = get_data_access_filter(current_user, QuarterlyPrediction)
+        if access_filter is not None:
+            query = query.filter(access_filter)
         # Apply additional filters
         if company_symbol:
             query = query.filter(Company.symbol.ilike(f"%{company_symbol}%"))
@@ -715,7 +675,7 @@ async def get_quarterly_predictions(
         skip = (page - 1) * size
         results = query.offset(skip).limit(size).all()
         
-        # Format response from joined results
+        # Format response with simplified access control
         prediction_data = []
         for pred, company, organization, creator in results:
             prediction_data.append({
@@ -741,10 +701,10 @@ async def get_quarterly_predictions(
                 "risk_level": pred.risk_level,
                 "confidence": safe_float(pred.confidence),
                 
-                # Organization context
+                # Simplified access control
+                "access_level": pred.access_level,
                 "organization_id": str(pred.organization_id) if pred.organization_id else None,
                 "organization_name": organization.name if organization else None,
-                "organization_access": "global" if company.is_global else ("organization" if pred.organization_id else "personal"),
                 "created_by": str(pred.created_by),
                 "created_by_email": creator.email if creator else None,
                 "created_at": pred.created_at.isoformat(),
@@ -781,10 +741,10 @@ async def bulk_upload_predictions(
     """Bulk upload predictions from CSV file"""
     try:
         # Check permissions
-        if not check_user_permissions(current_user, "org_admin"):
+        if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
-                detail="You need to be an organization admin or higher for bulk uploads"
+                detail="Authentication required to upload predictions"
             )
 
         # Validate file type
@@ -803,15 +763,15 @@ async def bulk_upload_predictions(
         
         # Get organization context
         organization_context = get_organization_context(current_user)
-        is_global = current_user.role == "super_admin"
+        access_level = get_user_access_level(current_user)
         
         # Determine final organization_id for predictions
         if current_user.role == "super_admin":
-            final_org_id = None  # Global predictions
+            final_org_id = None  # System-level predictions
         elif current_user.organization_id:
             final_org_id = current_user.organization_id  # Organization predictions
         else:
-            final_org_id = None  # User-specific predictions (no org)
+            final_org_id = None  # Personal predictions (no org)
         
         results = {
             "success": True,
@@ -831,9 +791,7 @@ async def bulk_upload_predictions(
                     company_name=row['company_name'],
                     market_cap=float(row['market_cap']),
                     sector=row['sector'],
-                    organization_id=organization_context,
-                    created_by=str(current_user.id),
-                    is_global=is_global
+                    user=current_user
                 )
                 
                 if prediction_type == "annual":
@@ -975,10 +933,10 @@ async def bulk_upload_annual_async(
     """Async bulk upload annual predictions with job tracking"""
     try:
         # Check permissions
-        if not check_user_permissions(current_user, "org_member"):
+        if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
-                detail="You need to be an organization member or higher to create predictions"
+                detail="Authentication required to create predictions"
             )
 
         # Validate file type
@@ -1078,10 +1036,10 @@ async def bulk_upload_quarterly_async(
     """Async bulk upload quarterly predictions with job tracking"""
     try:
         # Check permissions
-        if not check_user_permissions(current_user, "org_member"):
+        if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
-                detail="You need to be an organization member or higher to create predictions"
+                detail="Authentication required to create predictions"
             )
 
         # Validate file type
@@ -1093,15 +1051,15 @@ async def bulk_upload_quarterly_async(
 
         # Get organization context
         organization_context = get_organization_context(current_user)
-        is_global = current_user.role == "super_admin"
+        access_level = get_user_access_level(current_user)
         
         # Determine final organization_id for predictions
         if current_user.role == "super_admin":
-            final_org_id = None  # Global predictions
+            final_org_id = None  # System-level predictions
         elif current_user.organization_id:
             final_org_id = current_user.organization_id  # Organization predictions
         else:
-            final_org_id = None  # User-specific predictions (no org)
+            final_org_id = None  # Personal predictions (no org)
         
         # Read and validate file
         contents = await file.read()
@@ -1180,10 +1138,10 @@ async def get_bulk_upload_job_status(
     """Get the status of a bulk upload job"""
     try:
         # Check permissions
-        if not check_user_permissions(current_user, "org_member"):
+        if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
-                detail="You need to be an organization member or higher to view job status"
+                detail="Authentication required to view job status"
             )
 
         from app.services.celery_bulk_upload_service import celery_bulk_upload_service
@@ -1214,10 +1172,10 @@ async def list_bulk_upload_jobs(
     """List bulk upload jobs for the current user/organization"""
     try:
         # Check permissions
-        if not check_user_permissions(current_user, "org_member"):
+        if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
-                detail="You need to be an organization member or higher to view jobs"
+                detail="Authentication required to view jobs"
             )
 
         # Get organization context
@@ -1300,10 +1258,10 @@ async def update_annual_prediction(
     """Update an existing annual prediction"""
     try:
         # Check permissions
-        if not check_user_permissions(current_user, "org_member"):
+        if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
-                detail="You need to be an organization member or higher to update predictions"
+                detail="Authentication required to update predictions"
             )
 
         # Get organization context
@@ -1365,8 +1323,8 @@ async def update_annual_prediction(
             org = db.query(Organization).filter(Organization.id == prediction.organization_id).first()
             organization_name = org.name if org else None
         
-        # Determine if this is global access
-        is_global = prediction.organization_id is None
+        # Use the new access level system
+        access_level = prediction.access_level
         
         return {
             "success": True,
@@ -1397,7 +1355,7 @@ async def update_annual_prediction(
                 # Organization context
                 "organization_id": str(prediction.organization_id) if prediction.organization_id else None,
                 "organization_name": organization_name,
-                "organization_access": "global" if is_global else "organization",
+                "access_level": access_level,
                 "created_by": str(prediction.created_by),
                 "created_by_email": current_user.email,
                 "created_at": prediction.created_at.isoformat(),
@@ -1465,10 +1423,10 @@ async def update_quarterly_prediction(
     """Update an existing quarterly prediction"""
     try:
         # Check permissions
-        if not check_user_permissions(current_user, "org_member"):
+        if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
-                detail="You need to be an organization member or higher to update predictions"
+                detail="Authentication required to update predictions"
             )
 
         # Get organization context
@@ -1530,8 +1488,8 @@ async def update_quarterly_prediction(
             org = db.query(Organization).filter(Organization.id == prediction.organization_id).first()
             organization_name = org.name if org else None
         
-        # Determine if this is global access
-        is_global = prediction.organization_id is None
+        # Use the new access level system
+        access_level = prediction.access_level
         
         return {
             "success": True,
@@ -1563,7 +1521,7 @@ async def update_quarterly_prediction(
                 # Organization context
                 "organization_id": str(prediction.organization_id) if prediction.organization_id else None,
                 "organization_name": organization_name,
-                "organization_access": "global" if is_global else "organization",
+                "access_level": access_level,
                 "created_by": str(prediction.created_by),
                 "created_by_email": current_user.email,
                 "created_at": prediction.created_at.isoformat(),

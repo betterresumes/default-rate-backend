@@ -95,7 +95,6 @@ DATA_CONFIG = {
             "domain": "risk.fintech-solutions.com",
             "description": "Specialized team for credit risk analysis and default prediction modeling",
             "default_role": "org_member",
-            "allow_global_data_access": True,
             
             # Organization Admin
             "admin": {
@@ -130,7 +129,6 @@ DATA_CONFIG = {
             "domain": "credit.fintech-solutions.com",
             "description": "Advanced analytics team focused on credit scoring and financial modeling",
             "default_role": "org_member",
-            "allow_global_data_access": False,
             
             # Organization Admin
             "admin": {
@@ -246,7 +244,6 @@ def create_organization_with_users(db, org_config, tenant_id, tenant_admin_id):
         join_token=generate_join_token(),
         join_enabled=True,
         default_role=org_config["default_role"],
-        allow_global_data_access=org_config["allow_global_data_access"],
         max_users=500,
         is_active=True,
         created_by=tenant_admin_id,
@@ -372,7 +369,6 @@ def print_setup_summary(super_admin, tenant, tenant_admin, organizations_data):
         print(f"\n🏛️  ORGANIZATION {i}: {org.name}")
         print(f"   🌐 Domain: {org.domain}")
         print(f"   🔗 Join Token: {org.join_token}")
-        print(f"   🌍 Global Data Access: {'Yes' if org.allow_global_data_access else 'No'}")
         
         print(f"\n   👨‍💼 ORGANIZATION ADMIN:")
         print(f"      📧 Email: {admin.email}")

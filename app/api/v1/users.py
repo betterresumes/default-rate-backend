@@ -152,7 +152,6 @@ async def get_current_user_profile_me(
                             "slug": org.slug,
                             "domain": org.domain,
                             "is_active": org.is_active,
-                            "allow_global_data_access": org.allow_global_data_access,
                             "member_count": db.query(User).filter(User.organization_id == org.id).count(),
                             "admin_email": db.query(User).filter(
                                 and_(User.organization_id == org.id, User.role == "org_admin")
@@ -208,7 +207,6 @@ async def get_current_user_profile_me(
                         "domain": organization.domain,
                         "description": organization.description,
                         "is_active": organization.is_active,
-                        "allow_global_data_access": organization.allow_global_data_access,
                         "join_enabled": organization.join_enabled,
                         "default_role": organization.default_role,
                         "max_users": organization.max_users,
