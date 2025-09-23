@@ -11,14 +11,10 @@ cd "$(dirname "$0")/../.."
 # Set environment variables
 export PYTHONPATH="$(pwd):${PYTHONPATH}"
 
-# macOS fork safety fix
-export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
-
-# Start Celery worker with macOS-compatible settings
+# Start Celery worker with production settings
 exec celery -A app.workers.celery_app worker \
     --loglevel=info \
     --concurrency=2 \
-    --pool=threads \
     --queues=bulk_predictions \
     --hostname=worker@%h \
     --max-tasks-per-child=100 \

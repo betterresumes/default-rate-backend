@@ -56,16 +56,7 @@ class MLModelService:
                 low, high = iv
                 if low < x <= high:
                     return rates[idx]
-            
-            # FIXED: Instead of returning None, handle out-of-range values
-            # If value doesn't fall in any bin, treat it as missing and assign missing rate
-            if "Missing" in intervals:
-                return rates[intervals.index("Missing")]
-            else:
-                # If no "Missing" category, use the rate from the first non-missing interval
-                # This provides a sensible fallback for extreme values
-                non_missing_rates = [rate for idx, rate in enumerate(rates) if intervals[idx] != "Missing"]
-                return non_missing_rates[0] if non_missing_rates else 0.0
+            return None  # in case it doesn't fall in any bin
 
         prefix = 'bin_'
         new_column_name = f"{prefix}{value_col}"

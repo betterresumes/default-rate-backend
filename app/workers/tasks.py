@@ -1,4 +1,5 @@
 import os
+import sys
 import pandas as pd
 import time
 import traceback
@@ -9,6 +10,11 @@ import uuid
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from celery import current_task
+
+# macOS fork safety fix
+if sys.platform == "darwin":
+    os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
+
 from ..workers.celery_app import celery_app
 from ..core.database import get_session_local, BulkUploadJob, Company, AnnualPrediction, QuarterlyPrediction, User, Organization
 from ..services.ml_service import ml_model
@@ -29,54 +35,6 @@ def safe_float(value):
         return float_val
     except (ValueError, TypeError):
         return 0
-
-
-def safe_quarter(value):
-    """Convert quarter value to integer, handling Q1, Q2, Q3, Q4 format"""
-    if value is None or value == '':
-        return None
-    
-    # Handle string values
-    if isinstance(value, str):
-        value = value.strip().upper()
-        
-        # Handle Q1, Q2, Q3, Q4 format
-        if value.startswith('Q') and len(value) == 2:
-            try:
-                quarter_num = int(value[1])
-                if 1 <= quarter_num <= 4:
-                    return quarter_num
-            except ValueError:
-                pass
-        
-        # Handle direct number strings
-        try:
-            quarter_num = int(value)
-            if 1 <= quarter_num <= 4:
-                return quarter_num
-        except ValueError:
-            pass
-    
-    # Handle integer values
-    elif isinstance(value, int):
-        if 1 <= value <= 4:
-            return value
-    
-    # Return None for invalid values
-    return None
-
-
-def format_quarter_display(quarter_int):
-    """Convert integer quarter to display format Q1, Q2, Q3, Q4"""
-    if quarter_int is None:
-        return None
-    try:
-        quarter_num = int(quarter_int)
-        if 1 <= quarter_num <= 4:
-            return f"Q{quarter_num}"
-    except (ValueError, TypeError):
-        pass
-    return None
 
 
 def update_job_status(
@@ -126,47 +84,38 @@ def update_job_status(
 
 
 def create_or_get_company(db, symbol: str, name: str, market_cap: float, sector: str, organization_id: Optional[str], user_id: str) -> Company:
-    """Create or get company with simplified 3-level access control"""
-    
-    # Get user to determine access level
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise Exception("User not found")
-    
-    # Determine access level based on user role and organization
-    if user.role == "super_admin":
-        access_level = "system"
-        final_org_id = None  # System-wide
-    elif user.role in ["org_admin", "org_member"] and user.organization_id:
-        access_level = "organization" 
-        final_org_id = user.organization_id
+    """Create or get company with organization scoping"""
+    # Check for existing company in organization scope
+    if organization_id:
+        company = db.query(Company).filter(
+            Company.symbol == symbol.upper(),
+            Company.organization_id == organization_id
+        ).first()
     else:
-        access_level = "personal"
-        final_org_id = None  # Personal to the user
-    
-    # Check for existing company in the same access scope
-    query = db.query(Company).filter(
-        Company.symbol == symbol.upper(),
-        Company.access_level == access_level
-    )
-    
-    if access_level == "organization" and final_org_id:
-        query = query.filter(Company.organization_id == final_org_id)
-    elif access_level == "personal":
-        query = query.filter(Company.created_by == str(user_id))
-    
-    company = query.first()
+        # Global scope
+        company = db.query(Company).filter(
+            Company.symbol == symbol.upper(),
+            Company.organization_id.is_(None)
+        ).first()
     
     if not company:
-        # Create new company with access level
+        # Check if user can create global companies
+        is_global = False
+        if organization_id is None:
+            user = db.query(User).filter(User.id == user_id).first()
+            if user and user.role == "super_admin":
+                is_global = True
+            else:
+                raise Exception("Only super admin can create global companies")
+        
         company = Company(
             symbol=symbol.upper(),
             name=name,
             market_cap=safe_float(market_cap) * 1_000_000,  # Convert to actual value
             sector=sector,
-            access_level=access_level,
-            organization_id=final_org_id,
-            created_by=str(user_id)
+            organization_id=organization_id,
+            created_by=user_id,
+            is_global=is_global
         )
         db.add(company)
         db.flush()  # Get the ID without committing
@@ -208,22 +157,6 @@ def process_annual_bulk_upload_task(
     SessionLocal = get_session_local()
     db = SessionLocal()
     
-    # Get user to determine access level for predictions
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        db.close()
-        raise Exception("User not found")
-    
-    # Determine access level based on user role
-    if user.role == "super_admin":
-        access_level = "system"
-    elif user.role == "tenant_admin":
-        access_level = "organization"  # Tenant admin can see all orgs within tenant
-    elif user.role in ["org_admin", "org_member"] and user.organization_id:
-        access_level = "organization"
-    else:
-        access_level = "personal"
-    
     successful_rows = 0
     failed_rows = 0
     error_details = []
@@ -256,12 +189,12 @@ def process_annual_bulk_upload_task(
                 # Check if prediction already exists
                 existing_query = db.query(AnnualPrediction).filter(
                     AnnualPrediction.company_id == company.id,
-                    AnnualPrediction.reporting_year == str(int(row['reporting_year']))
+                    AnnualPrediction.reporting_year == str(row['reporting_year'])
                 )
                 
                 if row.get('reporting_quarter'):
                     existing_query = existing_query.filter(
-                        AnnualPrediction.reporting_quarter == format_quarter_display(safe_quarter(row['reporting_quarter']))
+                        AnnualPrediction.reporting_quarter == row['reporting_quarter']
                     )
                 else:
                     existing_query = existing_query.filter(
@@ -294,9 +227,8 @@ def process_annual_bulk_upload_task(
                     id=uuid.uuid4(),
                     company_id=company.id,
                     organization_id=organization_id,
-                    access_level=access_level,
-                    reporting_year=str(int(row['reporting_year'])),
-                    reporting_quarter=format_quarter_display(safe_quarter(row.get('reporting_quarter'))) if safe_quarter(row.get('reporting_quarter')) else None,
+                    reporting_year=str(row['reporting_year']),
+                    reporting_quarter=row.get('reporting_quarter') if row.get('reporting_quarter') else None,
                     long_term_debt_to_total_capital=safe_float(row['long_term_debt_to_total_capital']),
                     total_debt_to_ebitda=safe_float(row['total_debt_to_ebitda']),
                     net_income_margin=safe_float(row['net_income_margin']),
@@ -430,22 +362,6 @@ def process_quarterly_bulk_upload_task(
     SessionLocal = get_session_local()
     db = SessionLocal()
     
-    # Get user to determine access level for predictions
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        db.close()
-        raise Exception("User not found")
-    
-    # Determine access level based on user role
-    if user.role == "super_admin":
-        access_level = "system"
-    elif user.role == "tenant_admin":
-        access_level = "organization"  # Tenant admin can see all orgs within tenant
-    elif user.role in ["org_admin", "org_member"] and user.organization_id:
-        access_level = "organization"
-    else:
-        access_level = "personal"
-    
     successful_rows = 0
     failed_rows = 0
     error_details = []
@@ -478,8 +394,8 @@ def process_quarterly_bulk_upload_task(
                 # Check if prediction already exists
                 existing_prediction = db.query(QuarterlyPrediction).filter(
                     QuarterlyPrediction.company_id == company.id,
-                    QuarterlyPrediction.reporting_year == str(int(row['reporting_year'])),
-                    QuarterlyPrediction.reporting_quarter == format_quarter_display(safe_quarter(row['reporting_quarter']))
+                    QuarterlyPrediction.reporting_year == str(row['reporting_year']),
+                    QuarterlyPrediction.reporting_quarter == row['reporting_quarter']
                 ).first()
                 
                 if existing_prediction:
@@ -506,9 +422,8 @@ def process_quarterly_bulk_upload_task(
                     id=uuid.uuid4(),
                     company_id=company.id,
                     organization_id=organization_id,
-                    access_level=access_level,
-                    reporting_year=str(int(row['reporting_year'])),
-                    reporting_quarter=format_quarter_display(safe_quarter(row['reporting_quarter'])),
+                    reporting_year=str(row['reporting_year']),
+                    reporting_quarter=row['reporting_quarter'],
                     total_debt_to_ebitda=safe_float(row['total_debt_to_ebitda']),
                     sga_margin=safe_float(row['sga_margin']),
                     long_term_debt_to_total_capital=safe_float(row['long_term_debt_to_total_capital']),
@@ -1269,11 +1184,6 @@ def process_quarterly_bulk_task(file_content_b64: str, original_filename: str, o
                         organization_id=organization_id,
                         created_by=created_by
                     )
-                else:
-                    # Update existing company details
-                    company.name = company_name
-                    company.sector = str(row.get('sector', '')).strip() or None
-                    company.market_cap = safe_float(row.get('market_cap', 0))
                 
                 # Check if prediction already exists
                 existing_prediction = company_service.get_quarterly_prediction(
