@@ -46,6 +46,21 @@ celery_app.conf.update(
     worker_disable_rate_limits=False,
     task_default_queue="bulk_predictions",
     
+    # Fix for exception serialization issues
+    result_accept_content=["json"],
+    result_backend_transport_options={
+        "master_name": "mymaster",
+        "retry_on_timeout": True,
+        "connection_pool_kwargs": {
+            "retry_on_timeout": True,
+        }
+    },
+    
+    # Additional error handling configuration
+    task_reject_on_worker_lost=True,
+    task_ignore_result=False,
+    result_persistent=True,
+    
     # macOS specific fixes
     worker_pool="solo" if sys.platform == "darwin" else "prefork",
     worker_concurrency=1 if sys.platform == "darwin" else None,

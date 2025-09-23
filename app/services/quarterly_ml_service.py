@@ -44,21 +44,31 @@ class QuarterlyMLModelService:
 
     def binned_runscoring(self, df: pd.DataFrame, value_col: str, scoring_info: Dict) -> pd.DataFrame:
         """Apply binned scoring to a column based on scoring information"""
-        df[value_col] = pd.to_numeric(df[value_col].replace('NM', np.nan), errors='coerce')
+        # Handle None values first, then replace 'NM' with NaN and convert to numeric
+        df[value_col] = df[value_col].replace([None, 'NM', 'N/A', ''], np.nan)
+        df[value_col] = pd.to_numeric(df[value_col], errors='coerce')
 
         intervals = scoring_info[value_col]['intervals']
         rates = scoring_info[value_col]['rates']
 
         def assign_rate(x):
-            if pd.isna(x):
-                return rates[intervals.index("Missing")]
+            if pd.isna(x) or x is None:
+                # Find "Missing" category in intervals
+                if "Missing" in intervals:
+                    return rates[intervals.index("Missing")]
+                else:
+                    # If no "Missing" category, use first rate as default
+                    return rates[0] if rates else 0.0
             for idx, iv in enumerate(intervals):
                 if iv == "Missing":
                     continue
                 low, high = iv
                 if low < x <= high:
                     return rates[idx]
-            return None  
+            # If value doesn't fall in any bin, use the closest rate or first rate
+            if rates:
+                return rates[0]  # Use first rate as default
+            return 0.0  # Ultimate fallback
 
         prefix = 'bin_'
         new_column_name = f"{prefix}{value_col}"
@@ -144,12 +154,35 @@ class QuarterlyMLModelService:
             ]
 
             X_logistic = df_binned[binned_features]
+            
+            # Check for NaN values in the logistic feature matrix
+            if X_logistic.isnull().any().any():
+                print(f"❌ Warning: NaN values found in logistic features: {X_logistic.isnull().sum()}")
+                # Fill NaN values with default rates from scoring_info
+                for feature in binned_features:
+                    if X_logistic[feature].isnull().any():
+                        # Extract the corresponding scoring info column name
+                        original_col = feature.replace('bin_', '')
+                        if original_col in self.scoring_info and 'rates' in self.scoring_info[original_col]:
+                            rates = self.scoring_info[original_col]['rates']
+                            default_value = rates[0] if rates else 0.0
+                            X_logistic[feature] = X_logistic[feature].fillna(default_value)
+                            print(f"Filled NaN in {feature} with default value: {default_value}")
+            
             logistic_probability = self.logistic_model.predict_proba(X_logistic)[:, 1][0]
 
             X_gbm = df[single_variables]
+            
+            # Check for NaN values in the GBM feature matrix
+            if X_gbm.isnull().any().any():
+                print(f"❌ Warning: NaN values found in GBM features: {X_gbm.isnull().sum()}")
+                # Fill NaN values with 0 for GBM (it might handle NaN better, but let's be safe)
+                X_gbm = X_gbm.fillna(0)
+            
             gbm_probability = self.gbm_model.predict(X_gbm)[0]
 
-            ensemble_probability = (logistic_probability + gbm_probability) / 2
+            # Use only logistic probability as main probability per user request
+            ensemble_probability = logistic_probability  # Changed from averaging both models
 
             probability_percentage = ensemble_probability * 100
 

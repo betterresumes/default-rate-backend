@@ -56,7 +56,10 @@ class MLModelService:
                 low, high = iv
                 if low < x <= high:
                     return rates[idx]
-            return None  # in case it doesn't fall in any bin
+            # If value doesn't fall in any bin, use the closest rate or first rate
+            if rates:
+                return rates[0]  # Use first rate as default
+            return 0.0  # Ultimate fallback
 
         prefix = 'bin_'
         new_column_name = f"{prefix}{value_col}"
@@ -150,6 +153,21 @@ class MLModelService:
 
             # Prepare the feature matrix
             X = df[features]
+            
+            # Check for NaN values in the feature matrix
+            if X.isnull().any().any():
+                print(f"❌ Warning: NaN values found in features: {X.isnull().sum()}")
+                # Fill NaN values with the mean rate from scoring_info for each feature
+                for feature in features:
+                    if X[feature].isnull().any():
+                        # Extract the corresponding scoring info column name
+                        original_col = feature.replace('bin_', '')
+                        if original_col in self.scoring_info and 'rates' in self.scoring_info[original_col]:
+                            rates = self.scoring_info[original_col]['rates']
+                            # Use the first rate (typically the lowest risk rate) as default
+                            default_value = rates[0] if rates else 0.0
+                            X[feature] = X[feature].fillna(default_value)
+                            print(f"Filled NaN in {feature} with default value: {default_value}")
 
             # Make prediction
             probability = self.model.predict_proba(X)[:, 1][0]

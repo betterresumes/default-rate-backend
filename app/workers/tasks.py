@@ -85,37 +85,44 @@ def update_job_status(
 
 def create_or_get_company(db, symbol: str, name: str, market_cap: float, sector: str, organization_id: Optional[str], user_id: str) -> Company:
     """Create or get company with organization scoping"""
-    # Check for existing company in organization scope
+    # Determine access level based on user and organization context
     if organization_id:
+        # Organization-scoped company
+        access_level = "organization"
         company = db.query(Company).filter(
             Company.symbol == symbol.upper(),
-            Company.organization_id == organization_id
+            Company.organization_id == organization_id,
+            Company.access_level == "organization"
         ).first()
     else:
-        # Global scope
-        company = db.query(Company).filter(
-            Company.symbol == symbol.upper(),
-            Company.organization_id.is_(None)
-        ).first()
+        # For organization_id=None, determine if system or personal level
+        user = db.query(User).filter(User.id == user_id).first()
+        if user and user.role == "super_admin":
+            # Super admin creates system-level companies
+            access_level = "system"
+            company = db.query(Company).filter(
+                Company.symbol == symbol.upper(),
+                Company.access_level == "system"
+            ).first()
+        else:
+            # Non-super-admin creates personal companies
+            access_level = "personal"
+            company = db.query(Company).filter(
+                Company.symbol == symbol.upper(),
+                Company.organization_id.is_(None),
+                Company.access_level == "personal",
+                Company.created_by == user_id
+            ).first()
     
     if not company:
-        # Check if user can create global companies
-        is_global = False
-        if organization_id is None:
-            user = db.query(User).filter(User.id == user_id).first()
-            if user and user.role == "super_admin":
-                is_global = True
-            else:
-                raise Exception("Only super admin can create global companies")
-        
         company = Company(
             symbol=symbol.upper(),
             name=name,
             market_cap=safe_float(market_cap) * 1_000_000,  # Convert to actual value
             sector=sector,
             organization_id=organization_id,
-            created_by=user_id,
-            is_global=is_global
+            access_level=access_level,
+            created_by=user_id
         )
         db.add(company)
         db.flush()  # Get the ID without committing
@@ -222,11 +229,22 @@ def process_annual_bulk_upload_task(
                 # Get ML prediction (direct call in Celery task)
                 ml_result = ml_model.predict_default_probability(financial_data)
                 
+                # Determine access level based on user and organization
+                if organization_id:
+                    access_level = "organization"
+                else:
+                    user = db.query(User).filter(User.id == user_id).first()
+                    if user and user.role == "super_admin":
+                        access_level = "system"
+                    else:
+                        access_level = "personal"
+                
                 # Create prediction
                 prediction = AnnualPrediction(
                     id=uuid.uuid4(),
                     company_id=company.id,
                     organization_id=organization_id,
+                    access_level=access_level,
                     reporting_year=str(row['reporting_year']),
                     reporting_quarter=row.get('reporting_quarter') if row.get('reporting_quarter') else None,
                     long_term_debt_to_total_capital=safe_float(row['long_term_debt_to_total_capital']),
@@ -310,6 +328,7 @@ def process_annual_bulk_upload_task(
         db.rollback()
         error_msg = str(e)
         logger.error(f"Bulk upload job {job_id} failed: {error_msg}")
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         
         update_job_status(
             job_id,
@@ -327,8 +346,16 @@ def process_annual_bulk_upload_task(
             }
         )
         
-        raise Exception(f"Annual bulk upload failed: {error_msg}")
-        
+        # Return error result instead of raising exception to avoid serialization issues
+        return {
+            "status": "failed",
+            "job_id": job_id,
+            "error": error_msg,
+            "total_rows": total_rows,
+            "successful_rows": successful_rows,
+            "failed_rows": failed_rows
+        }
+    
     finally:
         db.close()
 
@@ -417,11 +444,22 @@ def process_quarterly_bulk_upload_task(
                 # Get ML prediction (direct call in Celery task)
                 ml_result = quarterly_ml_model.predict_quarterly_default_probability(financial_data)
                 
+                # Determine access level based on user and organization
+                if organization_id:
+                    access_level = "organization"
+                else:
+                    user = db.query(User).filter(User.id == user_id).first()
+                    if user and user.role == "super_admin":
+                        access_level = "system"
+                    else:
+                        access_level = "personal"
+                
                 # Create prediction
                 prediction = QuarterlyPrediction(
                     id=uuid.uuid4(),
                     company_id=company.id,
                     organization_id=organization_id,
+                    access_level=access_level,
                     reporting_year=str(row['reporting_year']),
                     reporting_quarter=row['reporting_quarter'],
                     total_debt_to_ebitda=safe_float(row['total_debt_to_ebitda']),
@@ -523,7 +561,15 @@ def process_quarterly_bulk_upload_task(
             }
         )
         
-        raise Exception(f"Quarterly bulk upload failed: {error_msg}")
+        # Return error result instead of raising exception to avoid serialization issues
+        return {
+            "status": "failed",
+            "job_id": job_id,
+            "error": error_msg,
+            "total_rows": len(data) if 'data' in locals() else 0,
+            "successful_rows": successful_rows,
+            "failed_rows": failed_rows
+        }
         
     finally:
         db.close()
