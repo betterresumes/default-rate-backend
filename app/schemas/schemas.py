@@ -61,6 +61,24 @@ class UserLogin(BaseModel):
     email: EmailStr
     password: str
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=8)
+    
+    @validator('new_password')
+    def validate_new_password(cls, v):
+        if len(v) < 8:
+            raise ValueError('New password must be at least 8 characters long')
+        if not any(c.isalpha() for c in v):
+            raise ValueError('New password must contain at least one letter')
+        if not any(c.isdigit() for c in v):
+            raise ValueError('New password must contain at least one number')
+        return v
+
+class ChangePasswordResponse(BaseModel):
+    success: bool
+    message: str
+
 class UserUpdate(BaseModel):
     username: Optional[str] = None
     full_name: Optional[str] = None

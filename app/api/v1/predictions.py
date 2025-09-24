@@ -36,12 +36,12 @@ def get_user_access_level(user: User):
     else:
         return "personal"  # Personal data only
 
-def get_data_access_filter(user: User, prediction_model):
-    """Get simple 3-level access filter for predictions"""
+def get_data_access_filter(user: User, prediction_model, include_system: bool = False):
+    """Get access filter for predictions - excludes system data by default"""
     conditions = []
     
-    if user.role == "super_admin":
-        # Super admin sees everything
+    if user.role == "super_admin" and include_system:
+        # Super admin sees everything only when specifically requesting system data
         return None
     
     # Personal data: only what the user created
@@ -61,8 +61,9 @@ def get_data_access_filter(user: User, prediction_model):
             )
         )
     
-    # System data: everyone can see it
-    conditions.append(prediction_model.access_level == "system")
+    # System data: only include if explicitly requested
+    if include_system:
+        conditions.append(prediction_model.access_level == "system")
     
     return or_(*conditions)
 
@@ -535,7 +536,7 @@ async def get_annual_predictions(
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
-    """Get paginated annual predictions with simplified 3-level access control"""
+    """Get paginated annual predictions (personal + organization data only - excludes system data)"""
     try:
         # Check permissions
         if not check_user_permissions(current_user, "user"):
@@ -558,8 +559,8 @@ async def get_annual_predictions(
             User, AnnualPrediction.created_by == User.id
         )
         
-        # Apply simplified 3-level access control
-        access_filter = get_data_access_filter(current_user, AnnualPrediction)
+        # Apply access control - exclude system data from regular endpoint
+        access_filter = get_data_access_filter(current_user, AnnualPrediction, include_system=False)
         if access_filter is not None:
             query = query.filter(access_filter)
         
@@ -635,7 +636,7 @@ async def get_quarterly_predictions(
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
-    """Get paginated quarterly predictions with simplified 3-level access control"""
+    """Get paginated quarterly predictions (personal + organization data only - excludes system data)"""
     try:
         # Check permissions
         if not check_user_permissions(current_user, "user"):
@@ -658,8 +659,8 @@ async def get_quarterly_predictions(
             User, QuarterlyPrediction.created_by == User.id
         )
         
-        # Apply simplified 3-level access control
-        access_filter = get_data_access_filter(current_user, QuarterlyPrediction)
+        # Apply access control - exclude system data from regular endpoint
+        access_filter = get_data_access_filter(current_user, QuarterlyPrediction, include_system=False)
         if access_filter is not None:
             query = query.filter(access_filter)
         # Apply additional filters
@@ -726,6 +727,231 @@ async def get_quarterly_predictions(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching quarterly predictions: {str(e)}")
+
+# ========================================
+# SYSTEM-LEVEL PREDICTIONS ENDPOINTS
+# ========================================
+
+@router.get("/annual/system", response_model=Dict)
+async def get_system_annual_predictions(
+    page: int = 1,
+    size: int = 10,
+    company_symbol: Optional[str] = None,
+    reporting_year: Optional[str] = None,
+    sector: Optional[str] = None,
+    risk_level: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(current_verified_user)
+):
+    """Get paginated system-level annual predictions (accessible to all user roles)"""
+    try:
+        # Check basic authentication (all roles allowed)
+        if not check_user_permissions(current_user, "user"):
+            raise HTTPException(
+                status_code=403,
+                detail="Authentication required to view system predictions"
+            )
+
+        # Build query with joins for performance - ONLY system-level predictions
+        query = db.query(
+            AnnualPrediction,
+            Company,
+            User
+        ).select_from(AnnualPrediction).join(
+            Company, AnnualPrediction.company_id == Company.id
+        ).outerjoin(
+            User, AnnualPrediction.created_by == User.id
+        ).filter(
+            AnnualPrediction.access_level == "system"  # Only system-level predictions
+        )
+        
+        # Apply additional filters
+        if company_symbol:
+            query = query.filter(Company.symbol.ilike(f"%{company_symbol}%"))
+        if reporting_year:
+            query = query.filter(AnnualPrediction.reporting_year == reporting_year)
+        if sector:
+            query = query.filter(Company.sector.ilike(f"%{sector}%"))
+        if risk_level:
+            query = query.filter(AnnualPrediction.risk_level == risk_level)
+        
+        # Order by created_at desc for latest predictions first
+        query = query.order_by(AnnualPrediction.created_at.desc())
+        
+        # Pagination
+        total = query.count()
+        skip = (page - 1) * size
+        results = query.offset(skip).limit(size).all()
+        
+        # Format response
+        prediction_data = []
+        for pred, company, creator in results:            
+            prediction_data.append({
+                "id": str(pred.id),
+                "company_id": str(company.id),
+                "company_symbol": company.symbol,
+                "company_name": company.name,
+                "sector": company.sector,
+                "market_cap": safe_float(company.market_cap),
+                "reporting_year": pred.reporting_year,
+                "reporting_quarter": pred.reporting_quarter,
+                
+                # Financial input ratios
+                "long_term_debt_to_total_capital": safe_float(pred.long_term_debt_to_total_capital),
+                "total_debt_to_ebitda": safe_float(pred.total_debt_to_ebitda),
+                "net_income_margin": safe_float(pred.net_income_margin),
+                "ebit_to_interest_expense": safe_float(pred.ebit_to_interest_expense),
+                "return_on_assets": safe_float(pred.return_on_assets),
+                
+                # ML prediction results
+                "probability": safe_float(pred.probability),
+                "risk_level": pred.risk_level,
+                "confidence": safe_float(pred.confidence),
+                
+                # System-level metadata
+                "access_level": pred.access_level,
+                "created_by": str(pred.created_by),
+                "created_by_email": creator.email if creator else None,
+                "created_at": pred.created_at.isoformat(),
+                "predicted_at": pred.predicted_at.isoformat() if pred.predicted_at else None
+            })
+        
+        return {
+            "success": True,
+            "message": "System-level annual predictions retrieved successfully",
+            "predictions": prediction_data,
+            "pagination": {
+                "total": total,
+                "page": page,
+                "size": size,
+                "pages": (total + size - 1) // size
+            },
+            "filters": {
+                "access_level": "system",
+                "company_symbol": company_symbol,
+                "reporting_year": reporting_year,
+                "sector": sector,
+                "risk_level": risk_level
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching system annual predictions: {str(e)}")
+
+@router.get("/quarterly/system", response_model=Dict)
+async def get_system_quarterly_predictions(
+    page: int = 1,
+    size: int = 10,
+    company_symbol: Optional[str] = None,
+    reporting_year: Optional[str] = None,
+    reporting_quarter: Optional[str] = None,
+    sector: Optional[str] = None,
+    risk_level: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(current_verified_user)
+):
+    """Get paginated system-level quarterly predictions (accessible to all user roles)"""
+    try:
+        # Check basic authentication (all roles allowed)
+        if not check_user_permissions(current_user, "user"):
+            raise HTTPException(
+                status_code=403,
+                detail="Authentication required to view system predictions"
+            )
+
+        # Build query with joins for performance - ONLY system-level predictions
+        query = db.query(
+            QuarterlyPrediction,
+            Company,
+            User
+        ).select_from(QuarterlyPrediction).join(
+            Company, QuarterlyPrediction.company_id == Company.id
+        ).outerjoin(
+            User, QuarterlyPrediction.created_by == User.id
+        ).filter(
+            QuarterlyPrediction.access_level == "system"  # Only system-level predictions
+        )
+        
+        # Apply additional filters
+        if company_symbol:
+            query = query.filter(Company.symbol.ilike(f"%{company_symbol}%"))
+        if reporting_year:
+            query = query.filter(QuarterlyPrediction.reporting_year == reporting_year)
+        if reporting_quarter:
+            query = query.filter(QuarterlyPrediction.reporting_quarter == reporting_quarter)
+        if sector:
+            query = query.filter(Company.sector.ilike(f"%{sector}%"))
+        if risk_level:
+            query = query.filter(QuarterlyPrediction.risk_level == risk_level)
+        
+        # Order by created_at desc for latest predictions first
+        query = query.order_by(QuarterlyPrediction.created_at.desc())
+        
+        # Pagination
+        total = query.count()
+        skip = (page - 1) * size
+        results = query.offset(skip).limit(size).all()
+        
+        # Format response
+        prediction_data = []
+        for pred, company, creator in results:            
+            prediction_data.append({
+                "id": str(pred.id),
+                "company_id": str(company.id),
+                "company_symbol": company.symbol,
+                "company_name": company.name,
+                "sector": company.sector,
+                "market_cap": safe_float(company.market_cap),
+                "reporting_year": pred.reporting_year,
+                "reporting_quarter": pred.reporting_quarter,
+                
+                # Financial input ratios
+                "total_debt_to_ebitda": safe_float(pred.total_debt_to_ebitda),
+                "sga_margin": safe_float(pred.sga_margin),
+                "long_term_debt_to_total_capital": safe_float(pred.long_term_debt_to_total_capital),
+                "return_on_capital": safe_float(pred.return_on_capital),
+                
+                # ML prediction results
+                "logistic_probability": safe_float(pred.logistic_probability),
+                "gbm_probability": safe_float(pred.gbm_probability),
+                "ensemble_probability": safe_float(pred.ensemble_probability),
+                "risk_level": pred.risk_level,
+                "confidence": safe_float(pred.confidence),
+                
+                # System-level metadata
+                "access_level": pred.access_level,
+                "created_by": str(pred.created_by),
+                "created_by_email": creator.email if creator else None,
+                "created_at": pred.created_at.isoformat(),
+                "predicted_at": pred.predicted_at.isoformat() if pred.predicted_at else None
+            })
+        
+        return {
+            "success": True,
+            "message": "System-level quarterly predictions retrieved successfully",
+            "predictions": prediction_data,
+            "pagination": {
+                "total": total,
+                "page": page,
+                "size": size,
+                "pages": (total + size - 1) // size
+            },
+            "filters": {
+                "access_level": "system",
+                "company_symbol": company_symbol,
+                "reporting_year": reporting_year,
+                "reporting_quarter": reporting_quarter,
+                "sector": sector,
+                "risk_level": risk_level
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching system quarterly predictions: {str(e)}")
 
 # ========================================
 # BULK UPLOAD ENDPOINT
@@ -1269,46 +1495,48 @@ async def update_annual_prediction(
         if not prediction:
             raise HTTPException(status_code=404, detail="Prediction not found")
         
-        # Check if user can update this specific prediction
-        can_update = False
-        
-        if current_user.role == "super_admin":
-            # Super admin can update anything (including system-level data)
-            can_update = True
-        elif current_user.role == "tenant_admin":
-            # Tenant admin can update predictions from organizations in their tenant
-            if prediction.organization_id:
-                org = db.query(Organization).filter(Organization.id == prediction.organization_id).first()
-                if org and org.tenant_id == current_user.tenant_id:
-                    can_update = True
-            # Tenant admin can also update their own personal predictions
-            elif prediction.access_level == "personal" and prediction.created_by == str(current_user.id):
+        # ENHANCED PERMISSION LOGIC:
+        # 1. System-level predictions: ONLY super_admin can modify
+        if prediction.access_level == "system":
+            if current_user.role != "super_admin":
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only super admin can update system-level predictions"
+                )
+        else:
+            # 2. Non-system predictions: Multiple permission paths
+            can_update = False
+            
+            # Path 1: Super admin can edit anything
+            if current_user.role == "super_admin":
                 can_update = True
-        elif current_user.role in ["org_admin", "org_member"]:
-            # Org admin/member can update predictions within their organization
-            if (prediction.organization_id == current_user.organization_id and 
-                prediction.access_level == "organization"):
+                
+            # Path 2: Creator can edit their own prediction
+            elif prediction.created_by == str(current_user.id):
                 can_update = True
-            # Can also update their own personal predictions
-            elif prediction.access_level == "personal" and prediction.created_by == str(current_user.id):
+                
+            # Path 3: Organization-level predictions - org members can edit
+            elif (prediction.access_level == "organization" and 
+                  current_user.organization_id and 
+                  prediction.organization_id == current_user.organization_id and
+                  current_user.role in ["org_admin", "org_member"]):
                 can_update = True
-        elif current_user.role == "user":
-            # Regular user can only update their own personal predictions
-            if prediction.access_level == "personal" and prediction.created_by == str(current_user.id):
-                can_update = True
-        
-        # Special protection for system-level data
-        if prediction.access_level == "system" and current_user.role != "super_admin":
-            raise HTTPException(
-                status_code=403,
-                detail="Only super admin can update system-level predictions"
-            )
-        
-        if not can_update:
-            raise HTTPException(
-                status_code=403,
-                detail="You don't have permission to update this prediction"
-            )
+            
+            if not can_update:
+                # Provide detailed error message for debugging
+                if prediction.access_level == "organization":
+                    if not current_user.organization_id:
+                        detail = "You must be part of an organization to edit organization predictions"
+                    elif prediction.organization_id != current_user.organization_id:
+                        detail = "You can only edit predictions within your organization"
+                    elif current_user.role not in ["org_admin", "org_member"]:
+                        detail = "You need organization member role to edit organization predictions"
+                    else:
+                        detail = "You can only edit predictions that you created or organization predictions within your org"
+                else:
+                    detail = "You can only edit predictions that you created"
+                    
+                raise HTTPException(status_code=403, detail=detail)
         
         # Update company information
         company = prediction.company
@@ -1416,46 +1644,48 @@ async def delete_annual_prediction(
         if not prediction:
             raise HTTPException(status_code=404, detail="Prediction not found")
         
-        # Check if user can delete this specific prediction
-        can_delete = False
-        
-        if current_user.role == "super_admin":
-            # Super admin can delete anything (including system-level data)
-            can_delete = True
-        elif current_user.role == "tenant_admin":
-            # Tenant admin can delete predictions from organizations in their tenant
-            if prediction.organization_id:
-                org = db.query(Organization).filter(Organization.id == prediction.organization_id).first()
-                if org and org.tenant_id == current_user.tenant_id:
-                    can_delete = True
-            # Tenant admin can also delete their own personal predictions
-            elif prediction.access_level == "personal" and prediction.created_by == str(current_user.id):
+        # ENHANCED PERMISSION LOGIC:
+        # 1. System-level predictions: ONLY super_admin can modify
+        if prediction.access_level == "system":
+            if current_user.role != "super_admin":
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only super admin can delete system-level predictions"
+                )
+        else:
+            # 2. Non-system predictions: Multiple permission paths
+            can_delete = False
+            
+            # Path 1: Super admin can delete anything
+            if current_user.role == "super_admin":
                 can_delete = True
-        elif current_user.role in ["org_admin", "org_member"]:
-            # Org admin/member can delete predictions within their organization
-            if (prediction.organization_id == current_user.organization_id and 
-                prediction.access_level == "organization"):
+                
+            # Path 2: Creator can delete their own prediction
+            elif prediction.created_by == str(current_user.id):
                 can_delete = True
-            # Can also delete their own personal predictions
-            elif prediction.access_level == "personal" and prediction.created_by == str(current_user.id):
+                
+            # Path 3: Organization-level predictions - org members can delete
+            elif (prediction.access_level == "organization" and 
+                  current_user.organization_id and 
+                  prediction.organization_id == current_user.organization_id and
+                  current_user.role in ["org_admin", "org_member"]):
                 can_delete = True
-        elif current_user.role == "user":
-            # Regular user can only delete their own personal predictions
-            if prediction.access_level == "personal" and prediction.created_by == str(current_user.id):
-                can_delete = True
-        
-        # Special protection for system-level data
-        if prediction.access_level == "system" and current_user.role != "super_admin":
-            raise HTTPException(
-                status_code=403,
-                detail="Only super admin can delete system-level predictions"
-            )
-        
-        if not can_delete:
-            raise HTTPException(
-                status_code=403,
-                detail="You don't have permission to delete this prediction"
-            )
+            
+            if not can_delete:
+                # Provide detailed error message for debugging
+                if prediction.access_level == "organization":
+                    if not current_user.organization_id:
+                        detail = "You must be part of an organization to delete organization predictions"
+                    elif prediction.organization_id != current_user.organization_id:
+                        detail = "You can only delete predictions within your organization"
+                    elif current_user.role not in ["org_admin", "org_member"]:
+                        detail = "You need organization member role to delete organization predictions"
+                    else:
+                        detail = "You can only delete predictions that you created or organization predictions within your org"
+                else:
+                    detail = "You can only delete predictions that you created"
+                    
+                raise HTTPException(status_code=403, detail=detail)
         
         db.delete(prediction)
         db.commit()
@@ -1493,46 +1723,48 @@ async def update_quarterly_prediction(
         if not prediction:
             raise HTTPException(status_code=404, detail="Prediction not found")
         
-        # Check if user can update this specific prediction
-        can_update = False
-        
-        if current_user.role == "super_admin":
-            # Super admin can update anything (including system-level data)
-            can_update = True
-        elif current_user.role == "tenant_admin":
-            # Tenant admin can update predictions from organizations in their tenant
-            if prediction.organization_id:
-                org = db.query(Organization).filter(Organization.id == prediction.organization_id).first()
-                if org and org.tenant_id == current_user.tenant_id:
-                    can_update = True
-            # Tenant admin can also update their own personal predictions
-            elif prediction.access_level == "personal" and prediction.created_by == str(current_user.id):
+        # ENHANCED PERMISSION LOGIC:
+        # 1. System-level predictions: ONLY super_admin can modify
+        if prediction.access_level == "system":
+            if current_user.role != "super_admin":
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only super admin can update system-level predictions"
+                )
+        else:
+            # 2. Non-system predictions: Multiple permission paths
+            can_update = False
+            
+            # Path 1: Super admin can update anything
+            if current_user.role == "super_admin":
                 can_update = True
-        elif current_user.role in ["org_admin", "org_member"]:
-            # Org admin/member can update predictions within their organization
-            if (prediction.organization_id == current_user.organization_id and 
-                prediction.access_level == "organization"):
+                
+            # Path 2: Creator can update their own prediction
+            elif prediction.created_by == str(current_user.id):
                 can_update = True
-            # Can also update their own personal predictions
-            elif prediction.access_level == "personal" and prediction.created_by == str(current_user.id):
+                
+            # Path 3: Organization-level predictions - org members can update
+            elif (prediction.access_level == "organization" and 
+                  current_user.organization_id and 
+                  prediction.organization_id == current_user.organization_id and
+                  current_user.role in ["org_admin", "org_member"]):
                 can_update = True
-        elif current_user.role == "user":
-            # Regular user can only update their own personal predictions
-            if prediction.access_level == "personal" and prediction.created_by == str(current_user.id):
-                can_update = True
-        
-        # Special protection for system-level data
-        if prediction.access_level == "system" and current_user.role != "super_admin":
-            raise HTTPException(
-                status_code=403,
-                detail="Only super admin can update system-level predictions"
-            )
-        
-        if not can_update:
-            raise HTTPException(
-                status_code=403,
-                detail="You don't have permission to update this prediction"
-            )
+            
+            if not can_update:
+                # Provide detailed error message for debugging
+                if prediction.access_level == "organization":
+                    if not current_user.organization_id:
+                        detail = "You must be part of an organization to update organization predictions"
+                    elif prediction.organization_id != current_user.organization_id:
+                        detail = "You can only update predictions within your organization"
+                    elif current_user.role not in ["org_admin", "org_member"]:
+                        detail = "You need organization member role to update organization predictions"
+                    else:
+                        detail = "You can only update predictions that you created or organization predictions within your org"
+                else:
+                    detail = "You can only update predictions that you created"
+                    
+                raise HTTPException(status_code=403, detail=detail)
         
         # Update company information
         company = prediction.company
@@ -1641,46 +1873,48 @@ async def delete_quarterly_prediction(
         if not prediction:
             raise HTTPException(status_code=404, detail="Prediction not found")
         
-        # Check if user can delete this specific prediction
-        can_delete = False
-        
-        if current_user.role == "super_admin":
-            # Super admin can delete anything (including system-level data)
-            can_delete = True
-        elif current_user.role == "tenant_admin":
-            # Tenant admin can delete predictions from organizations in their tenant
-            if prediction.organization_id:
-                org = db.query(Organization).filter(Organization.id == prediction.organization_id).first()
-                if org and org.tenant_id == current_user.tenant_id:
-                    can_delete = True
-            # Tenant admin can also delete their own personal predictions
-            elif prediction.access_level == "personal" and prediction.created_by == str(current_user.id):
+        # ENHANCED PERMISSION LOGIC:
+        # 1. System-level predictions: ONLY super_admin can modify
+        if prediction.access_level == "system":
+            if current_user.role != "super_admin":
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only super admin can delete system-level predictions"
+                )
+        else:
+            # 2. Non-system predictions: Multiple permission paths
+            can_delete = False
+            
+            # Path 1: Super admin can delete anything
+            if current_user.role == "super_admin":
                 can_delete = True
-        elif current_user.role in ["org_admin", "org_member"]:
-            # Org admin/member can delete predictions within their organization
-            if (prediction.organization_id == current_user.organization_id and 
-                prediction.access_level == "organization"):
+                
+            # Path 2: Creator can delete their own prediction
+            elif prediction.created_by == str(current_user.id):
                 can_delete = True
-            # Can also delete their own personal predictions
-            elif prediction.access_level == "personal" and prediction.created_by == str(current_user.id):
+                
+            # Path 3: Organization-level predictions - org members can delete
+            elif (prediction.access_level == "organization" and 
+                  current_user.organization_id and 
+                  prediction.organization_id == current_user.organization_id and
+                  current_user.role in ["org_admin", "org_member"]):
                 can_delete = True
-        elif current_user.role == "user":
-            # Regular user can only delete their own personal predictions
-            if prediction.access_level == "personal" and prediction.created_by == str(current_user.id):
-                can_delete = True
-        
-        # Special protection for system-level data
-        if prediction.access_level == "system" and current_user.role != "super_admin":
-            raise HTTPException(
-                status_code=403,
-                detail="Only super admin can delete system-level predictions"
-            )
-        
-        if not can_delete:
-            raise HTTPException(
-                status_code=403,
-                detail="You don't have permission to delete this prediction"
-            )
+            
+            if not can_delete:
+                # Provide detailed error message for debugging
+                if prediction.access_level == "organization":
+                    if not current_user.organization_id:
+                        detail = "You must be part of an organization to delete organization predictions"
+                    elif prediction.organization_id != current_user.organization_id:
+                        detail = "You can only delete predictions within your organization"
+                    elif current_user.role not in ["org_admin", "org_member"]:
+                        detail = "You need organization member role to delete organization predictions"
+                    else:
+                        detail = "You can only delete predictions that you created or organization predictions within your org"
+                else:
+                    detail = "You can only delete predictions that you created"
+                    
+                raise HTTPException(status_code=403, detail=detail)
         
         db.delete(prediction)
         db.commit()
@@ -1934,6 +2168,7 @@ async def get_prediction_statistics(
 
 # ========================================
 # DASHBOARD API - POST ENDPOINT WITH PLATFORM STATS
+
 # ========================================
 
 from pydantic import BaseModel
@@ -1991,10 +2226,11 @@ async def get_dashboard_post(
 async def get_system_dashboard(db: Session, current_user: User):
     """Get system-wide dashboard data"""
     total_companies = db.query(Company).count()
-    total_predictions = (
-        db.query(AnnualPrediction).count() + 
-        db.query(QuarterlyPrediction).count()
-    )
+    
+    # Get annual and quarterly prediction counts
+    annual_predictions = db.query(AnnualPrediction).count()
+    quarterly_predictions = db.query(QuarterlyPrediction).count()
+    total_predictions = annual_predictions + quarterly_predictions
     
     # Calculate average default rate
     annual_avg = db.query(func.avg(AnnualPrediction.probability)).scalar() or 0
@@ -2015,6 +2251,8 @@ async def get_system_dashboard(db: Session, current_user: User):
         "organization_name": "System Administrator",
         "total_companies": total_companies,
         "total_predictions": total_predictions,
+        "annual_predictions": annual_predictions,
+        "quarterly_predictions": quarterly_predictions,
         "average_default_rate": round(average_default_rate, 4),
         "high_risk_companies": high_risk_companies,
         "sectors_covered": sectors_covered,
@@ -2054,7 +2292,9 @@ async def get_organization_dashboard(db: Session, current_user: User):
         data_scope_note = " (Organization data only)"
     
     total_companies = len(companies)
-    total_predictions = len(annual_predictions) + len(quarterly_predictions)
+    annual_predictions_count = len(annual_predictions)
+    quarterly_predictions_count = len(quarterly_predictions)
+    total_predictions = annual_predictions_count + quarterly_predictions_count
     
     # Calculate average default rate
     annual_probs = [p.probability for p in annual_predictions if p.probability is not None]
@@ -2077,6 +2317,8 @@ async def get_organization_dashboard(db: Session, current_user: User):
         "organization_name": organization.name,
         "total_companies": total_companies,
         "total_predictions": total_predictions,
+        "annual_predictions": annual_predictions_count,
+        "quarterly_predictions": quarterly_predictions_count,
         "average_default_rate": round(average_default_rate, 4),
         "high_risk_companies": high_risk_companies,
         "sectors_covered": sectors_covered,
@@ -2093,7 +2335,9 @@ async def get_personal_dashboard(db: Session, current_user: User):
     quarterly_predictions = db.query(QuarterlyPrediction).filter(QuarterlyPrediction.created_by == str(current_user.id)).all()
     
     total_companies = len(companies)
-    total_predictions = len(annual_predictions) + len(quarterly_predictions)
+    annual_predictions_count = len(annual_predictions)
+    quarterly_predictions_count = len(quarterly_predictions)
+    total_predictions = annual_predictions_count + quarterly_predictions_count
     
     # Calculate average default rate
     annual_probs = [p.probability for p in annual_predictions if p.probability is not None]
@@ -2116,6 +2360,8 @@ async def get_personal_dashboard(db: Session, current_user: User):
         "organization_name": "Personal Data",
         "total_companies": total_companies,
         "total_predictions": total_predictions,
+        "annual_predictions": annual_predictions_count,
+        "quarterly_predictions": quarterly_predictions_count,
         "average_default_rate": round(average_default_rate, 4),
         "high_risk_companies": high_risk_companies,
         "sectors_covered": sectors_covered,
@@ -2125,11 +2371,6 @@ async def get_personal_dashboard(db: Session, current_user: User):
 async def get_platform_statistics(db: Session):
     """Get platform-wide statistics for inclusion in dashboard"""
     total_companies = db.query(Company).count()
-    total_users = db.query(User).count()
-    total_organizations = db.query(Organization).count()
-    
-    # Count unique tenants (organizations with tenant_admin users)
-    tenant_count = db.query(User).filter(User.role == "tenant_admin").distinct(User.organization_id).count()
     
     total_annual = db.query(AnnualPrediction).count()
     total_quarterly = db.query(QuarterlyPrediction).count()
@@ -2150,9 +2391,6 @@ async def get_platform_statistics(db: Session):
     
     return {
         "total_companies": total_companies,
-        "total_users": total_users,
-        "total_organizations": total_organizations,
-        "total_tenants": tenant_count,
         "total_predictions": total_predictions,
         "annual_predictions": total_annual,
         "quarterly_predictions": total_quarterly,
@@ -2160,3 +2398,69 @@ async def get_platform_statistics(db: Session):
         "high_risk_companies": platform_high_risk,
         "sectors_covered": platform_sectors
     }
+
+# DEBUG ENDPOINT - Remove this after fixing the issue
+@router.get("/debug/prediction/{prediction_id}")
+async def debug_prediction_ownership(
+    prediction_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(current_verified_user)
+):
+    """Debug endpoint to check prediction ownership details"""
+    try:
+        # Find the prediction
+        prediction = db.query(AnnualPrediction).filter(AnnualPrediction.id == prediction_id).first()
+        
+        if not prediction:
+            # Try quarterly predictions
+            prediction = db.query(QuarterlyPrediction).filter(QuarterlyPrediction.id == prediction_id).first()
+            prediction_type = "quarterly"
+        else:
+            prediction_type = "annual"
+        
+        if not prediction:
+            raise HTTPException(status_code=404, detail="Prediction not found")
+        
+        # Get detailed comparison info
+        current_user_id_str = str(current_user.id)
+        prediction_created_by = prediction.created_by
+        
+        return {
+            "debug_info": {
+                "prediction_id": prediction_id,
+                "prediction_type": prediction_type,
+                "prediction_access_level": prediction.access_level,
+                "prediction_created_by": prediction_created_by,
+                "prediction_created_by_type": type(prediction_created_by).__name__,
+                "current_user_id": current_user.id,
+                "current_user_id_str": current_user_id_str,
+                "current_user_id_type": type(current_user.id).__name__,
+                "current_user_role": current_user.role,
+                "ids_match_exact": prediction_created_by == current_user_id_str,
+                "ids_match_both_str": str(prediction_created_by) == str(current_user_id_str),
+                "permission_should_work": (
+                    current_user.role == "super_admin" or 
+                    (prediction.access_level != "system" and prediction_created_by == current_user_id_str)
+                )
+            },
+            "current_user_details": {
+                "id": current_user.id,
+                "email": current_user.email,
+                "full_name": current_user.full_name,
+                "role": current_user.role,
+                "organization_id": current_user.organization_id
+            },
+            "prediction_details": {
+                "id": str(prediction.id),
+                "access_level": prediction.access_level,
+                "created_by": prediction.created_by,
+                "organization_id": str(prediction.organization_id) if prediction.organization_id else None,
+                "company_id": str(prediction.company_id),
+                "created_at": prediction.created_at.isoformat() if prediction.created_at else None
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Debug error: {str(e)}")

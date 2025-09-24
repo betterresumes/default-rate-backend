@@ -12,7 +12,8 @@ import uuid
 from ...core.database import get_db, User, Organization, Tenant, OrganizationMemberWhitelist
 from ...schemas.schemas import (
     UserCreate, UserLogin, UserResponse, Token, 
-    JoinOrganizationRequest, JoinOrganizationResponse
+    JoinOrganizationRequest, JoinOrganizationResponse,
+    ChangePasswordRequest, ChangePasswordResponse
 )
 from ...utils.tenant_utils import is_email_whitelisted, get_organization_by_token
 
@@ -341,3 +342,47 @@ async def refresh_token(current_user: User = Depends(get_current_active_user)):
 async def logout():
     """Logout user (client should discard token)."""
     return {"message": "Successfully logged out"}
+
+@router.post("/change-password", response_model=ChangePasswordResponse)
+async def change_password(
+    request: ChangePasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Change user password - any authenticated user can update their password"""
+    try:
+        # Verify current password
+        if not AuthManager.verify_password(request.current_password, current_user.hashed_password):
+            raise HTTPException(
+                status_code=400,
+                detail="Current password is incorrect"
+            )
+        
+        # Ensure new password is different from current
+        if AuthManager.verify_password(request.new_password, current_user.hashed_password):
+            raise HTTPException(
+                status_code=400,
+                detail="New password must be different from current password"
+            )
+        
+        # Hash new password and update user
+        new_hashed_password = AuthManager.get_password_hash(request.new_password)
+        current_user.hashed_password = new_hashed_password
+        current_user.updated_at = datetime.utcnow()
+        
+        db.commit()
+        db.refresh(current_user)
+        
+        return ChangePasswordResponse(
+            success=True,
+            message="Password changed successfully"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error changing password: {str(e)}"
+        )
