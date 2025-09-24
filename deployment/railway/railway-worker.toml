@@ -6,7 +6,7 @@ builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "./scripts/start-worker.sh"
+startCommand = "./deployment/scripts/start-worker.sh"
 restartPolicyType = "always"
 healthcheckTimeout = 300
 

@@ -4,7 +4,7 @@ builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "./scripts/start-railway.sh"
+startCommand = "./deployment/scripts/start-railway.sh"
 healthcheckPath = "/health"
 healthcheckTimeout = 300
 restartPolicyType = "always"
@@ -22,7 +22,7 @@ variables = {
 [services.worker]
 build.builder = "dockerfile"
 build.dockerfilePath = "Dockerfile"
-deploy.startCommand = "./scripts/start-worker.sh"
+deploy.startCommand = "./deployment/scripts/start-worker.sh"
 deploy.restartPolicyType = "always"
 
 [services.worker.environments.production]

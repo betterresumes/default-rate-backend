@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir --upgrade pip \
 COPY . .
 
 # Make scripts executable
-RUN chmod +x scripts/start-railway.sh scripts/start-worker.sh
+RUN chmod +x deployment/scripts/start-railway.sh deployment/scripts/start-worker.sh
 
 # Create non-root user for security
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
@@ -36,4 +36,4 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:${PORT:-8000}/health || exit 1
 
 # Production command
-CMD ["./scripts/start-railway.sh"]
+CMD ["./deployment/scripts/start-railway.sh"]
