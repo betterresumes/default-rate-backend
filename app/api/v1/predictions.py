@@ -7,10 +7,8 @@ import uuid
 import pandas as pd
 import io
 import math
-import uuid
-import math
-import pandas as pd
-import io
+import logging
+import json
 
 # Core imports
 from ...core.database import get_db, User, Company, AnnualPrediction, QuarterlyPrediction, Organization, BulkUploadJob
@@ -20,8 +18,12 @@ from ...schemas.schemas import (
 from ...services.ml_service import ml_model
 from ...services.quarterly_ml_service import quarterly_ml_model
 from .auth_multi_tenant import get_current_active_user as current_verified_user
+from app.workers.celery_app import celery_app
 
 router = APIRouter()
+
+# Initialize logger
+logger = logging.getLogger(__name__)
 
 # ========================================
 # SIMPLIFIED ACCESS CONTROL HELPERS  
@@ -1470,6 +1472,296 @@ async def list_bulk_upload_jobs(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error listing jobs: {str(e)}")
 
+@router.get("/jobs/{job_id}")
+async def get_job_details(
+    job_id: str,
+    include_errors: bool = False,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(current_verified_user)
+):
+    """Get comprehensive job details including results and error information"""
+    try:
+        # Check permissions
+        if not check_user_permissions(current_user, "user"):
+            raise HTTPException(
+                status_code=403,
+                detail="Authentication required to view job details"
+            )
+
+        # Get organization context for access control
+        organization_id = get_organization_context(current_user)
+        
+        # Query the job with access control
+        query = db.query(BulkUploadJob).filter(BulkUploadJob.id == job_id)
+        
+        # Apply organization/user filtering
+        if organization_id:
+            query = query.filter(BulkUploadJob.organization_id == organization_id)
+        else:
+            query = query.filter(BulkUploadJob.user_id == current_user.id)
+        
+        job = query.first()
+        
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found or access denied")
+
+        # Calculate progress percentage safely
+        progress_percentage = 0
+        if job.total_rows and job.total_rows > 0 and job.processed_rows is not None:
+            try:
+                progress = (job.processed_rows / job.total_rows) * 100
+                import math
+                progress_percentage = round(progress, 2) if not (math.isnan(progress) or math.isinf(progress)) else 0
+            except (ZeroDivisionError, TypeError):
+                progress_percentage = 0
+
+        # Get Celery task status if available
+        celery_status = None
+        celery_meta = None
+        task_result = None
+        
+        # Try to get celery task information
+        try:
+            from app.workers.celery_app import celery_app
+            # Note: We would need to store celery_task_id in database for this to work
+            # For now, we'll skip celery status integration
+        except Exception:
+            pass
+
+        # Parse error details if they exist
+        error_details_parsed = None
+        if job.error_details and include_errors:
+            try:
+                import json
+                error_details_parsed = json.loads(job.error_details)
+            except (json.JSONDecodeError, TypeError):
+                error_details_parsed = {"raw_error": job.error_details}
+
+        # Calculate processing time
+        processing_time_seconds = None
+        if job.started_at and job.completed_at:
+            processing_time_seconds = (job.completed_at - job.started_at).total_seconds()
+        elif job.started_at:
+            from datetime import datetime
+            processing_time_seconds = (datetime.utcnow() - job.started_at).total_seconds()
+
+        # Build comprehensive response
+        job_details = {
+            "id": str(job.id),
+            "status": job.status,
+            "job_type": job.job_type,
+            
+            # File information
+            "file_info": {
+                "original_filename": job.original_filename,
+                "file_size": job.file_size,
+                "file_size_mb": round(job.file_size / (1024 * 1024), 2) if job.file_size else None
+            },
+            
+            # Progress information
+            "progress": {
+                "total_rows": job.total_rows or 0,
+                "processed_rows": job.processed_rows or 0,
+                "successful_rows": job.successful_rows or 0,
+                "failed_rows": job.failed_rows or 0,
+                "progress_percentage": progress_percentage,
+                "remaining_rows": (job.total_rows or 0) - (job.processed_rows or 0)
+            },
+            
+            # Performance metrics
+            "performance": {
+                "processing_time_seconds": processing_time_seconds,
+                "rows_per_second": round((job.processed_rows or 0) / processing_time_seconds, 2) if processing_time_seconds and processing_time_seconds > 0 else None,
+                "estimated_completion_time": None  # Could calculate based on current rate
+            },
+            
+            # Timestamps
+            "timestamps": {
+                "created_at": job.created_at.isoformat() if job.created_at else None,
+                "started_at": job.started_at.isoformat() if job.started_at else None,
+                "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+                "updated_at": job.updated_at.isoformat() if job.updated_at else None
+            },
+            
+            # User and organization info
+            "context": {
+                "user_id": str(job.user_id),
+                "organization_id": str(job.organization_id) if job.organization_id else None,
+                "created_by": job.user.username if job.user else None
+            },
+            
+            # Error information (only if requested and exists)
+            "errors": {
+                "has_errors": bool(job.error_message or job.error_details),
+                "error_message": job.error_message if include_errors else None,
+                "error_details": error_details_parsed if include_errors else None,
+                "error_count": len(error_details_parsed.get('errors', [])) if error_details_parsed and isinstance(error_details_parsed, dict) else None
+            } if include_errors else {
+                "has_errors": bool(job.error_message or job.error_details),
+                "error_count": len(json.loads(job.error_details).get('errors', [])) if job.error_details else 0
+            },
+            
+            # Celery information (if available)
+            "celery_info": {
+                "task_id": getattr(job, 'celery_task_id', None),
+                "celery_status": celery_status,
+                "celery_meta": celery_meta
+            }
+        }
+
+        # Add estimated completion time for active jobs
+        if job.status == "processing" and processing_time_seconds and job.processed_rows and job.total_rows:
+            remaining_rows = job.total_rows - job.processed_rows
+            if remaining_rows > 0 and processing_time_seconds > 0:
+                rows_per_second = job.processed_rows / processing_time_seconds
+                if rows_per_second > 0:
+                    estimated_seconds = remaining_rows / rows_per_second
+                    job_details["performance"]["estimated_completion_seconds"] = round(estimated_seconds, 0)
+                    job_details["performance"]["estimated_completion_time"] = f"{int(estimated_seconds // 60)}m {int(estimated_seconds % 60)}s"
+
+        return {
+            "success": True,
+            "job": job_details
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting job details: {str(e)}")
+
+@router.delete("/jobs/{job_id}")
+async def delete_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(current_verified_user)
+):
+    """Delete a bulk upload job (cannot delete jobs that are currently processing)"""
+    try:
+        # Check permissions
+        if not check_user_permissions(current_user, "user"):
+            raise HTTPException(
+                status_code=403,
+                detail="Authentication required to delete jobs"
+            )
+
+        # Get organization context for access control
+        organization_id = get_organization_context(current_user)
+        
+        # Query the job with access control
+        query = db.query(BulkUploadJob).filter(BulkUploadJob.id == job_id)
+        
+        # Apply organization/user filtering
+        if organization_id:
+            query = query.filter(BulkUploadJob.organization_id == organization_id)
+        else:
+            query = query.filter(BulkUploadJob.user_id == current_user.id)
+        
+        job = query.first()
+        
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found or access denied")
+
+        # Only prevent deletion of jobs that are currently processing
+        if job.status == "processing":
+            raise HTTPException(
+                status_code=400, 
+                detail="Cannot delete job that is currently processing. Please cancel the job first or wait for it to complete."
+            )
+
+        # Delete the job
+        db.delete(job)
+        db.commit()
+
+        return {
+            "success": True,
+            "message": f"Job {job_id} deleted successfully",
+            "deleted_job": {
+                "id": str(job.id),
+                "status": job.status,
+                "job_type": job.job_type,
+                "original_filename": job.original_filename
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error deleting job: {str(e)}")
+
+@router.post("/jobs/{job_id}/cancel")
+async def cancel_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(current_verified_user)
+):
+    """Cancel a running bulk upload job"""
+    try:
+        # Check permissions
+        if not check_user_permissions(current_user, "user"):
+            raise HTTPException(
+                status_code=403,
+                detail="Authentication required to cancel jobs"
+            )
+
+        # Get organization context for access control
+        organization_id = get_organization_context(current_user)
+        
+        # Query the job with access control
+        query = db.query(BulkUploadJob).filter(BulkUploadJob.id == job_id)
+        
+        # Apply organization/user filtering
+        if organization_id:
+            query = query.filter(BulkUploadJob.organization_id == organization_id)
+        else:
+            query = query.filter(BulkUploadJob.user_id == current_user.id)
+        
+        job = query.first()
+        
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found or access denied")
+
+        # Only allow cancellation of pending or processing jobs
+        if job.status not in ["pending", "processing"]:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Cannot cancel job with status '{job.status}'. Only pending or processing jobs can be cancelled."
+            )
+
+        # Try to cancel Celery task if available
+        celery_cancelled = False
+        if hasattr(job, 'celery_task_id') and job.celery_task_id:
+            try:
+                from app.workers.celery_app import celery_app
+                celery_app.control.revoke(job.celery_task_id, terminate=True)
+                celery_cancelled = True
+            except Exception as e:
+                logger.warning(f"Failed to cancel Celery task {job.celery_task_id}: {str(e)}")
+
+        # Update job status
+        job.status = "failed"
+        job.error_message = "Job cancelled by user"
+        job.completed_at = func.now()
+        db.commit()
+
+        return {
+            "success": True,
+            "message": f"Job {job_id} cancelled successfully",
+            "cancelled_job": {
+                "id": str(job.id),
+                "status": job.status,
+                "job_type": job.job_type,
+                "original_filename": job.original_filename,
+                "celery_cancelled": celery_cancelled
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error cancelling job: {str(e)}")
+
 # ========================================
 # UPDATE AND DELETE PREDICTIONS
 # ========================================
@@ -1769,7 +2061,7 @@ async def update_quarterly_prediction(
         # Update company information
         company = prediction.company
         company.name = request.company_name
-        company.market_cap = request.market_cap  # Market cap should be stored as-is (already in millions)
+        company.market_cap = request.market_cap   # Market cap should be stored as-is (already in millions)
         company.sector = request.sector
         
         # Prepare data for ML model
@@ -2464,3 +2756,32 @@ async def debug_prediction_ownership(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Debug error: {str(e)}")
+
+# ========================================
+# REDIS HEALTH CHECK ENDPOINT
+# ========================================
+
+@router.get("/health/redis", 
+           summary="Redis Connection Health Check",
+           description="Check if Redis connection is working for Celery tasks")
+async def redis_health_check():
+    """Check Redis connection health"""
+    try:
+        # Test connection to Redis
+        with celery_app.connection() as conn:
+            conn.ensure_connection(max_retries=1, timeout=5)
+        
+        return {
+            "status": "healthy",
+            "redis": "connected",
+            "broker_url": celery_app.conf.broker_url,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Redis health check failed: {str(e)}")
+        return {
+            "status": "unhealthy", 
+            "redis": "disconnected", 
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }

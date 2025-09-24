@@ -296,6 +296,9 @@ class BulkUploadJob(Base):
     error_message = Column(Text, nullable=True)
     error_details = Column(Text, nullable=True)  # JSON string with detailed errors
     
+    # Celery task tracking
+    celery_task_id = Column(String(255), nullable=True, index=True)  # Celery task UUID
+    
     # Timestamps
     created_at = Column(DateTime, default=func.now())
     started_at = Column(DateTime, nullable=True)

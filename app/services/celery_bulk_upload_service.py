@@ -88,7 +88,9 @@ class CeleryBulkUploadService:
             try:
                 job = db.query(BulkUploadJob).filter(BulkUploadJob.id == job_id).first()
                 if job:
-                    job.celery_task_id = task.id
+                    # Set celery_task_id if the field exists
+                    if hasattr(job, 'celery_task_id'):
+                        job.celery_task_id = task.id
                     job.status = 'queued'
                     db.commit()
             except Exception as e:
@@ -134,7 +136,9 @@ class CeleryBulkUploadService:
             try:
                 job = db.query(BulkUploadJob).filter(BulkUploadJob.id == job_id).first()
                 if job:
-                    job.celery_task_id = task.id
+                    # Set celery_task_id if the field exists
+                    if hasattr(job, 'celery_task_id'):
+                        job.celery_task_id = task.id
                     job.status = 'queued'
                     db.commit()
             except Exception as e:
@@ -161,11 +165,12 @@ class CeleryBulkUploadService:
             # Get Celery task status if available
             celery_status = None
             celery_meta = None
+            celery_task_id = getattr(job, 'celery_task_id', None)
             
-            if job.celery_task_id:
+            if celery_task_id:
                 try:
                     from app.workers.celery_app import celery_app
-                    result = celery_app.AsyncResult(job.celery_task_id)
+                    result = celery_app.AsyncResult(celery_task_id)
                     celery_status = result.status
                     celery_meta = result.info if result.info else {}
                 except Exception as e:
@@ -196,7 +201,7 @@ class CeleryBulkUploadService:
                 'started_at': job.started_at.isoformat() if job.started_at else None,
                 'completed_at': job.completed_at.isoformat() if job.completed_at else None,
                 'progress_percentage': progress_percentage,
-                'celery_task_id': job.celery_task_id,
+                'celery_task_id': celery_task_id,
                 'celery_status': celery_status,
                 'celery_meta': celery_meta
             }

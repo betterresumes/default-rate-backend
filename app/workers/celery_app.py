@@ -14,15 +14,26 @@ if sys.platform == "darwin":  # macOS
     import multiprocessing
     multiprocessing.set_start_method('spawn', force=True)
 
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = os.getenv("REDIS_PORT", "6379")
-REDIS_DB = os.getenv("REDIS_DB", "0")
-REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
+# Get Redis configuration with Railway support
+REDIS_URL = os.getenv("REDIS_URL")
 
-if REDIS_PASSWORD:
-    REDIS_URL = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
-else:
-    REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+if not REDIS_URL:
+    # Fallback to individual Redis environment variables
+    REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+    REDIS_PORT = os.getenv("REDIS_PORT", "6379")
+    REDIS_DB = os.getenv("REDIS_DB", "0")
+    REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
+    REDIS_USER = os.getenv("REDIS_USER", os.getenv("REDISUSER", "default"))
+    
+    if REDIS_PASSWORD:
+        if REDIS_USER and REDIS_USER != "default":
+            REDIS_URL = f"redis://{REDIS_USER}:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+        else:
+            REDIS_URL = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+    else:
+        REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+
+print(f"🔄 Celery using Redis URL: {REDIS_URL[:20]}...{REDIS_URL[-10:] if len(REDIS_URL) > 30 else REDIS_URL}")
 
 celery_app = Celery(
     "bulk_prediction_worker",
@@ -48,11 +59,25 @@ celery_app.conf.update(
     
     # Fix for exception serialization issues
     result_accept_content=["json"],
-    result_backend_transport_options={
-        "master_name": "mymaster",
+    
+    # Connection and retry configuration for Railway/Cloud deployments
+    broker_connection_retry_on_startup=True,
+    broker_connection_retry=True,
+    broker_connection_max_retries=10,
+    broker_transport_options={
         "retry_on_timeout": True,
         "connection_pool_kwargs": {
             "retry_on_timeout": True,
+            "socket_timeout": 30,
+            "socket_connect_timeout": 30,
+        }
+    },
+    result_backend_transport_options={
+        "retry_on_timeout": True,
+        "connection_pool_kwargs": {
+            "retry_on_timeout": True,
+            "socket_timeout": 30,
+            "socket_connect_timeout": 30,
         }
     },
     
@@ -71,9 +96,30 @@ celery_app.conf.update(
         "app.workers.tasks.process_quarterly_bulk_upload_task": {"queue": "bulk_predictions"},
         "app.workers.tasks.send_verification_email_task": {"queue": "emails"},
         "app.workers.tasks.send_password_reset_email_task": {"queue": "emails"},
-    },
-    broker_connection_retry_on_startup=True,
-    broker_connection_retry=True
+    }
 )
 
 celery_app.conf.beat_schedule = {}
+
+# Test Redis connection on startup
+def test_redis_connection():
+    """Test Redis connection and provide helpful error messages"""
+    try:
+        # Test the broker connection
+        with celery_app.connection() as conn:
+            conn.ensure_connection(max_retries=3)
+        print("✅ Redis connection successful!")
+        return True
+    except Exception as e:
+        print(f"❌ Redis connection failed: {str(e)}")
+        print(f"🔍 Using Redis URL: {REDIS_URL[:25]}...")
+        print("💡 Check your Redis configuration:")
+        print(f"   - REDIS_URL: {os.getenv('REDIS_URL', 'Not set')[:30]}...")
+        print(f"   - REDIS_HOST: {os.getenv('REDIS_HOST', 'Not set')}")
+        print(f"   - REDIS_PORT: {os.getenv('REDIS_PORT', 'Not set')}")
+        print(f"   - REDIS_PASSWORD: {'Set' if os.getenv('REDIS_PASSWORD') else 'Not set'}")
+        return False
+
+# Only test connection if not in production auto-start
+if __name__ != "__main__" and os.getenv("CELERY_STARTUP_TEST", "true").lower() == "true":
+    test_redis_connection()
