@@ -13,6 +13,8 @@ from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
 from passlib.context import CryptContext
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,9 +30,24 @@ load_dotenv(env_path)
 
 sys.path.insert(0, str(backend_dir))
 
+
+DATABASE_URL = "postgresql://neondb_owner:npg_FRS5ptsg3QcE@ep-snowy-darkness-adw0r2ai-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+
+def get_session_local():
+    """Create database session using the specific DATABASE_URL"""
+    engine = create_engine(
+        DATABASE_URL,
+        pool_size=20,
+        max_overflow=30,
+        pool_pre_ping=True,
+        pool_recycle=300,
+        echo=False
+    )
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    return SessionLocal
+
 try:
-    from app.core.database import get_session_local
-    from app.core.database import User, Tenant, Organization, OrganizationMemberWhitelist
+    from app.core.database import User, Tenant, Organization, OrganizationMemberWhitelist, Company
     from sqlalchemy import text
     logger.info("✅ Successfully imported database components")
 except ImportError as e:
@@ -42,86 +59,170 @@ DATA_CONFIG = {
         "email": "admin@defaultrate.com",
         "username": "super_admin",
         "password": "SuperAdmin123!",
-        "full_name": "System Administrator",
+        "full_name": "Rajesh Kumar Sharma",
         "role": "super_admin"
     },
     
     "tenant": {
-        "name": "FinTech Solutions Enterprise",
-        "slug": "fintech-solutions",
-        "domain": "fintech-solutions.com",
-        "description": "Leading financial technology and risk assessment platform"
+        "name": "HDFC Bank Limited",
+        "slug": "hdfc-bank",
+        "domain": "hdfcbank.com",
+        "description": "India's leading private sector bank"
     },
     
     "tenant_admin": {
-        "email": "admin@fintech-solutions.com",
+        "email": "admin@hdfcbank.com",
         "username": "tenant_admin",
         "password": "TenantAdmin123!",
-        "full_name": "Robert Johnson",
+        "full_name": "Priya Gupta",
         "role": "tenant_admin"
     },
     
     "organizations": [
         {
-            "name": "Risk Assessment Division",
-            "slug": "risk-assessment",
-            "domain": "risk.fintech-solutions.com",
-            "description": "Specialized team for credit risk analysis and default prediction modeling",
+            "name": "Credit Risk Management Division",
+            "slug": "credit-risk-management",
+            "domain": "risk.hdfcbank.com",
+            "description": "Advanced credit risk assessment and default prediction analytics for retail and corporate banking",
             "default_role": "org_member",
             
             "admin": {
-                "email": "risk.admin@fintech-solutions.com",
-                "username": "risk_admin",
-                "password": "RiskAdmin123!",
-                "full_name": "Sarah Williams",
+                "email": "risk.head@hdfcbank.com",
+                "username": "risk_head",
+                "password": "RiskHead123!",
+                "full_name": "Dr. Amit Krishnamurthy",
                 "role": "org_admin"
             },
             
             "members": [
                 {
-                    "email": "analyst1@fintech-solutions.com",
-                    "username": "risk_analyst_1",
-                    "password": "Analyst123!",
-                    "full_name": "Michael Chen",
+                    "email": "senior.analyst@hdfcbank.com",
+                    "username": "senior_risk_analyst",
+                    "password": "SeniorAnalyst123!",
+                    "full_name": "Sneha Raghavan Nair",
                     "role": "org_member"
                 },
                 {
-                    "email": "analyst2@fintech-solutions.com",
-                    "username": "risk_analyst_2", 
-                    "password": "Analyst123!",
-                    "full_name": "Emily Davis",
+                    "email": "quant.analyst@hdfcbank.com",
+                    "username": "quant_analyst", 
+                    "password": "QuantAnalyst123!",
+                    "full_name": "Arjun Vikram Singh",
                     "role": "org_member"
                 }
             ]
         },
         {
-            "name": "Credit Analytics Department",
-            "slug": "credit-analytics",
-            "domain": "credit.fintech-solutions.com",
-            "description": "Advanced analytics team focused on credit scoring and financial modeling",
+            "name": "Data Analytics & Machine Learning",
+            "slug": "data-analytics-ml",
+            "domain": "analytics.hdfcbank.com",
+            "description": "Machine learning models and statistical analysis for financial risk prediction and business intelligence",
             "default_role": "org_member",
             
             "admin": {
-                "email": "credit.admin@fintech-solutions.com",
-                "username": "credit_admin",
-                "password": "CreditAdmin123!",
-                "full_name": "David Thompson",
+                "email": "analytics.head@hdfcbank.com",
+                "username": "analytics_head",
+                "password": "AnalyticsHead123!",
+                "full_name": "Dr. Kavitha Subramanian",
                 "role": "org_admin"
             },
             
             "members": [
                 {
-                    "email": "modeler1@fintech-solutions.com",
-                    "username": "credit_modeler_1",
-                    "password": "Modeler123!",
-                    "full_name": "Jessica Rodriguez",
+                    "email": "data.scientist@hdfcbank.com",
+                    "username": "data_scientist_lead",
+                    "password": "DataScientist123!",
+                    "full_name": "Rohit Agarwal Joshi",
                     "role": "org_member"
                 },
                 {
-                    "email": "modeler2@fintech-solutions.com",
-                    "username": "credit_modeler_2",
-                    "password": "Modeler123!",
-                    "full_name": "Alex Kumar",
+                    "email": "ml.engineer@hdfcbank.com",
+                    "username": "ml_engineer",
+                    "password": "MLEngineer123!",
+                    "full_name": "Ananya Sharma Reddy",
+                    "role": "org_member"
+                }
+            ]
+        }
+    ]
+}
+
+DATA_CONFIG2 = {
+    "tenant": {
+        "name": "ICICI Bank Limited",
+        "slug": "icici-bank",
+        "domain": "icicibank.com",
+        "description": "India's largest private sector bank by consolidated assets offering comprehensive banking and financial services"
+    },
+    
+    "tenant_admin": {
+        "email": "admin@icicibank.com",
+        "username": "tenant_admin_icici",
+        "password": "TenantAdmin123!",
+        "full_name": "Deepika Agarwal Sharma",
+        "role": "tenant_admin"
+    },
+    
+    "organizations": [
+        {
+            "name": "Corporate Credit & Risk Assessment",
+            "slug": "corporate-credit-risk",
+            "domain": "corporate.icicibank.com",
+            "description": "Corporate lending and credit risk evaluation for large enterprises and institutional clients",
+            "default_role": "org_member",
+            
+            "admin": {
+                "email": "corporate.head@icicibank.com",
+                "username": "corporate_head",
+                "password": "CorporateHead123!",
+                "full_name": "Dr. Ramesh Chandra Verma",
+                "role": "org_admin"
+            },
+            
+            "members": [
+                {
+                    "email": "credit.manager@icicibank.com",
+                    "username": "credit_manager",
+                    "password": "CreditManager123!",
+                    "full_name": "Meera Krishnan Iyer",
+                    "role": "org_member"
+                },
+                {
+                    "email": "risk.specialist@icicibank.com",
+                    "username": "risk_specialist", 
+                    "password": "RiskSpecialist123!",
+                    "full_name": "Vivek Kumar Agarwal",
+                    "role": "org_member"
+                }
+            ]
+        },
+        {
+            "name": "Retail Banking & Consumer Finance",
+            "slug": "retail-consumer-finance",
+            "domain": "retail.icicibank.com",
+            "description": "Personal banking, home loans, and consumer credit risk assessment division",
+            "default_role": "org_member",
+            
+            "admin": {
+                "email": "retail.director@icicibank.com",
+                "username": "retail_director",
+                "password": "RetailDirector123!",
+                "full_name": "Dr. Sunita Rajesh Patel",
+                "role": "org_admin"
+            },
+            
+            "members": [
+                {
+                    "email": "loan.officer@icicibank.com",
+                    "username": "loan_officer_lead",
+                    "password": "LoanOfficer123!",
+                    "full_name": "Karthik Venkatesh Rao",
+                    "role": "org_member"
+                },
+                {
+                    "email": "consumer.analyst@icicibank.com",
+                    "username": "consumer_analyst",
+                    "password": "ConsumerAnalyst123!",
+                    "full_name": "Pooja Sharma Malhotra",
                     "role": "org_member"
                 }
             ]
@@ -215,6 +316,7 @@ def create_organization_with_users(db, org_config, tenant_id, tenant_admin_id):
         default_role=org_config["default_role"],
         max_users=500,
         is_active=True,
+        allow_global_data_access=False,  # Default to False for new organizations
         created_by=tenant_admin_id,
         created_at=datetime.now()
     )
@@ -319,6 +421,7 @@ def print_setup_summary(super_admin, tenant, tenant_admin, organizations_data):
     print(f"   👤 Username: {super_admin.username}")
     print(f"   🔑 Password: {DATA_CONFIG['super_admin']['password']}")
     print(f"   🏷️  Role: {super_admin.role}")
+    print(f"   👨‍💼 Full Name: {super_admin.full_name}")
     
     print(f"\n🏢 TENANT: {tenant.name}")
     print(f"   🌐 Domain: {tenant.domain}")
@@ -329,6 +432,7 @@ def print_setup_summary(super_admin, tenant, tenant_admin, organizations_data):
     print(f"   👤 Username: {tenant_admin.username}")
     print(f"   🔑 Password: {DATA_CONFIG['tenant_admin']['password']}")
     print(f"   🏷️  Role: {tenant_admin.role}")
+    print(f"   👨‍💼 Full Name: {tenant_admin.full_name}")
     
     for i, org_data in enumerate(organizations_data, 1):
         org = org_data["organization"]
@@ -338,11 +442,13 @@ def print_setup_summary(super_admin, tenant, tenant_admin, organizations_data):
         print(f"\n🏛️  ORGANIZATION {i}: {org.name}")
         print(f"   🌐 Domain: {org.domain}")
         print(f"   🔗 Join Token: {org.join_token}")
+        print(f"   📝 Description: {org.description}")
         
         print(f"\n   👨‍💼 ORGANIZATION ADMIN:")
         print(f"      📧 Email: {admin.email}")
         print(f"      👤 Username: {admin.username}")
         print(f"      🔑 Password: {[org_conf for org_conf in DATA_CONFIG['organizations'] if org_conf['name'] == org.name][0]['admin']['password']}")
+        print(f"      👨‍💼 Full Name: {admin.full_name}")
         
         print(f"\n   👥 ORGANIZATION MEMBERS:")
         for j, member in enumerate(members, 1):
@@ -354,9 +460,10 @@ def print_setup_summary(super_admin, tenant, tenant_admin, organizations_data):
     
     print("\n✅ NEXT STEPS:")
     print("1. 🚀 Start your FastAPI application server")
-    print("2. 📬 Import the corrected Postman collection")
+    print("2. 📬 Import the API collection for testing")
     print("3. 🔐 Use the login credentials above to test authentication")
     print("4. 🧪 Test the API endpoints with different user roles")
+    print("5. 🏭 Create companies and predictions via the API")
     
     print("\n📝 NOTES:")
     print("- All passwords follow strong security practices")
@@ -364,6 +471,7 @@ def print_setup_summary(super_admin, tenant, tenant_admin, organizations_data):
     print("- Users are properly assigned to their respective organizations")
     print("- Whitelist entries created for all organization members")
     print("- Join tokens generated for organization access")
+    print("- Companies can be created via the API endpoints")
 
 def main():
     """Main function"""
@@ -378,9 +486,10 @@ def main():
         db.execute(text("SELECT 1"))
         db.close()
         logger.info("✅ Database connection verified")
+        logger.info(f"🔗 Using Database: {DATABASE_URL[:50]}...{DATABASE_URL[-20:]}")
     except Exception as e:
         logger.error(f"❌ Database connection failed: {e}")
-        logger.error("Please run 'python scripts/reset_database.py' first")
+        logger.error("Please check the database connection details")
         sys.exit(1)
     
     # Setup data

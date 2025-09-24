@@ -44,6 +44,7 @@ class Organization(Base):
     logo_url = Column(String(500), nullable=True)
     
     is_active = Column(Boolean, default=True)
+    allow_global_data_access = Column(Boolean, default=False)  # New field for global data access
     
     join_token = Column(String(32), unique=True, nullable=False, index=True)
     join_enabled = Column(Boolean, default=True)
