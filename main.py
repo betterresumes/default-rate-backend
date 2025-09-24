@@ -4,20 +4,55 @@ Application startup script for development and production.
 """
 
 import os
+import sys
 import uvicorn
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
-# Import the FastAPI app for direct uvicorn access
-from app.main import app
-
 def main():
     """Start the application server."""
     # Get configuration from environment
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "8000"))
+    environment = os.getenv("ENVIRONMENT", "development").lower()
+    
+    # Import the FastAPI app
+    try:
+        from app.main import app
+    except ImportError as e:
+        print(f"Error importing application: {e}")
+        sys.exit(1)
+    
+    # Configure uvicorn based on environment
+    if environment == "production":
+        # Production configuration
+        uvicorn.run(
+            "app.main:app",
+            host=host,
+            port=port,
+            workers=int(os.getenv("WORKERS", "4")),
+            log_level=os.getenv("LOG_LEVEL", "warning").lower(),
+            access_log=True,
+            use_colors=False,
+            server_header=False,
+        )
+    else:
+        # Development configuration
+        uvicorn.run(
+            "app.main:app",
+            host=host,
+            port=port,
+            reload=True,
+            log_level="info",
+            access_log=True,
+            use_colors=True,
+        )
+
+
+if __name__ == "__main__":
+    main()
     debug = os.getenv("DEBUG", "false").lower() == "true"
     workers = int(os.getenv("WORKERS", "1"))
     

@@ -1,30 +1,5 @@
-fastapi
-uvicorn
-sqlalchemy
-psycopg2-binary
-python-dotenv
-pydantic[email]
-pandas
-numpy
-scikit-learn
-joblib
-lightgbm
-python-multipart
-openpyxl
-celery
-redis
-uuid
+# Main Requirements File
+# For development, use: pip install -r requirements.dev.txt
+# For production, use: pip install -r requirements.prod.txt
 
-# Authentication and security
-fastapi-users[sqlalchemy]>=12.0.0
-fastapi-users[oauth]>=12.0.0
-passlib[bcrypt]>=1.7.4
-bcrypt>=4.0.0
-python-jose[cryptography]
-
-# Web and templates
-python-multipart
-
-# Additional utilities
-aiofiles
-httpx
+-r requirements.prod.txt
