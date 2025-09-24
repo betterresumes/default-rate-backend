@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, or_
+from sqlalchemy import func, and_, or_, text
 from typing import Dict, List, Optional
 from datetime import datetime
 import uuid
@@ -126,13 +126,23 @@ def safe_float(value):
     if value is None:
         return None
     try:
-        import math
         float_val = float(value)
         if math.isnan(float_val) or math.isinf(float_val):
             return None
         return float_val
     except (ValueError, TypeError):
         return None
+
+def is_prediction_owner(prediction, current_user):
+    """Check if current user is the owner of the prediction"""
+    if not prediction or not current_user:
+        return False
+    
+    # Convert both to string for comparison to handle UUID vs string issues
+    prediction_creator = str(prediction.created_by) if prediction.created_by else None
+    current_user_id = str(current_user.id) if current_user.id else None
+    
+    return prediction_creator and current_user_id and prediction_creator == current_user_id
 
 
 @router.post("/annual", response_model=Dict)
@@ -350,85 +360,6 @@ async def create_quarterly_prediction(
         organization_name = None
         if organization_id:
             org = db.query(Organization).filter(Organization.id == organization_id).first()
-            organization_name = org.name if org else None
-        
-        return {
-            "success": True,
-            "message": f"Quarterly prediction created for {request.company_symbol}",
-            "prediction": {
-                "id": str(prediction.id),
-                "company_id": str(company.id),
-                "company_symbol": request.company_symbol,
-                "company_name": request.company_name,
-                "sector": request.sector,
-                "market_cap": float(request.market_cap),
-                "reporting_year": request.reporting_year,
-                "reporting_quarter": request.reporting_quarter,
-                
-                "total_debt_to_ebitda": float(request.total_debt_to_ebitda),
-                "sga_margin": float(request.sga_margin),
-                "long_term_debt_to_total_capital": float(request.long_term_debt_to_total_capital),
-                "return_on_capital": float(request.return_on_capital),
-                
-                "logistic_probability": float(ml_result.get('logistic_probability', 0)),
-                "gbm_probability": float(ml_result.get('gbm_probability', 0)),
-                "ensemble_probability": float(ml_result.get('ensemble_probability', 0)),
-                "risk_level": ml_result['risk_level'],
-                "confidence": float(ml_result['confidence']),
-                
-                "access_level": access_level,
-                "organization_id": str(organization_id) if organization_id else None,
-                "organization_name": organization_name,
-                "created_by": str(current_user.id),
-                "created_by_email": current_user.email,
-                "created_at": prediction.created_at.isoformat()
-            }
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error creating quarterly prediction: {str(e)}")
-        
-        financial_data = {
-            'total_debt_to_ebitda': request.total_debt_to_ebitda,
-            'sga_margin': request.sga_margin,
-            'long_term_debt_to_total_capital': request.long_term_debt_to_total_capital,
-            'return_on_capital': request.return_on_capital
-        }
-        
-        ml_result = await quarterly_ml_model.predict_quarterly(financial_data)
-        
-        prediction = QuarterlyPrediction(
-            id=uuid.uuid4(),
-            company_id=company.id,
-            organization_id=final_org_id,
-            reporting_year=request.reporting_year,
-            reporting_quarter=request.reporting_quarter,
-            
-            total_debt_to_ebitda=request.total_debt_to_ebitda,
-            sga_margin=request.sga_margin,
-            long_term_debt_to_total_capital=request.long_term_debt_to_total_capital,
-            return_on_capital=request.return_on_capital,
-            
-            logistic_probability=ml_result.get('logistic_probability'),
-            gbm_probability=ml_result.get('gbm_probability'),
-            ensemble_probability=ml_result.get('ensemble_probability'),
-            risk_level=ml_result['risk_level'],
-            confidence=ml_result['confidence'],
-            predicted_at=datetime.utcnow(),
-            
-            created_by=current_user.id
-        )
-        
-        db.add(prediction)
-        db.commit()
-        db.refresh(prediction)
-        
-        organization_name = None
-        if final_org_id:
-            org = db.query(Organization).filter(Organization.id == final_org_id).first()
             organization_name = org.name if org else None
         
         return {
@@ -1635,7 +1566,7 @@ async def update_annual_prediction(
             if current_user.role == "super_admin":
                 can_update = True
                 
-            elif prediction.created_by == str(current_user.id):
+            elif is_prediction_owner(prediction, current_user):
                 can_update = True
                 
             elif (prediction.access_level == "organization" and 
@@ -1766,7 +1697,7 @@ async def delete_annual_prediction(
             if current_user.role == "super_admin":
                 can_delete = True
                 
-            elif prediction.created_by == str(current_user.id):
+            elif is_prediction_owner(prediction, current_user):
                 can_delete = True
                 
             elif (prediction.access_level == "organization" and 
@@ -1836,7 +1767,7 @@ async def update_quarterly_prediction(
             if current_user.role == "super_admin":
                 can_update = True
                 
-            elif prediction.created_by == str(current_user.id):
+            elif is_prediction_owner(prediction, current_user):
                 can_update = True
                 
             elif (prediction.access_level == "organization" and 
@@ -1968,7 +1899,7 @@ async def delete_quarterly_prediction(
             if current_user.role == "super_admin":
                 can_delete = True
                 
-            elif prediction.created_by == str(current_user.id):
+            elif is_prediction_owner(prediction, current_user):
                 can_delete = True
                 
             elif (prediction.access_level == "organization" and 
@@ -2492,6 +2423,25 @@ async def debug_prediction_ownership(
            summary="Redis Connection Health Check",
            description="Check if Redis connection is working for Celery tasks")
 async def redis_health_check():
+    """Check Redis connection health"""
+    try:
+        with celery_app.connection() as conn:
+            conn.ensure_connection(max_retries=1, timeout=5)
+        
+        return {
+            "status": "healthy",
+            "redis": "connected",
+            "broker_url": celery_app.conf.broker_url,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Redis health check failed: {str(e)}")
+        return {
+            "status": "unhealthy", 
+            "redis": "disconnected", 
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
     """Check Redis connection health"""
     try:
         with celery_app.connection() as conn:

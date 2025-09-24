@@ -54,7 +54,7 @@ except ImportError as e:
     logger.error(f"❌ Failed to import database components: {e}")
     sys.exit(1)
 
-DATA_CONFIG = {
+DATA_CONFIG1 = {
     "super_admin": {
         "email": "admin@defaultrate.com",
         "username": "super_admin",
@@ -146,7 +146,15 @@ DATA_CONFIG = {
     ]
 }
 
-DATA_CONFIG2 = {
+DATA_CONFIG = {
+    "super_admin": {
+        "email": "admin2@defaultrate.com",
+        "username": "RajeshKSharma",
+        "password": "SuperAdmin123!",
+        "full_name": "Rajesh Kumar Sharma",
+        "role": "super_admin"
+    },
+    
     "tenant": {
         "name": "ICICI Bank Limited",
         "slug": "icici-bank",
