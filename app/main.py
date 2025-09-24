@@ -1,5 +1,5 @@
 """
-Main FastAPI application factory and configuration.
+Main FastAPI application starting and configuration.
 """
 
 from fastapi import FastAPI, Request
@@ -31,85 +31,77 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize database tables on startup"""
-    logger.info("🚀 Starting Multi-Tenant Financial Risk API...")
+    """Initialize database tables and services on startup"""
+    environment = os.getenv("ENVIRONMENT", "development")
     
-    logger.info("📊 Initializing database...")
+    logger.info("🚀 Starting Default Rate Backend API...")
+    logger.info(f"🌍 Environment: {environment}")
+    logger.info(f"📅 Started at: {datetime.utcnow().isoformat()}")
+    
+    logger.info("📊 Initializing database connection...")
     try:
         create_tables()
-        logger.info("✅ Database tables created/verified")
+        logger.info("✅ Database: Connected and tables verified")
     except Exception as e:
-        logger.error(f"❌ Database initialization error: {e}")
+        logger.error(f"❌ Database: Connection failed - {e}")
+    
+    logger.info("🔄 Checking Redis connection...")
+    try:
+        import redis
+        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        r = redis.from_url(redis_url)
+        r.ping()
+        logger.info("✅ Redis: Connected successfully")
+    except Exception as e:
+        logger.error(f"❌ Redis: Connection failed - {e}")
+    
+    logger.info("🤖 Checking ML models...")
+    try:
+        from app.services.ml_service import ml_model
+        from app.services.quarterly_ml_service import quarterly_ml_model
+        
+        annual_loaded = hasattr(ml_model, 'model') and ml_model.model is not None
+        quarterly_loaded = hasattr(quarterly_ml_model, 'logistic_model') and quarterly_ml_model.logistic_model is not None
+        
+        if annual_loaded and quarterly_loaded:
+            logger.info("✅ ML Models: Annual and Quarterly models loaded successfully")
+        else:
+            logger.warning("⚠️ ML Models: Some models may not be loaded properly")
+    except Exception as e:
+        logger.error(f"❌ ML Models: Loading failed - {e}")
+    
+    logger.info("👷 Checking Celery workers...")
+    try:
+        from app.workers.celery_app import celery_app
+        inspect = celery_app.control.inspect()
+        stats = inspect.stats()
+        
+        if stats:
+            worker_count = len(stats)
+            logger.info(f"✅ Celery: {worker_count} worker(s) available")
+        else:
+            logger.warning("⚠️ Celery: No workers detected (background tasks may not process)")
+    except Exception as e:
+        logger.warning(f"⚠️ Celery: Worker check failed - {e}")
+    
+    logger.info("🎯 API startup completed!")
+    logger.info("📋 Available endpoints:")
+    logger.info("   • Health Check: /health")
+    logger.info("   • API Documentation: /docs")
+    logger.info("   • API Root: /")
+    logger.info("   • Main API: /api/v1/")
     
     yield
+    
+    logger.info("🛑 Shutting down Default Rate Backend API...")
 
 
 def create_app() -> FastAPI:
     """Create and configure FastAPI application."""
     
     app = FastAPI(
-        title="🏦 Financial Default Risk Prediction API - Multi-Tenant",
-        description="""
-# 🎯 Enterprise Multi-Tenant Financial Risk Assessment Platform
-
-## 📋 API Sections & Access Control
-
-### 🔐 **USER AUTHENTICATION** (Public/User Access)
-- User registration, login, organization joining
-- Token management and logout
-
-### 👨‍💼 **ADMIN AUTHENTICATION** (Super Admin Only)
-- Admin user creation and management
-- User impersonation and password resets
-- Audit trails and bulk operations
-
-### 🎯 **TENANT ADMIN MANAGEMENT** (Super Admin Only)
-- **⭐ ATOMIC TENANT CREATION**: Create tenant + admin in one operation
-- Existing user tenant admin assignment
-- Tenant admin information and role management
-
-### 🏢 **TENANT MANAGEMENT** (Super Admin Only)  
-- Tenant CRUD operations
-- Tenant statistics and admin management
-- Multi-tenant data isolation
-
-### 🏛️ **ORGANIZATION MANAGEMENT** (Tenant Admin + Org Admin)
-- Organization CRUD within tenant scope
-- Join token management and whitelisting
-- Organization user management
-
-### 👥 **USER MANAGEMENT** (Role-Based Scoped Access)
-- Self-service profile management
-- Admin user operations with proper scoping
-- Role-based user administration
-
-### 🏭 **COMPANIES** (Org Members + Above)
-- Company data management
-- Symbol-based company search
-- Paginated company listings
-
-### 📊 **PREDICTIONS** (Org Members + Above)
-- **⭐ UNIFIED PREDICTION API**: Main ML prediction endpoint
-- Annual and quarterly risk assessments
-- Bulk prediction processing (sync/async)
-- Prediction management and analytics
-
-## 🔐 Role Hierarchy
-1. **Super Admin** → Full system access
-2. **Tenant Admin** → Tenant-scoped management
-3. **Org Admin** → Organization-scoped management  
-4. **Member** → Company & prediction access
-5. **User** → Basic profile access
-
-## 🚀 Quick Start for HDFC Bank Case
-1. `POST /auth/login` (Super Admin)
-2. `POST /tenant-admin/assign-existing-user` (Connect admin@hdfc.com)
-3. `POST /organizations` (Create HDFC organizations)
-4. `POST /predictions/unified-predict` (Run ML predictions)
-
----
-*Version 2.0.0 - Built with FastAPI, PostgreSQL, and Advanced ML Models*
-        """,
+        title="Default Rate Backend API",
+        description="Financial risk assessment platform with machine learning predictions and multi-tenant architecture.",
         version="2.0.0",
         lifespan=lifespan,
         docs_url="/docs",
@@ -120,7 +112,6 @@ def create_app() -> FastAPI:
     # Exception handlers
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
-        """Custom validation error handler with user-friendly messages"""
         errors = []
         for error in exc.errors():
             field = error["loc"][-1] if error["loc"] else "unknown"
@@ -154,31 +145,24 @@ def create_app() -> FastAPI:
             }
         )
 
-    # Custom middleware for API timing and logging
     @app.middleware("http")
     async def add_timing_and_logging(request: Request, call_next):
         start_time = time.time()
         
-        # Log incoming request
         logger.info(f"📥 {request.method} {request.url.path} - Started")
         
-        # Process request
         response = await call_next(request)
         
-        # Calculate timing
         process_time = time.time() - start_time
         timing_ms = round(process_time * 1000, 2)
         
-        # Add timing header
         response.headers["X-Process-Time"] = str(timing_ms)
         
-        # Log response with timing
         status_emoji = "✅" if response.status_code < 400 else "❌"
         logger.info(f"{status_emoji} {request.method} {request.url.path} - {response.status_code} ({timing_ms}ms)")
         
         return response
 
-    # Middleware
     app.add_middleware(GZipMiddleware, minimum_size=1000)
 
     app.add_middleware(
@@ -189,98 +173,171 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Include API routers - All follow /api/v1/ pattern with role-based access control
-    app.include_router(auth_router, prefix="/api/v1/auth", tags=["🔐 User Authentication"])
-    app.include_router(auth_admin_router, prefix="/api/v1/auth", tags=["👨‍💼 Admin Authentication (Super Admin Only)"])
-    app.include_router(tenant_admin_router, prefix="/api/v1", tags=["🎯 Tenant Admin Management (Super Admin Only)"])
-    app.include_router(tenants_router, prefix="/api/v1/tenants", tags=["🏢 Tenant Management (Super Admin Only)"])
-    app.include_router(organizations_router, prefix="/api/v1/organizations", tags=["🏛️ Organization Management (Tenant/Org Admin)"])
-    app.include_router(users_router, prefix="/api/v1/users", tags=["👥 User Management (Role-Based Access)"])
-    app.include_router(companies.router, prefix="/api/v1/companies", tags=["🏭 Companies (Members+)"])
-    app.include_router(predictions.router, prefix="/api/v1/predictions", tags=["📊 Predictions (Members+)"])
+    app.include_router(auth_router, prefix="/api/v1/auth", tags=["Authentication"])
+    app.include_router(auth_admin_router, prefix="/api/v1/auth", tags=["Admin Authentication"])
+    app.include_router(tenant_admin_router, prefix="/api/v1", tags=["Tenant Admin Management"])
+    app.include_router(tenants_router, prefix="/api/v1/tenants", tags=["Tenant Management"])
+    app.include_router(organizations_router, prefix="/api/v1/organizations", tags=["Organization Management"])
+    app.include_router(users_router, prefix="/api/v1/users", tags=["User Management"])
+    app.include_router(companies.router, prefix="/api/v1/companies", tags=["Companies"])
+    app.include_router(predictions.router, prefix="/api/v1/predictions", tags=["Predictions"])
 
-    # Root endpoints
     @app.get("/")
     async def root():
-        """API root endpoint with service information and final API structure."""
+        """API root endpoint with service information."""
         return {
-            "name": "🏦 Financial Default Risk Prediction API",
+            "name": "Default Rate Backend API",
             "version": "2.0.0",
-            "description": "Enterprise multi-tenant financial risk assessment platform",
-            "docs": "/docs",
-            "redoc": "/redoc",
-            "api_sections": {
-                "🔐 user_authentication": {
-                    "prefix": "/api/v1/auth",
-                    "access": "Public/User",
-                    "endpoints": ["register", "login", "join", "refresh", "logout"]
-                },
-                "👨‍💼 admin_authentication": {
-                    "prefix": "/api/v1/auth/admin",
-                    "access": "Super Admin Only",
-                    "endpoints": ["create-user", "impersonate", "force-password-reset", "audit", "bulk-activate"]
-                },
-                "🎯 tenant_admin_management": {
-                    "prefix": "/api/v1/tenant-admin",
-                    "access": "Super Admin Only",
-                    "endpoints": ["create-tenant-with-admin ⭐", "assign-existing-user ⭐", "assign-user-to-organization ⭐", "admin-info", "remove-admin"],
-                    "note": "⭐ Main APIs for HDFC Bank case"
-                },
-                "🏢 tenant_management": {
-                    "prefix": "/api/v1/tenants",
-                    "access": "Super Admin Only",
-                    "endpoints": ["list", "create", "get", "update", "delete", "stats"],
-                    "note": "Core tenant CRUD operations only - admin management moved to tenant-admin section"
-                },
-                "🏛️ organization_management": {
-                    "prefix": "/api/v1/organizations",
-                    "access": "Tenant Admin + Org Admin",
-                    "endpoints": ["list", "create", "get", "update", "delete", "regenerate-token", "whitelist", "users"]
-                },
-                "👥 user_management": {
-                    "prefix": "/api/v1/users",
-                    "access": "Role-Based Scoped",
-                    "endpoints": ["profile (self)", "list", "create", "get", "update", "delete", "role", "activate", "deactivate"]
-                },
-                "🏭 companies": {
-                    "prefix": "/api/v1/companies",
-                    "access": "Members+",
-                    "endpoints": ["list", "create", "get", "search"]
-                },
-                "📊 predictions": {
-                    "prefix": "/api/v1/predictions",
-                    "access": "Members+",
-                    "endpoints": ["unified-predict ⭐", "companies ⭐", "summary ⭐", "annual", "quarterly", "bulk", "async", "management"],
-                    "note": "⭐ Core prediction APIs"
-                }
+            "description": "Financial risk assessment platform with machine learning predictions",
+            "environment": os.getenv("ENVIRONMENT", "development"),
+            "status": "operational",
+            "endpoints": {
+                "health": "/health",
+                "docs": "/docs", 
+                "redoc": "/redoc",
+                "api": "/api/v1"
             },
-            "role_hierarchy": [
-                "Super Admin → Full system access",
-                "Tenant Admin → Tenant-scoped management", 
-                "Org Admin → Organization-scoped management",
-                "Member → Company & prediction access",
-                "User → Basic profile access"
-            ],
-            "quick_start_hdfc": [
-                "1. POST /auth/login (Super Admin)",
-                "2. POST /tenant-admin/assign-existing-user (Connect admin@hdfc.com)",
-                "3. POST /organizations (Create HDFC organizations)",
-                "4. POST /predictions/unified-predict (Run ML predictions)"
-            ]
+            "timestamp": datetime.utcnow().isoformat()
         }
 
     @app.get("/health")
     async def health_check():
-        """Health check endpoint for monitoring."""
-        return {
+        """Comprehensive health check endpoint for monitoring."""
+        import redis
+        from sqlalchemy import text
+        
+        health_status = {
             "status": "healthy",
             "timestamp": datetime.utcnow().isoformat(),
-            "service": "financial-risk-api",
-            "version": "2.0.0"
+            "service": "default-rate-backend-api",
+            "version": "2.0.0",
+            "environment": os.getenv("ENVIRONMENT", "development"),
+            "services": {
+                "database": {"status": "unknown", "connected": False},
+                "redis": {"status": "unknown", "connected": False},
+                "ml_models": {"status": "unknown", "loaded": False},
+                "celery": {"status": "unknown", "available": False}
+            },
+            "system": {
+                "cpu_usage": 0.0,
+                "memory_usage": 0.0,
+                "disk_usage": 0.0
+            }
         }
+        
+        overall_healthy = True
+        
+        try:
+            from app.core.database import get_session_local
+            db = get_session_local()
+            result = db.execute(text("SELECT 1"))
+            health_status["services"]["database"] = {
+                "status": "healthy",
+                "connected": True
+            }
+            db.close()
+        except Exception as e:
+            health_status["services"]["database"] = {
+                "status": "error",
+                "connected": False,
+                "error": "Connection failed"
+            }
+            overall_healthy = False
+        
+        try:
+            redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+            r = redis.from_url(redis_url)
+            r.ping()
+            health_status["services"]["redis"] = {
+                "status": "healthy",
+                "connected": True
+            }
+        except Exception as e:
+            health_status["services"]["redis"] = {
+                "status": "error", 
+                "connected": False,
+                "error": "Connection failed"
+            }
+            overall_healthy = False
+        
+        try:
+            from app.services.ml_service import ml_model
+            from app.services.quarterly_ml_service import quarterly_ml_model
+            
+            annual_loaded = hasattr(ml_model, 'model') and ml_model.model is not None
+            quarterly_loaded = hasattr(quarterly_ml_model, 'logistic_model') and quarterly_ml_model.logistic_model is not None
+            
+            if annual_loaded and quarterly_loaded:
+                health_status["services"]["ml_models"] = {
+                    "status": "healthy",
+                    "loaded": True,
+                    "models": ["annual_prediction", "quarterly_prediction"]
+                }
+            else:
+                health_status["services"]["ml_models"] = {
+                    "status": "warning",
+                    "loaded": False,
+                    "error": "Some models not loaded"
+                }
+        except Exception as e:
+            health_status["services"]["ml_models"] = {
+                "status": "error",
+                "loaded": False,
+                "error": "Model loading failed"
+            }
+            overall_healthy = False
+        
+        try:
+            from app.workers.celery_app import celery_app
+            inspect = celery_app.control.inspect()
+            stats = inspect.stats()
+            
+            if stats:
+                health_status["services"]["celery"] = {
+                    "status": "healthy",
+                    "available": True,
+                    "workers": len(stats) if stats else 0
+                }
+            else:
+                health_status["services"]["celery"] = {
+                    "status": "warning",
+                    "available": False,
+                    "error": "No workers available"
+                }
+        except Exception as e:
+            health_status["services"]["celery"] = {
+                "status": "error",
+                "available": False,
+                "error": "Celery not available"
+            }
+        
+        try:
+            import psutil
+            health_status["system"] = {
+                "cpu_usage": round(psutil.cpu_percent(interval=0.1), 2),
+                "memory_usage": round(psutil.virtual_memory().percent, 2),
+                "disk_usage": round(psutil.disk_usage('/').percent, 2)
+            }
+        except ImportError:
+            health_status["system"] = {
+                "cpu_usage": "N/A",
+                "memory_usage": "N/A", 
+                "disk_usage": "N/A",
+                "note": "psutil not installed - system metrics unavailable"
+            }
+        except Exception:
+            health_status["system"] = {
+                "cpu_usage": "Error",
+                "memory_usage": "Error",
+                "disk_usage": "Error"
+            }
+        
+        if not overall_healthy:
+            health_status["status"] = "degraded"
+        
+        return health_status
 
     return app
 
 
-# Create the app instance
 app = create_app()
