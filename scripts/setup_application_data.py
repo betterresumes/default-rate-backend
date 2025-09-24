@@ -1,22 +1,7 @@
 #!/usr/bin/env python3
 """
-Professional Application Data Setup Script for Default Rate Prediction System
-
-This script creates a complete professional setup with:
-- 1 Super Admin
-- 1 Tenant with 1 Tenant Admin
-- 2 Organizations with 1 Org Admin each
-- 2 Org Members per organization
-- Professional email addresses and company names
-
-All data is configurable through the DATA_CONFIG dictionary.
-
 Usage:
     python scripts/setup_application_data.py
-
-Requirements:
-    - Database tables must exist (run reset_database.py first)
-    - .env file with DATABASE_URL
 """
 
 import os
@@ -29,22 +14,18 @@ from datetime import datetime
 from dotenv import load_dotenv
 from passlib.context import CryptContext
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Password hashing configuration (same as application)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=5)
 
-# Load environment variables
 backend_dir = Path(__file__).parent.parent
 env_path = backend_dir / '.env'
 load_dotenv(env_path)
 
-# Add backend directory to Python path
 sys.path.insert(0, str(backend_dir))
 
 try:
@@ -56,12 +37,7 @@ except ImportError as e:
     logger.error(f"❌ Failed to import database components: {e}")
     sys.exit(1)
 
-# ========================================
-# PROFESSIONAL DATA CONFIGURATION
-# ========================================
-
 DATA_CONFIG = {
-    # Super Admin Configuration
     "super_admin": {
         "email": "admin@defaultrate.com",
         "username": "super_admin",
@@ -70,7 +46,6 @@ DATA_CONFIG = {
         "role": "super_admin"
     },
     
-    # Tenant Configuration
     "tenant": {
         "name": "FinTech Solutions Enterprise",
         "slug": "fintech-solutions",
@@ -78,7 +53,6 @@ DATA_CONFIG = {
         "description": "Leading financial technology and risk assessment platform"
     },
     
-    # Tenant Admin Configuration
     "tenant_admin": {
         "email": "admin@fintech-solutions.com",
         "username": "tenant_admin",
@@ -87,7 +61,6 @@ DATA_CONFIG = {
         "role": "tenant_admin"
     },
     
-    # Organizations Configuration
     "organizations": [
         {
             "name": "Risk Assessment Division",
@@ -96,7 +69,6 @@ DATA_CONFIG = {
             "description": "Specialized team for credit risk analysis and default prediction modeling",
             "default_role": "org_member",
             
-            # Organization Admin
             "admin": {
                 "email": "risk.admin@fintech-solutions.com",
                 "username": "risk_admin",
@@ -105,7 +77,6 @@ DATA_CONFIG = {
                 "role": "org_admin"
             },
             
-            # Organization Members
             "members": [
                 {
                     "email": "analyst1@fintech-solutions.com",
@@ -130,7 +101,6 @@ DATA_CONFIG = {
             "description": "Advanced analytics team focused on credit scoring and financial modeling",
             "default_role": "org_member",
             
-            # Organization Admin
             "admin": {
                 "email": "credit.admin@fintech-solutions.com",
                 "username": "credit_admin",
@@ -139,7 +109,6 @@ DATA_CONFIG = {
                 "role": "org_admin"
             },
             
-            # Organization Members
             "members": [
                 {
                     "email": "modeler1@fintech-solutions.com",
@@ -182,7 +151,7 @@ def create_user(db, user_data, tenant_id=None, organization_id=None):
         )
         
         db.add(user)
-        db.flush()  # Flush to get the ID
+        db.flush()  
         
         logger.info(f"✅ Created user: {user_data['full_name']} ({user_data['email']})")
         return user
