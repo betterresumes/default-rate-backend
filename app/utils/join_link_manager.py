@@ -1,16 +1,6 @@
 #!/usr/bin/env python3
 """
-Join Link Management System
-============================
-
-Simple, production-ready system for organization invitations via shareable links.
-No approval workflows, no pending states, no organization codes to remember.
-
-Features:
-- Generate secure join links for organizations
-- Validate join tokens and auto-join users
-- Super admin control over all organizations
-- Track join statistics and link usage
+Simple, production-ready system for organization invitations via shareable codes.
 """
 
 import secrets
@@ -29,7 +19,6 @@ class JoinLinkManager:
     @staticmethod
     def generate_join_token() -> str:
         """Generate a secure 32-character join token"""
-        # Use URL-safe characters: letters + numbers + dashes
         alphabet = string.ascii_letters + string.digits + '-_'
         return ''.join(secrets.choice(alphabet) for _ in range(32))
     
@@ -55,14 +44,11 @@ class JoinLinkManager:
             }
         """
         
-        # Generate unique join token
         join_token = JoinLinkManager.generate_join_token()
         
-        # Ensure token is unique
         while db.query(Organization).filter(Organization.join_token == join_token).first():
             join_token = JoinLinkManager.generate_join_token()
         
-        # Create organization
         organization = Organization(
             name=name,
             slug=slug,
@@ -101,12 +87,10 @@ class JoinLinkManager:
         if not organization:
             raise ValueError("Organization not found")
         
-        # Generate new unique token
         new_token = JoinLinkManager.generate_join_token()
         while db.query(Organization).filter(Organization.join_token == new_token).first():
             new_token = JoinLinkManager.generate_join_token()
         
-        # Update organization
         organization.join_token = new_token
         organization.join_created_at = datetime.utcnow()
         
@@ -152,19 +136,16 @@ class JoinLinkManager:
             }
         """
         
-        # Get user
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
             return {"success": False, "message": "User not found"}
         
-        # Check if user already in an organization
         if user.organization_id:
             return {
                 "success": False, 
                 "message": "User already belongs to an organization"
             }
         
-        # Validate join token
         organization = JoinLinkManager.validate_join_token(db, join_token)
         if not organization:
             return {
@@ -172,7 +153,6 @@ class JoinLinkManager:
                 "message": "Invalid or expired join link"
             }
         
-        # Check organization capacity
         current_users = db.query(User).filter(
             User.organization_id == organization.id
         ).count()
@@ -183,7 +163,6 @@ class JoinLinkManager:
                 "message": f"Organization has reached maximum capacity ({organization.max_users} users)"
             }
         
-        # Join user to organization
         user.organization_id = organization.id
         user.role = organization.default_role
         user.joined_via_token = join_token
@@ -238,7 +217,6 @@ class JoinLinkManager:
         if not organization:
             return {"success": False, "message": "Organization not found"}
         
-        # Count users who joined via this token
         users_joined_via_token = db.query(User).filter(
             and_(
                 User.organization_id == organization_id,
@@ -246,7 +224,6 @@ class JoinLinkManager:
             )
         ).count()
         
-        # Total users in organization
         total_users = db.query(User).filter(
             User.organization_id == organization_id
         ).count()
@@ -278,7 +255,6 @@ class SuperAdminManager:
         Super admin creates organization and can optionally assign an admin
         """
         
-        # Verify super admin
         super_admin = db.query(User).filter(
             and_(
                 User.id == super_admin_user_id,
@@ -289,7 +265,6 @@ class SuperAdminManager:
         if not super_admin:
             return {"success": False, "message": "Only super admins can create organizations"}
         
-        # Create organization
         result = JoinLinkManager.create_organization_with_join_link(
             db=db,
             name=org_data["name"],
@@ -303,7 +278,6 @@ class SuperAdminManager:
         
         organization = result["organization"]
         
-        # Optionally assign an admin user
         if "admin_email" in org_data:
             admin_user = db.query(User).filter(User.email == org_data["admin_email"]).first()
             if admin_user and not admin_user.organization_id:
@@ -357,40 +331,4 @@ class SuperAdminManager:
         }
 
 
-# Usage Examples
-if __name__ == "__main__":
-    """
-    EXAMPLE USAGE:
-    
-    # 1. Super admin creates organization
-    result = SuperAdminManager.create_organization_as_super_admin(
-        db=db,
-        super_admin_user_id="super-admin-uuid",
-        org_data={
-            "name": "Acme Corp",
-            "slug": "acme-corp",
-            "domain": "acme.com",
-            "description": "Financial analysis team",
-            "max_users": 50,
-            "admin_email": "admin@acme.com"  # Optional: assign admin
-        }
-    )
-    
-    # 2. Get join link to share
-    join_link = result["join_link"]
-    # "https://app.yoursite.com/join/Kx9mP2nQ8vR4tL7wZ3bH1cF6gJ5uE0sA"
-    
-    # 3. User clicks link and registers/logs in
-    # Frontend gets token from URL: /join/Kx9mP2nQ8vR4tL7wZ3bH1cF6gJ5uE0sA
-    
-    # 4. User automatically joins organization
-    join_result = JoinLinkManager.join_organization_via_token(
-        db=db,
-        user_id="new-user-uuid",
-        join_token="Kx9mP2nQ8vR4tL7wZ3bH1cF6gJ5uE0sA"
-    )
-    
-    # 5. Check organization stats
-    stats = JoinLinkManager.get_organization_join_stats(db, org_id)
-    """
-    pass
+if __name__ == "__main__"

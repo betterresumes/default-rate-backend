@@ -10,6 +10,7 @@ import math
 import logging
 import json
 
+# Core imports
 from ...core.database import get_db, User, Company, AnnualPrediction, QuarterlyPrediction, Organization, BulkUploadJob
 from ...schemas.schemas import (
     AnnualPredictionRequest, QuarterlyPredictionRequest
@@ -21,8 +22,12 @@ from app.workers.celery_app import celery_app
 
 router = APIRouter()
 
+# Initialize logger
 logger = logging.getLogger(__name__)
 
+# ========================================
+# SIMPLIFIED ACCESS CONTROL HELPERS  
+# ========================================
 
 def get_user_access_level(user: User):
     """Get the access level for data created by this user"""
@@ -38,8 +43,10 @@ def get_data_access_filter(user: User, prediction_model, include_system: bool = 
     conditions = []
     
     if user.role == "super_admin" and include_system:
+        # Super admin sees everything only when specifically requesting system data
         return None
     
+    # Personal data: only what the user created
     conditions.append(
         and_(
             prediction_model.access_level == "personal",
@@ -47,6 +54,7 @@ def get_data_access_filter(user: User, prediction_model, include_system: bool = 
         )
     )
     
+    # Organization data: if user is in an organization
     if user.organization_id:
         conditions.append(
             and_(
@@ -55,6 +63,7 @@ def get_data_access_filter(user: User, prediction_model, include_system: bool = 
             )
         )
     
+    # System data: only include if explicitly requested
     if include_system:
         conditions.append(prediction_model.access_level == "system")
     
@@ -76,6 +85,7 @@ def create_or_get_company(db: Session, company_symbol: str, company_name: str,
     access_level = get_user_access_level(user)
     organization_id = user.organization_id if access_level == "organization" else None
     
+    # Check for existing company in the same access scope
     query = db.query(Company).filter(
         Company.symbol == company_symbol.upper(),
         Company.access_level == access_level
@@ -91,6 +101,7 @@ def create_or_get_company(db: Session, company_symbol: str, company_name: str,
     if existing_company:
         return existing_company
     
+    # Create new company
     company = Company(
         symbol=company_symbol.upper(),
         name=company_name,
@@ -134,6 +145,9 @@ def safe_float(value):
     except (ValueError, TypeError):
         return None
 
+# ========================================
+# ANNUAL PREDICTION ENDPOINTS
+# ========================================
 
 @router.post("/annual", response_model=Dict)
 async def create_annual_prediction(
@@ -143,15 +157,18 @@ async def create_annual_prediction(
 ):
     """Create annual prediction with simplified 3-level access control"""
     try:
+        # Check permissions
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
                 detail="Authentication required to create predictions"
             )
 
+        # Get user's access level
         access_level = get_user_access_level(current_user)
         organization_id = current_user.organization_id if access_level == "organization" else None
         
+        # Create or get company
         company = create_or_get_company(
             db=db,
             company_symbol=request.company_symbol,
@@ -161,17 +178,20 @@ async def create_annual_prediction(
             user=current_user
         )
         
+        # Check if prediction already exists
         existing_query = db.query(AnnualPrediction).filter(
             AnnualPrediction.company_id == company.id,
             AnnualPrediction.reporting_year == request.reporting_year,
             AnnualPrediction.access_level == access_level
         )
         
+        # Add specific filters based on access level
         if access_level == "organization":
             existing_query = existing_query.filter(AnnualPrediction.organization_id == organization_id)
         elif access_level == "personal":
             existing_query = existing_query.filter(AnnualPrediction.created_by == str(current_user.id))
         
+        # Check for quarter
         if request.reporting_quarter:
             existing_query = existing_query.filter(AnnualPrediction.reporting_quarter == request.reporting_quarter)
         else:
@@ -186,6 +206,7 @@ async def create_annual_prediction(
                 detail=f"Annual prediction for {request.company_symbol} in {request.reporting_year}{quarter_text} already exists in your {access_level} scope"
             )
         
+        # Prepare data for ML model
         financial_data = {
             'long_term_debt_to_total_capital': request.long_term_debt_to_total_capital,
             'total_debt_to_ebitda': request.total_debt_to_ebitda,
@@ -194,8 +215,10 @@ async def create_annual_prediction(
             'return_on_assets': request.return_on_assets
         }
         
+        # Get ML prediction
         ml_result = await ml_model.predict_annual(financial_data)
         
+        # Create prediction record
         prediction = AnnualPrediction(
             id=uuid.uuid4(),
             company_id=company.id,
@@ -204,17 +227,20 @@ async def create_annual_prediction(
             reporting_year=request.reporting_year,
             reporting_quarter=request.reporting_quarter,
             
+            # Financial input data
             long_term_debt_to_total_capital=request.long_term_debt_to_total_capital,
             total_debt_to_ebitda=request.total_debt_to_ebitda,
             net_income_margin=request.net_income_margin,
             ebit_to_interest_expense=request.ebit_to_interest_expense,
             return_on_assets=request.return_on_assets,
             
+            # ML prediction results
             probability=ml_result['probability'],
             risk_level=ml_result['risk_level'],
             confidence=ml_result['confidence'],
             predicted_at=datetime.utcnow(),
             
+            # Metadata
             created_by=str(current_user.id)
         )
         
@@ -222,6 +248,7 @@ async def create_annual_prediction(
         db.commit()
         db.refresh(prediction)
         
+        # Get organization name for response (if applicable)
         organization_name = None
         if organization_id:
             org = db.query(Organization).filter(Organization.id == organization_id).first()
@@ -240,16 +267,19 @@ async def create_annual_prediction(
                 "reporting_year": request.reporting_year,
                 "reporting_quarter": request.reporting_quarter,
                 
+                # Financial input ratios
                 "long_term_debt_to_total_capital": float(request.long_term_debt_to_total_capital),
                 "total_debt_to_ebitda": float(request.total_debt_to_ebitda),
                 "net_income_margin": float(request.net_income_margin),
                 "ebit_to_interest_expense": float(request.ebit_to_interest_expense),
                 "return_on_assets": float(request.return_on_assets),
                 
+                # ML prediction results
                 "probability": float(ml_result['probability']),
                 "risk_level": ml_result['risk_level'],
                 "confidence": float(ml_result['confidence']),
                 
+                # Simplified access control
                 "access_level": access_level,
                 "organization_id": str(organization_id) if organization_id else None,
                 "organization_name": organization_name,
@@ -273,15 +303,18 @@ async def create_quarterly_prediction(
 ):
     """Create quarterly prediction with simplified 3-level access control"""
     try:
+        # Check permissions
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
                 detail="Authentication required to create predictions"
             )
 
+        # Get user's access level
         access_level = get_user_access_level(current_user)
         organization_id = current_user.organization_id if access_level == "organization" else None
         
+        # Create or get company
         company = create_or_get_company(
             db=db,
             company_symbol=request.company_symbol,
@@ -291,6 +324,7 @@ async def create_quarterly_prediction(
             user=current_user
         )
         
+        # Check if prediction already exists
         existing_query = db.query(QuarterlyPrediction).filter(
             QuarterlyPrediction.company_id == company.id,
             QuarterlyPrediction.reporting_year == request.reporting_year,
@@ -298,6 +332,7 @@ async def create_quarterly_prediction(
             QuarterlyPrediction.access_level == access_level
         )
         
+        # Add specific filters based on access level
         if access_level == "organization":
             existing_query = existing_query.filter(QuarterlyPrediction.organization_id == organization_id)
         elif access_level == "personal":
@@ -311,6 +346,7 @@ async def create_quarterly_prediction(
                 detail=f"Quarterly prediction for {request.company_symbol} in {request.reporting_year} {request.reporting_quarter} already exists in your {access_level} scope"
             )
         
+        # Prepare data for ML model
         financial_data = {
             'total_debt_to_ebitda': request.total_debt_to_ebitda,
             'sga_margin': request.sga_margin,
@@ -318,8 +354,10 @@ async def create_quarterly_prediction(
             'return_on_capital': request.return_on_capital
         }
         
+        # Get ML prediction
         ml_result = await quarterly_ml_model.predict_quarterly(financial_data)
         
+        # Create prediction record
         prediction = QuarterlyPrediction(
             id=uuid.uuid4(),
             company_id=company.id,
@@ -328,11 +366,13 @@ async def create_quarterly_prediction(
             reporting_year=request.reporting_year,
             reporting_quarter=request.reporting_quarter,
             
+            # Financial input data
             total_debt_to_ebitda=request.total_debt_to_ebitda,
             sga_margin=request.sga_margin,
             long_term_debt_to_total_capital=request.long_term_debt_to_total_capital,
             return_on_capital=request.return_on_capital,
             
+            # ML prediction results
             logistic_probability=ml_result.get('logistic_probability'),
             gbm_probability=ml_result.get('gbm_probability'),
             ensemble_probability=ml_result.get('ensemble_probability'),
@@ -340,6 +380,7 @@ async def create_quarterly_prediction(
             confidence=ml_result['confidence'],
             predicted_at=datetime.utcnow(),
             
+            # Metadata
             created_by=str(current_user.id)
         )
         
@@ -347,6 +388,7 @@ async def create_quarterly_prediction(
         db.commit()
         db.refresh(prediction)
         
+        # Get organization name if applicable
         organization_name = None
         if organization_id:
             org = db.query(Organization).filter(Organization.id == organization_id).first()
@@ -365,17 +407,20 @@ async def create_quarterly_prediction(
                 "reporting_year": request.reporting_year,
                 "reporting_quarter": request.reporting_quarter,
                 
+                # Financial input ratios
                 "total_debt_to_ebitda": float(request.total_debt_to_ebitda),
                 "sga_margin": float(request.sga_margin),
                 "long_term_debt_to_total_capital": float(request.long_term_debt_to_total_capital),
                 "return_on_capital": float(request.return_on_capital),
                 
+                # ML prediction results
                 "logistic_probability": float(ml_result.get('logistic_probability', 0)),
                 "gbm_probability": float(ml_result.get('gbm_probability', 0)),
                 "ensemble_probability": float(ml_result.get('ensemble_probability', 0)),
                 "risk_level": ml_result['risk_level'],
                 "confidence": float(ml_result['confidence']),
                 
+                # Simplified access control
                 "access_level": access_level,
                 "organization_id": str(organization_id) if organization_id else None,
                 "organization_name": organization_name,
@@ -391,6 +436,7 @@ async def create_quarterly_prediction(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error creating quarterly prediction: {str(e)}")
         
+        # Prepare data for ML model
         financial_data = {
             'total_debt_to_ebitda': request.total_debt_to_ebitda,
             'sga_margin': request.sga_margin,
@@ -398,8 +444,10 @@ async def create_quarterly_prediction(
             'return_on_capital': request.return_on_capital
         }
         
+        # Get ML prediction
         ml_result = await quarterly_ml_model.predict_quarterly(financial_data)
         
+        # Create prediction record
         prediction = QuarterlyPrediction(
             id=uuid.uuid4(),
             company_id=company.id,
@@ -407,11 +455,13 @@ async def create_quarterly_prediction(
             reporting_year=request.reporting_year,
             reporting_quarter=request.reporting_quarter,
             
+            # Financial input data
             total_debt_to_ebitda=request.total_debt_to_ebitda,
             sga_margin=request.sga_margin,
             long_term_debt_to_total_capital=request.long_term_debt_to_total_capital,
             return_on_capital=request.return_on_capital,
             
+            # ML prediction results
             logistic_probability=ml_result.get('logistic_probability'),
             gbm_probability=ml_result.get('gbm_probability'),
             ensemble_probability=ml_result.get('ensemble_probability'),
@@ -419,6 +469,7 @@ async def create_quarterly_prediction(
             confidence=ml_result['confidence'],
             predicted_at=datetime.utcnow(),
             
+            # Metadata
             created_by=current_user.id
         )
         
@@ -426,6 +477,7 @@ async def create_quarterly_prediction(
         db.commit()
         db.refresh(prediction)
         
+        # Get organization name if applicable
         organization_name = None
         if final_org_id:
             org = db.query(Organization).filter(Organization.id == final_org_id).first()
@@ -444,17 +496,20 @@ async def create_quarterly_prediction(
                 "reporting_year": request.reporting_year,
                 "reporting_quarter": request.reporting_quarter,
                 
+                # Financial input ratios
                 "total_debt_to_ebitda": float(request.total_debt_to_ebitda),
                 "sga_margin": float(request.sga_margin),
                 "long_term_debt_to_total_capital": float(request.long_term_debt_to_total_capital),
                 "return_on_capital": float(request.return_on_capital),
                 
+                # ML prediction results
                 "logistic_probability": float(ml_result.get('logistic_probability', 0)),
                 "gbm_probability": float(ml_result.get('gbm_probability', 0)),
                 "ensemble_probability": float(ml_result.get('ensemble_probability', 0)),
                 "risk_level": ml_result['risk_level'],
                 "confidence": float(ml_result['confidence']),
                 
+                # Simplified access control
                 "access_level": access_level,
                 "organization_id": str(organization_id) if organization_id else None,
                 "organization_name": organization_name,
@@ -470,6 +525,9 @@ async def create_quarterly_prediction(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error creating quarterly prediction: {str(e)}")
 
+# ========================================
+# RETRIEVE PREDICTIONS
+# ========================================
 
 @router.get("/annual", response_model=Dict)
 async def get_annual_predictions(
@@ -482,12 +540,14 @@ async def get_annual_predictions(
 ):
     """Get paginated annual predictions (personal + organization data only - excludes system data)"""
     try:
+        # Check permissions
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
                 detail="Authentication required to view predictions"
             )
 
+        # Build query with joins for performance
         query = db.query(
             AnnualPrediction,
             Company,
@@ -501,19 +561,23 @@ async def get_annual_predictions(
             User, AnnualPrediction.created_by == User.id
         )
         
+        # Apply access control - exclude system data from regular endpoint
         access_filter = get_data_access_filter(current_user, AnnualPrediction, include_system=False)
         if access_filter is not None:
             query = query.filter(access_filter)
         
+        # Apply additional filters
         if company_symbol:
             query = query.filter(Company.symbol.ilike(f"%{company_symbol}%"))
         if reporting_year:
             query = query.filter(AnnualPrediction.reporting_year == reporting_year)
         
+        # Pagination
         total = query.count()
         skip = (page - 1) * size
         results = query.offset(skip).limit(size).all()
         
+        # Format response with simplified access control info
         prediction_data = []
         for pred, company, organization, creator in results:            
             prediction_data.append({
@@ -526,16 +590,19 @@ async def get_annual_predictions(
                 "reporting_year": pred.reporting_year,
                 "reporting_quarter": pred.reporting_quarter,
                 
+                # Financial input ratios
                 "long_term_debt_to_total_capital": safe_float(pred.long_term_debt_to_total_capital),
                 "total_debt_to_ebitda": safe_float(pred.total_debt_to_ebitda),
                 "net_income_margin": safe_float(pred.net_income_margin),
                 "ebit_to_interest_expense": safe_float(pred.ebit_to_interest_expense),
                 "return_on_assets": safe_float(pred.return_on_assets),
                 
+                # ML prediction results
                 "probability": safe_float(pred.probability),
                 "risk_level": pred.risk_level,
                 "confidence": safe_float(pred.confidence),
                 
+                # Simplified access control
                 "access_level": pred.access_level,
                 "organization_id": str(pred.organization_id) if pred.organization_id else None,
                 "organization_name": organization.name if organization else None,
@@ -573,12 +640,14 @@ async def get_quarterly_predictions(
 ):
     """Get paginated quarterly predictions (personal + organization data only - excludes system data)"""
     try:
+        # Check permissions
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
                 detail="Authentication required to view predictions"
             )
 
+        # Optimized query with joins
         query = db.query(
             QuarterlyPrediction,
             Company,
@@ -592,9 +661,11 @@ async def get_quarterly_predictions(
             User, QuarterlyPrediction.created_by == User.id
         )
         
+        # Apply access control - exclude system data from regular endpoint
         access_filter = get_data_access_filter(current_user, QuarterlyPrediction, include_system=False)
         if access_filter is not None:
             query = query.filter(access_filter)
+        # Apply additional filters
         if company_symbol:
             query = query.filter(Company.symbol.ilike(f"%{company_symbol}%"))
         if reporting_year:
@@ -602,10 +673,12 @@ async def get_quarterly_predictions(
         if reporting_quarter:
             query = query.filter(QuarterlyPrediction.reporting_quarter == reporting_quarter)
         
+        # Pagination
         total = query.count()
         skip = (page - 1) * size
         results = query.offset(skip).limit(size).all()
         
+        # Format response with simplified access control
         prediction_data = []
         for pred, company, organization, creator in results:
             prediction_data.append({
@@ -618,17 +691,20 @@ async def get_quarterly_predictions(
                 "reporting_year": pred.reporting_year,
                 "reporting_quarter": pred.reporting_quarter,
                 
+                # Financial input ratios
                 "total_debt_to_ebitda": safe_float(pred.total_debt_to_ebitda),
                 "sga_margin": safe_float(pred.sga_margin),
                 "long_term_debt_to_total_capital": safe_float(pred.long_term_debt_to_total_capital),
                 "return_on_capital": safe_float(pred.return_on_capital),
                 
+                # ML prediction results
                 "logistic_probability": safe_float(pred.logistic_probability),
                 "gbm_probability": safe_float(pred.gbm_probability),
                 "ensemble_probability": safe_float(pred.ensemble_probability),
                 "risk_level": pred.risk_level,
                 "confidence": safe_float(pred.confidence),
                 
+                # Simplified access control
                 "access_level": pred.access_level,
                 "organization_id": str(pred.organization_id) if pred.organization_id else None,
                 "organization_name": organization.name if organization else None,
@@ -654,6 +730,9 @@ async def get_quarterly_predictions(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching quarterly predictions: {str(e)}")
 
+# ========================================
+# SYSTEM-LEVEL PREDICTIONS ENDPOINTS
+# ========================================
 
 @router.get("/annual/system", response_model=Dict)
 async def get_system_annual_predictions(
@@ -668,12 +747,14 @@ async def get_system_annual_predictions(
 ):
     """Get paginated system-level annual predictions (accessible to all user roles)"""
     try:
+        # Check basic authentication (all roles allowed)
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
                 detail="Authentication required to view system predictions"
             )
 
+        # Build query with joins for performance - ONLY system-level predictions
         query = db.query(
             AnnualPrediction,
             Company,
@@ -686,6 +767,7 @@ async def get_system_annual_predictions(
             AnnualPrediction.access_level == "system"  # Only system-level predictions
         )
         
+        # Apply additional filters
         if company_symbol:
             query = query.filter(Company.symbol.ilike(f"%{company_symbol}%"))
         if reporting_year:
@@ -695,12 +777,15 @@ async def get_system_annual_predictions(
         if risk_level:
             query = query.filter(AnnualPrediction.risk_level == risk_level)
         
+        # Order by created_at desc for latest predictions first
         query = query.order_by(AnnualPrediction.created_at.desc())
         
+        # Pagination
         total = query.count()
         skip = (page - 1) * size
         results = query.offset(skip).limit(size).all()
         
+        # Format response
         prediction_data = []
         for pred, company, creator in results:            
             prediction_data.append({
@@ -713,16 +798,19 @@ async def get_system_annual_predictions(
                 "reporting_year": pred.reporting_year,
                 "reporting_quarter": pred.reporting_quarter,
                 
+                # Financial input ratios
                 "long_term_debt_to_total_capital": safe_float(pred.long_term_debt_to_total_capital),
                 "total_debt_to_ebitda": safe_float(pred.total_debt_to_ebitda),
                 "net_income_margin": safe_float(pred.net_income_margin),
                 "ebit_to_interest_expense": safe_float(pred.ebit_to_interest_expense),
                 "return_on_assets": safe_float(pred.return_on_assets),
                 
+                # ML prediction results
                 "probability": safe_float(pred.probability),
                 "risk_level": pred.risk_level,
                 "confidence": safe_float(pred.confidence),
                 
+                # System-level metadata
                 "access_level": pred.access_level,
                 "created_by": str(pred.created_by),
                 "created_by_email": creator.email if creator else None,
@@ -768,12 +856,14 @@ async def get_system_quarterly_predictions(
 ):
     """Get paginated system-level quarterly predictions (accessible to all user roles)"""
     try:
+        # Check basic authentication (all roles allowed)
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
                 detail="Authentication required to view system predictions"
             )
 
+        # Build query with joins for performance - ONLY system-level predictions
         query = db.query(
             QuarterlyPrediction,
             Company,
@@ -786,6 +876,7 @@ async def get_system_quarterly_predictions(
             QuarterlyPrediction.access_level == "system"  # Only system-level predictions
         )
         
+        # Apply additional filters
         if company_symbol:
             query = query.filter(Company.symbol.ilike(f"%{company_symbol}%"))
         if reporting_year:
@@ -797,12 +888,15 @@ async def get_system_quarterly_predictions(
         if risk_level:
             query = query.filter(QuarterlyPrediction.risk_level == risk_level)
         
+        # Order by created_at desc for latest predictions first
         query = query.order_by(QuarterlyPrediction.created_at.desc())
         
+        # Pagination
         total = query.count()
         skip = (page - 1) * size
         results = query.offset(skip).limit(size).all()
         
+        # Format response
         prediction_data = []
         for pred, company, creator in results:            
             prediction_data.append({
@@ -815,17 +909,20 @@ async def get_system_quarterly_predictions(
                 "reporting_year": pred.reporting_year,
                 "reporting_quarter": pred.reporting_quarter,
                 
+                # Financial input ratios
                 "total_debt_to_ebitda": safe_float(pred.total_debt_to_ebitda),
                 "sga_margin": safe_float(pred.sga_margin),
                 "long_term_debt_to_total_capital": safe_float(pred.long_term_debt_to_total_capital),
                 "return_on_capital": safe_float(pred.return_on_capital),
                 
+                # ML prediction results
                 "logistic_probability": safe_float(pred.logistic_probability),
                 "gbm_probability": safe_float(pred.gbm_probability),
                 "ensemble_probability": safe_float(pred.ensemble_probability),
                 "risk_level": pred.risk_level,
                 "confidence": safe_float(pred.confidence),
                 
+                # System-level metadata
                 "access_level": pred.access_level,
                 "created_by": str(pred.created_by),
                 "created_by_email": creator.email if creator else None,
@@ -858,6 +955,9 @@ async def get_system_quarterly_predictions(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching system quarterly predictions: {str(e)}")
 
+# ========================================
+# BULK UPLOAD ENDPOINT
+# ========================================
 
 @router.post("/bulk-upload", response_model=Dict)
 async def bulk_upload_predictions(
@@ -868,27 +968,32 @@ async def bulk_upload_predictions(
 ):
     """Bulk upload predictions from CSV file"""
     try:
+        # Check permissions
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
                 detail="Authentication required to upload predictions"
             )
 
+        # Validate file type
         if not file.filename.endswith('.csv'):
             raise HTTPException(
                 status_code=400,
                 detail="Only CSV files are supported for bulk upload"
             )
 
+        # Read CSV content
         import pandas as pd
         import io
         
         content = await file.read()
         df = pd.read_csv(io.StringIO(content.decode('utf-8')))
         
+        # Get organization context
         organization_context = get_organization_context(current_user)
         access_level = get_user_access_level(current_user)
         
+        # Determine final organization_id for predictions
         if current_user.role == "super_admin":
             final_org_id = None  # System-level predictions
         elif current_user.organization_id:
@@ -904,8 +1009,10 @@ async def bulk_upload_predictions(
             "errors": []
         }
         
+        # Process each row
         for index, row in df.iterrows():
             try:
+                # Create or get company
                 company = create_or_get_company(
                     db=db,
                     company_symbol=row['company_symbol'],
@@ -916,12 +1023,14 @@ async def bulk_upload_predictions(
                 )
                 
                 if prediction_type == "annual":
+                    # Check if annual prediction already exists within the same scope
                     existing_query = db.query(AnnualPrediction).filter(
                         AnnualPrediction.company_id == company.id,
                         AnnualPrediction.reporting_year == row['reporting_year'],
                         AnnualPrediction.organization_id == final_org_id
                     )
                     
+                    # For user-specific predictions (no org), also check by created_by
                     if final_org_id is None and current_user.role != "super_admin":
                         existing_query = existing_query.filter(AnnualPrediction.created_by == str(current_user.id))
                     
@@ -933,6 +1042,7 @@ async def bulk_upload_predictions(
                         results["failed"] += 1
                         continue
                     
+                    # Prepare ML data
                     financial_data = {
                         'long_term_debt_to_total_capital': float(row['long_term_debt_to_total_capital']),
                         'total_debt_to_ebitda': float(row['total_debt_to_ebitda']),
@@ -941,8 +1051,10 @@ async def bulk_upload_predictions(
                         'return_on_assets': float(row['return_on_assets'])
                     }
                     
+                    # Get ML prediction
                     ml_result = await ml_model.predict_annual(financial_data)
                     
+                    # Create prediction
                     prediction = AnnualPrediction(
                         id=uuid.uuid4(),
                         company_id=company.id,
@@ -961,6 +1073,7 @@ async def bulk_upload_predictions(
                     )
                     
                 elif prediction_type == "quarterly":
+                    # Check if quarterly prediction already exists within the same scope
                     existing_query = db.query(QuarterlyPrediction).filter(
                         QuarterlyPrediction.company_id == company.id,
                         QuarterlyPrediction.reporting_year == row['reporting_year'],
@@ -968,6 +1081,7 @@ async def bulk_upload_predictions(
                         QuarterlyPrediction.organization_id == final_org_id
                     )
                     
+                    # For user-specific predictions (no org), also check by created_by
                     if final_org_id is None and current_user.role != "super_admin":
                         existing_query = existing_query.filter(QuarterlyPrediction.created_by == str(current_user.id))
                     
@@ -979,6 +1093,7 @@ async def bulk_upload_predictions(
                         results["failed"] += 1
                         continue
                     
+                    # Prepare ML data
                     financial_data = {
                         'total_debt_to_ebitda': float(row['total_debt_to_ebitda']),
                         'sga_margin': float(row['sga_margin']),
@@ -986,8 +1101,10 @@ async def bulk_upload_predictions(
                         'return_on_capital': float(row['return_on_capital'])
                     }
                     
+                    # Get ML prediction
                     ml_result = await quarterly_ml_model.predict_quarterly(financial_data)
                     
+                    # Create prediction
                     prediction = QuarterlyPrediction(
                         id=uuid.uuid4(),
                         company_id=company.id,
@@ -1015,6 +1132,7 @@ async def bulk_upload_predictions(
                 results["failed"] += 1
                 continue
         
+        # Commit all successful predictions
         db.commit()
         
         return {
@@ -1029,6 +1147,9 @@ async def bulk_upload_predictions(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Bulk upload failed: {str(e)}")
 
+# ========================================
+# ASYNC BULK UPLOAD WITH JOB TRACKING
+# ========================================
 
 @router.post("/annual/bulk-upload-async")
 async def bulk_upload_annual_async(
@@ -1039,21 +1160,25 @@ async def bulk_upload_annual_async(
 ):
     """Async bulk upload annual predictions with job tracking"""
     try:
+        # Check permissions
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
                 detail="Authentication required to create predictions"
             )
 
+        # Validate file type
         if not file.filename.endswith(('.csv', '.xlsx')):
             raise HTTPException(
                 status_code=400,
                 detail="Only CSV and Excel files are supported"
             )
 
+        # Get organization context
         organization_context = get_organization_context(current_user)
         is_global = current_user.role == "super_admin"
         
+        # Determine final organization_id for predictions
         if current_user.role == "super_admin":
             final_org_id = None  # Global predictions
         elif current_user.organization_id:
@@ -1061,6 +1186,7 @@ async def bulk_upload_annual_async(
         else:
             final_org_id = None  # User-specific predictions (no org)
         
+        # Read and validate file
         contents = await file.read()
         file_size = len(contents)
         
@@ -1069,6 +1195,7 @@ async def bulk_upload_annual_async(
         else:
             df = pd.read_excel(io.BytesIO(contents))
         
+        # Validate required columns
         required_columns = [
             'company_symbol', 'company_name', 'market_cap', 'sector',
             'reporting_year', 'reporting_quarter',
@@ -1083,6 +1210,7 @@ async def bulk_upload_annual_async(
                 detail=f"Missing required columns: {', '.join(missing_columns)}"
             )
         
+        # Convert DataFrame to list of dictionaries
         data = df.to_dict('records')
         total_rows = len(data)
         
@@ -1092,6 +1220,7 @@ async def bulk_upload_annual_async(
         if total_rows > 10000:  # Limit for safety
             raise HTTPException(status_code=400, detail="File contains too many rows (max 10,000)")
         
+        # Create bulk upload job
         from app.services.celery_bulk_upload_service import celery_bulk_upload_service
         
         job_id = await celery_bulk_upload_service.create_bulk_upload_job(
@@ -1103,6 +1232,7 @@ async def bulk_upload_annual_async(
             total_rows=total_rows
         )
         
+        # Start Celery background processing
         task_id = await celery_bulk_upload_service.process_annual_bulk_upload(
             job_id=job_id,
             data=data,
@@ -1133,21 +1263,25 @@ async def bulk_upload_quarterly_async(
 ):
     """Async bulk upload quarterly predictions with job tracking"""
     try:
+        # Check permissions
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
                 detail="Authentication required to create predictions"
             )
 
+        # Validate file type
         if not file.filename.endswith(('.csv', '.xlsx')):
             raise HTTPException(
                 status_code=400,
                 detail="Only CSV and Excel files are supported"
             )
 
+        # Get organization context
         organization_context = get_organization_context(current_user)
         access_level = get_user_access_level(current_user)
         
+        # Determine final organization_id for predictions
         if current_user.role == "super_admin":
             final_org_id = None  # System-level predictions
         elif current_user.organization_id:
@@ -1155,6 +1289,7 @@ async def bulk_upload_quarterly_async(
         else:
             final_org_id = None  # Personal predictions (no org)
         
+        # Read and validate file
         contents = await file.read()
         file_size = len(contents)
         
@@ -1163,6 +1298,7 @@ async def bulk_upload_quarterly_async(
         else:
             df = pd.read_excel(io.BytesIO(contents))
         
+        # Validate required columns
         required_columns = [
             'company_symbol', 'company_name', 'market_cap', 'sector',
             'reporting_year', 'reporting_quarter',
@@ -1177,6 +1313,7 @@ async def bulk_upload_quarterly_async(
                 detail=f"Missing required columns: {', '.join(missing_columns)}"
             )
         
+        # Convert DataFrame to list of dictionaries
         data = df.to_dict('records')
         total_rows = len(data)
         
@@ -1186,6 +1323,7 @@ async def bulk_upload_quarterly_async(
         if total_rows > 10000:
             raise HTTPException(status_code=400, detail="File contains too many rows (max 10,000)")
         
+        # Create bulk upload job
         from app.services.celery_bulk_upload_service import celery_bulk_upload_service
         
         job_id = await celery_bulk_upload_service.create_bulk_upload_job(
@@ -1197,6 +1335,7 @@ async def bulk_upload_quarterly_async(
             total_rows=total_rows
         )
         
+        # Start Celery background processing
         task_id = await celery_bulk_upload_service.process_quarterly_bulk_upload(
             job_id=job_id,
             data=data,
@@ -1226,6 +1365,7 @@ async def get_bulk_upload_job_status(
 ):
     """Get the status of a bulk upload job"""
     try:
+        # Check permissions
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
@@ -1259,31 +1399,39 @@ async def list_bulk_upload_jobs(
 ):
     """List bulk upload jobs for the current user/organization"""
     try:
+        # Check permissions
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
                 detail="Authentication required to view jobs"
             )
 
+        # Get organization context
         organization_id = get_organization_context(current_user)
         
+        # Build query
         query = db.query(BulkUploadJob)
         
+        # Filter by organization/user
         if organization_id:
             query = query.filter(BulkUploadJob.organization_id == organization_id)
         else:
             query = query.filter(BulkUploadJob.user_id == current_user.id)
         
+        # Filter by status if provided
         if status:
             query = query.filter(BulkUploadJob.status == status)
         
+        # Order by created_at desc
         query = query.order_by(BulkUploadJob.created_at.desc())
         
+        # Apply pagination
         total = query.count()
         jobs = query.offset(offset).limit(limit).all()
         
         job_list = []
         for job in jobs:
+            # Safe calculation of progress percentage
             progress_percentage = 0
             if job.total_rows and job.total_rows > 0 and job.processed_rows is not None:
                 try:
@@ -1333,16 +1481,20 @@ async def get_job_details(
 ):
     """Get comprehensive job details including results and error information"""
     try:
+        # Check permissions
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
                 detail="Authentication required to view job details"
             )
 
+        # Get organization context for access control
         organization_id = get_organization_context(current_user)
         
+        # Query the job with access control
         query = db.query(BulkUploadJob).filter(BulkUploadJob.id == job_id)
         
+        # Apply organization/user filtering
         if organization_id:
             query = query.filter(BulkUploadJob.organization_id == organization_id)
         else:
@@ -1353,6 +1505,7 @@ async def get_job_details(
         if not job:
             raise HTTPException(status_code=404, detail="Job not found or access denied")
 
+        # Calculate progress percentage safely
         progress_percentage = 0
         if job.total_rows and job.total_rows > 0 and job.processed_rows is not None:
             try:
@@ -1362,16 +1515,20 @@ async def get_job_details(
             except (ZeroDivisionError, TypeError):
                 progress_percentage = 0
 
+        # Get Celery task status if available
         celery_status = None
         celery_meta = None
         task_result = None
         
+        # Try to get celery task information
         try:
             from app.workers.celery_app import celery_app
             # Note: We would need to store celery_task_id in database for this to work
+            # For now, we'll skip celery status integration
         except Exception:
             pass
 
+        # Parse error details if they exist
         error_details_parsed = None
         if job.error_details and include_errors:
             try:
@@ -1380,6 +1537,7 @@ async def get_job_details(
             except (json.JSONDecodeError, TypeError):
                 error_details_parsed = {"raw_error": job.error_details}
 
+        # Calculate processing time
         processing_time_seconds = None
         if job.started_at and job.completed_at:
             processing_time_seconds = (job.completed_at - job.started_at).total_seconds()
@@ -1387,17 +1545,20 @@ async def get_job_details(
             from datetime import datetime
             processing_time_seconds = (datetime.utcnow() - job.started_at).total_seconds()
 
+        # Build comprehensive response
         job_details = {
             "id": str(job.id),
             "status": job.status,
             "job_type": job.job_type,
             
+            # File information
             "file_info": {
                 "original_filename": job.original_filename,
                 "file_size": job.file_size,
                 "file_size_mb": round(job.file_size / (1024 * 1024), 2) if job.file_size else None
             },
             
+            # Progress information
             "progress": {
                 "total_rows": job.total_rows or 0,
                 "processed_rows": job.processed_rows or 0,
@@ -1407,12 +1568,14 @@ async def get_job_details(
                 "remaining_rows": (job.total_rows or 0) - (job.processed_rows or 0)
             },
             
+            # Performance metrics
             "performance": {
                 "processing_time_seconds": processing_time_seconds,
                 "rows_per_second": round((job.processed_rows or 0) / processing_time_seconds, 2) if processing_time_seconds and processing_time_seconds > 0 else None,
                 "estimated_completion_time": None  # Could calculate based on current rate
             },
             
+            # Timestamps
             "timestamps": {
                 "created_at": job.created_at.isoformat() if job.created_at else None,
                 "started_at": job.started_at.isoformat() if job.started_at else None,
@@ -1420,12 +1583,14 @@ async def get_job_details(
                 "updated_at": job.updated_at.isoformat() if job.updated_at else None
             },
             
+            # User and organization info
             "context": {
                 "user_id": str(job.user_id),
                 "organization_id": str(job.organization_id) if job.organization_id else None,
                 "created_by": job.user.username if job.user else None
             },
             
+            # Error information (only if requested and exists)
             "errors": {
                 "has_errors": bool(job.error_message or job.error_details),
                 "error_message": job.error_message if include_errors else None,
@@ -1436,6 +1601,7 @@ async def get_job_details(
                 "error_count": len(json.loads(job.error_details).get('errors', [])) if job.error_details else 0
             },
             
+            # Celery information (if available)
             "celery_info": {
                 "task_id": getattr(job, 'celery_task_id', None),
                 "celery_status": celery_status,
@@ -1443,6 +1609,7 @@ async def get_job_details(
             }
         }
 
+        # Add estimated completion time for active jobs
         if job.status == "processing" and processing_time_seconds and job.processed_rows and job.total_rows:
             remaining_rows = job.total_rows - job.processed_rows
             if remaining_rows > 0 and processing_time_seconds > 0:
@@ -1470,16 +1637,20 @@ async def delete_job(
 ):
     """Delete a bulk upload job (cannot delete jobs that are currently processing)"""
     try:
+        # Check permissions
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
                 detail="Authentication required to delete jobs"
             )
 
+        # Get organization context for access control
         organization_id = get_organization_context(current_user)
         
+        # Query the job with access control
         query = db.query(BulkUploadJob).filter(BulkUploadJob.id == job_id)
         
+        # Apply organization/user filtering
         if organization_id:
             query = query.filter(BulkUploadJob.organization_id == organization_id)
         else:
@@ -1490,17 +1661,23 @@ async def delete_job(
         if not job:
             raise HTTPException(status_code=404, detail="Job not found or access denied")
 
+        # Enhanced job deletion logic
+        # Allow deletion of jobs that aren't actively processing or that can be safely cancelled
         if job.status == "processing":
+            # Check if job has been running for a reasonable time
+            # If it's been processing for less than 30 seconds, allow deletion (likely just started)
             processing_duration = None
             if job.started_at:
                 processing_duration = (datetime.utcnow() - job.started_at).total_seconds()
             
             if processing_duration and processing_duration > 30:
+                # Job has been processing for more than 30 seconds, require explicit cancellation
                 raise HTTPException(
                     status_code=400, 
                     detail="Cannot delete job that has been processing for more than 30 seconds. Please cancel the job first or wait for it to complete."
                 )
             else:
+                # Job just started processing or no start time, allow deletion but try to cancel Celery task
                 if hasattr(job, 'celery_task_id') and job.celery_task_id:
                     try:
                         from app.workers.celery_app import celery_app
@@ -1509,6 +1686,7 @@ async def delete_job(
                     except Exception as e:
                         logger.warning(f"Failed to cancel Celery task {job.celery_task_id}: {str(e)}")
         
+        # For pending/queued jobs, also try to cancel Celery task if it exists
         elif job.status in ["pending", "queued"] and hasattr(job, 'celery_task_id') and job.celery_task_id:
             try:
                 from app.workers.celery_app import celery_app
@@ -1517,6 +1695,7 @@ async def delete_job(
             except Exception as e:
                 logger.warning(f"Failed to cancel Celery task {job.celery_task_id}: {str(e)}")
 
+        # Delete the job
         db.delete(job)
         db.commit()
 
@@ -1545,16 +1724,20 @@ async def cancel_job(
 ):
     """Cancel a running bulk upload job"""
     try:
+        # Check permissions
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
                 detail="Authentication required to cancel jobs"
             )
 
+        # Get organization context for access control
         organization_id = get_organization_context(current_user)
         
+        # Query the job with access control
         query = db.query(BulkUploadJob).filter(BulkUploadJob.id == job_id)
         
+        # Apply organization/user filtering
         if organization_id:
             query = query.filter(BulkUploadJob.organization_id == organization_id)
         else:
@@ -1565,12 +1748,14 @@ async def cancel_job(
         if not job:
             raise HTTPException(status_code=404, detail="Job not found or access denied")
 
+        # Only allow cancellation of pending or processing jobs
         if job.status not in ["pending", "processing"]:
             raise HTTPException(
                 status_code=400, 
                 detail=f"Cannot cancel job with status '{job.status}'. Only pending or processing jobs can be cancelled."
             )
 
+        # Try to cancel Celery task if available
         celery_cancelled = False
         if hasattr(job, 'celery_task_id') and job.celery_task_id:
             try:
@@ -1580,6 +1765,7 @@ async def cancel_job(
             except Exception as e:
                 logger.warning(f"Failed to cancel Celery task {job.celery_task_id}: {str(e)}")
 
+        # Update job status
         job.status = "failed"
         job.error_message = "Job cancelled by user"
         job.completed_at = func.now()
@@ -1603,6 +1789,9 @@ async def cancel_job(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error cancelling job: {str(e)}")
 
+# ========================================
+# UPDATE AND DELETE PREDICTIONS
+# ========================================
 
 @router.put("/annual/{prediction_id}")
 async def update_annual_prediction(
@@ -1613,16 +1802,20 @@ async def update_annual_prediction(
 ):
     """Update an existing annual prediction with proper access control"""
     try:
+        # Basic authentication check
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
                 detail="Authentication required to update predictions"
             )
 
+        # Find the prediction first
         prediction = db.query(AnnualPrediction).filter(AnnualPrediction.id == prediction_id).first()
         if not prediction:
             raise HTTPException(status_code=404, detail="Prediction not found")
         
+        # ENHANCED PERMISSION LOGIC:
+        # 1. System-level predictions: ONLY super_admin can modify
         if prediction.access_level == "system":
             if current_user.role != "super_admin":
                 raise HTTPException(
@@ -1630,14 +1823,18 @@ async def update_annual_prediction(
                     detail="Only super admin can update system-level predictions"
                 )
         else:
+            # 2. Non-system predictions: Multiple permission paths
             can_update = False
             
+            # Path 1: Super admin can edit anything
             if current_user.role == "super_admin":
                 can_update = True
                 
+            # Path 2: Creator can edit their own prediction
             elif prediction.created_by == str(current_user.id):
                 can_update = True
                 
+            # Path 3: Organization-level predictions - org members can edit
             elif (prediction.access_level == "organization" and 
                   current_user.organization_id and 
                   prediction.organization_id == current_user.organization_id and
@@ -1645,6 +1842,7 @@ async def update_annual_prediction(
                 can_update = True
             
             if not can_update:
+                # Provide detailed error message for debugging
                 if prediction.access_level == "organization":
                     if not current_user.organization_id:
                         detail = "You must be part of an organization to edit organization predictions"
@@ -1659,11 +1857,13 @@ async def update_annual_prediction(
                     
                 raise HTTPException(status_code=403, detail=detail)
         
+        # Update company information
         company = prediction.company
         company.name = request.company_name
         company.market_cap = request.market_cap  # Market cap should be stored as-is (already in millions)
         company.sector = request.sector
         
+        # Prepare data for ML model
         financial_data = {
             'long_term_debt_to_total_capital': request.long_term_debt_to_total_capital,
             'total_debt_to_ebitda': request.total_debt_to_ebitda,
@@ -1672,8 +1872,10 @@ async def update_annual_prediction(
             'return_on_assets': request.return_on_assets
         }
         
+        # Get new ML prediction
         ml_result = await ml_model.predict_annual(financial_data)
         
+        # Update prediction
         prediction.reporting_year = request.reporting_year
         prediction.reporting_quarter = request.reporting_quarter
         prediction.long_term_debt_to_total_capital = request.long_term_debt_to_total_capital
@@ -1689,11 +1891,13 @@ async def update_annual_prediction(
         db.commit()
         db.refresh(prediction)
         
+        # Get organization name for response (if applicable)
         organization_name = None
         if prediction.organization_id:
             org = db.query(Organization).filter(Organization.id == prediction.organization_id).first()
             organization_name = org.name if org else None
         
+        # Use the new access level system
         access_level = prediction.access_level
         
         return {
@@ -1709,17 +1913,20 @@ async def update_annual_prediction(
                 "reporting_year": request.reporting_year,
                 "reporting_quarter": request.reporting_quarter,
                 
+                # Financial input ratios (updated values)
                 "long_term_debt_to_total_capital": float(request.long_term_debt_to_total_capital),
                 "total_debt_to_ebitda": float(request.total_debt_to_ebitda),
                 "net_income_margin": float(request.net_income_margin),
                 "ebit_to_interest_expense": float(request.ebit_to_interest_expense),
                 "return_on_assets": float(request.return_on_assets),
                 
+                # ML prediction results (updated values)
                 "probability": float(ml_result['probability']),
                 "risk_level": ml_result['risk_level'],
                 "confidence": float(ml_result['confidence']),
                 "predicted_at": prediction.predicted_at.isoformat(),
                 
+                # Organization context
                 "organization_id": str(prediction.organization_id) if prediction.organization_id else None,
                 "organization_name": organization_name,
                 "access_level": access_level,
@@ -1744,16 +1951,20 @@ async def delete_annual_prediction(
 ):
     """Delete an annual prediction with proper access control"""
     try:
+        # Basic authentication check
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
                 detail="Authentication required to delete predictions"
             )
 
+        # Find the prediction first
         prediction = db.query(AnnualPrediction).filter(AnnualPrediction.id == prediction_id).first()
         if not prediction:
             raise HTTPException(status_code=404, detail="Prediction not found")
         
+        # ENHANCED PERMISSION LOGIC:
+        # 1. System-level predictions: ONLY super_admin can modify
         if prediction.access_level == "system":
             if current_user.role != "super_admin":
                 raise HTTPException(
@@ -1761,14 +1972,18 @@ async def delete_annual_prediction(
                     detail="Only super admin can delete system-level predictions"
                 )
         else:
+            # 2. Non-system predictions: Multiple permission paths
             can_delete = False
             
+            # Path 1: Super admin can delete anything
             if current_user.role == "super_admin":
                 can_delete = True
                 
+            # Path 2: Creator can delete their own prediction
             elif prediction.created_by == str(current_user.id):
                 can_delete = True
                 
+            # Path 3: Organization-level predictions - org members can delete
             elif (prediction.access_level == "organization" and 
                   current_user.organization_id and 
                   prediction.organization_id == current_user.organization_id and
@@ -1776,6 +1991,7 @@ async def delete_annual_prediction(
                 can_delete = True
             
             if not can_delete:
+                # Provide detailed error message for debugging
                 if prediction.access_level == "organization":
                     if not current_user.organization_id:
                         detail = "You must be part of an organization to delete organization predictions"
@@ -1814,16 +2030,20 @@ async def update_quarterly_prediction(
 ):
     """Update an existing quarterly prediction with proper access control"""
     try:
+        # Basic authentication check
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
                 detail="Authentication required to update predictions"
             )
 
+        # Find the prediction first
         prediction = db.query(QuarterlyPrediction).filter(QuarterlyPrediction.id == prediction_id).first()
         if not prediction:
             raise HTTPException(status_code=404, detail="Prediction not found")
         
+        # ENHANCED PERMISSION LOGIC:
+        # 1. System-level predictions: ONLY super_admin can modify
         if prediction.access_level == "system":
             if current_user.role != "super_admin":
                 raise HTTPException(
@@ -1831,14 +2051,18 @@ async def update_quarterly_prediction(
                     detail="Only super admin can update system-level predictions"
                 )
         else:
+            # 2. Non-system predictions: Multiple permission paths
             can_update = False
             
+            # Path 1: Super admin can update anything
             if current_user.role == "super_admin":
                 can_update = True
                 
+            # Path 2: Creator can update their own prediction
             elif prediction.created_by == str(current_user.id):
                 can_update = True
                 
+            # Path 3: Organization-level predictions - org members can update
             elif (prediction.access_level == "organization" and 
                   current_user.organization_id and 
                   prediction.organization_id == current_user.organization_id and
@@ -1846,6 +2070,7 @@ async def update_quarterly_prediction(
                 can_update = True
             
             if not can_update:
+                # Provide detailed error message for debugging
                 if prediction.access_level == "organization":
                     if not current_user.organization_id:
                         detail = "You must be part of an organization to update organization predictions"
@@ -1860,11 +2085,13 @@ async def update_quarterly_prediction(
                     
                 raise HTTPException(status_code=403, detail=detail)
         
+        # Update company information
         company = prediction.company
         company.name = request.company_name
         company.market_cap = request.market_cap   # Market cap should be stored as-is (already in millions)
         company.sector = request.sector
         
+        # Prepare data for ML model
         financial_data = {
             'total_debt_to_ebitda': request.total_debt_to_ebitda,
             'sga_margin': request.sga_margin,
@@ -1872,8 +2099,10 @@ async def update_quarterly_prediction(
             'return_on_capital': request.return_on_capital
         }
         
+        # Get new ML prediction
         ml_result = await quarterly_ml_model.predict_quarterly(financial_data)
         
+        # Update prediction
         prediction.reporting_year = request.reporting_year
         prediction.reporting_quarter = request.reporting_quarter
         prediction.total_debt_to_ebitda = request.total_debt_to_ebitda
@@ -1890,11 +2119,13 @@ async def update_quarterly_prediction(
         db.commit()
         db.refresh(prediction)
         
+        # Get organization name for response (if applicable)
         organization_name = None
         if prediction.organization_id:
             org = db.query(Organization).filter(Organization.id == prediction.organization_id).first()
             organization_name = org.name if org else None
         
+        # Use the new access level system
         access_level = prediction.access_level
         
         return {
@@ -1910,11 +2141,13 @@ async def update_quarterly_prediction(
                 "reporting_year": request.reporting_year,
                 "reporting_quarter": request.reporting_quarter,
                 
+                # Financial input ratios (updated values)
                 "total_debt_to_ebitda": float(request.total_debt_to_ebitda),
                 "sga_margin": float(request.sga_margin),
                 "long_term_debt_to_total_capital": float(request.long_term_debt_to_total_capital),
                 "return_on_capital": float(request.return_on_capital),
                 
+                # ML prediction results (updated values)
                 "logistic_probability": float(ml_result.get('logistic_probability', 0)),
                 "gbm_probability": float(ml_result.get('gbm_probability', 0)),
                 "ensemble_probability": float(ml_result.get('ensemble_probability', 0)),
@@ -1922,6 +2155,7 @@ async def update_quarterly_prediction(
                 "confidence": float(ml_result['confidence']),
                 "predicted_at": prediction.predicted_at.isoformat(),
                 
+                # Organization context
                 "organization_id": str(prediction.organization_id) if prediction.organization_id else None,
                 "organization_name": organization_name,
                 "access_level": access_level,
@@ -1946,16 +2180,20 @@ async def delete_quarterly_prediction(
 ):
     """Delete a quarterly prediction with proper access control"""
     try:
+        # Basic authentication check
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
                 detail="Authentication required to delete predictions"
             )
 
+        # Find the prediction first
         prediction = db.query(QuarterlyPrediction).filter(QuarterlyPrediction.id == prediction_id).first()
         if not prediction:
             raise HTTPException(status_code=404, detail="Prediction not found")
         
+        # ENHANCED PERMISSION LOGIC:
+        # 1. System-level predictions: ONLY super_admin can modify
         if prediction.access_level == "system":
             if current_user.role != "super_admin":
                 raise HTTPException(
@@ -1963,14 +2201,18 @@ async def delete_quarterly_prediction(
                     detail="Only super admin can delete system-level predictions"
                 )
         else:
+            # 2. Non-system predictions: Multiple permission paths
             can_delete = False
             
+            # Path 1: Super admin can delete anything
             if current_user.role == "super_admin":
                 can_delete = True
                 
+            # Path 2: Creator can delete their own prediction
             elif prediction.created_by == str(current_user.id):
                 can_delete = True
                 
+            # Path 3: Organization-level predictions - org members can delete
             elif (prediction.access_level == "organization" and 
                   current_user.organization_id and 
                   prediction.organization_id == current_user.organization_id and
@@ -1978,6 +2220,7 @@ async def delete_quarterly_prediction(
                 can_delete = True
             
             if not can_delete:
+                # Provide detailed error message for debugging
                 if prediction.access_level == "organization":
                     if not current_user.organization_id:
                         detail = "You must be part of an organization to delete organization predictions"
@@ -2007,6 +2250,9 @@ async def delete_quarterly_prediction(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error deleting quarterly prediction: {str(e)}")
 
+# ========================================
+# SUPER ADMIN STATISTICS API
+# ========================================
 
 @router.get("/stats")
 async def get_prediction_statistics(
@@ -2015,26 +2261,32 @@ async def get_prediction_statistics(
 ):
     """Get comprehensive prediction statistics - Available to all authenticated users"""
     try:
+        # All authenticated users can access platform statistics
         pass  # Removed super admin restriction
 
+        # === BASIC COUNTS ===
         total_annual = db.query(AnnualPrediction).count()
         total_quarterly = db.query(QuarterlyPrediction).count()
         total_companies = db.query(Company).count()
         total_users = db.query(User).count()
         total_organizations = db.query(Organization).count()
 
+        # === ACCESS LEVEL BREAKDOWN ===
+        # Annual predictions by access level
         annual_by_access = {
             "personal": db.query(AnnualPrediction).filter(AnnualPrediction.access_level == "personal").count(),
             "organization": db.query(AnnualPrediction).filter(AnnualPrediction.access_level == "organization").count(),
             "system": db.query(AnnualPrediction).filter(AnnualPrediction.access_level == "system").count()
         }
 
+        # Quarterly predictions by access level
         quarterly_by_access = {
             "personal": db.query(QuarterlyPrediction).filter(QuarterlyPrediction.access_level == "personal").count(),
             "organization": db.query(QuarterlyPrediction).filter(QuarterlyPrediction.access_level == "organization").count(),
             "system": db.query(QuarterlyPrediction).filter(QuarterlyPrediction.access_level == "system").count()
         }
 
+        # === ORGANIZATION BREAKDOWN ===
         org_stats = []
         organizations = db.query(Organization).all()
         
@@ -2059,11 +2311,13 @@ async def get_prediction_statistics(
                 "total_predictions": org_annual_count + org_quarterly_count
             })
 
+        # === USER ROLE BREAKDOWN ===
         user_role_stats = {}
         for role in ["super_admin", "tenant_admin", "org_admin", "org_member", "user"]:
             role_users = db.query(User).filter(User.role == role).all()
             role_count = len(role_users)
             
+            # Count predictions by users with this role
             role_annual_count = 0
             role_quarterly_count = 0
             
@@ -2083,6 +2337,8 @@ async def get_prediction_statistics(
                 "total_predictions": role_annual_count + role_quarterly_count
             }
 
+        # === TOP CONTRIBUTORS ===
+        # Get users who created the most predictions using simple ORM queries
         user_contributions = {}
         all_users = db.query(User).all()
         
@@ -2098,6 +2354,7 @@ async def get_prediction_statistics(
             total_count = annual_count + quarterly_count
             
             if total_count > 0:  # Only include users who have made predictions
+                # Get organization name
                 org_name = None
                 if user.organization_id:
                     org = db.query(Organization).filter(Organization.id == user.organization_id).first()
@@ -2114,12 +2371,15 @@ async def get_prediction_statistics(
                     "total_predictions": total_count
                 }
         
+        # Sort by total predictions and take top 10
         top_contributors = sorted(
             user_contributions.values(), 
             key=lambda x: x["total_predictions"], 
             reverse=True
         )[:10]
 
+        # === COMPANY BREAKDOWN ===
+        # Most predicted companies
         company_prediction_query = text("""
             SELECT 
                 c.id,
@@ -2160,6 +2420,8 @@ async def get_prediction_statistics(
                 "total_predictions": row.total_count or 0
             })
 
+        # === RECENT ACTIVITY ===
+        # Get recent predictions (last 7 days)
         from datetime import datetime, timedelta
         
         seven_days_ago = datetime.now() - timedelta(days=7)
@@ -2172,6 +2434,7 @@ async def get_prediction_statistics(
             QuarterlyPrediction.created_at >= seven_days_ago
         ).count()
 
+        # === COMPILE RESPONSE ===
         return {
             "success": True,
             "generated_at": datetime.now().isoformat(),
@@ -2222,7 +2485,10 @@ async def get_prediction_statistics(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating statistics: {str(e)}")
 
+# ========================================
+# DASHBOARD API - POST ENDPOINT WITH PLATFORM STATS
 
+# ========================================
 
 from pydantic import BaseModel
 from typing import Optional
@@ -2240,13 +2506,18 @@ async def get_dashboard_post(
 ):
     """Enhanced dashboard API with SEPARATE user data and platform statistics"""
     try:
+        # FIXED: Proper role-based scope determination
         if current_user.role == "super_admin":
+            # Super admin sees system-wide data
             scope = "system"
         elif current_user.role in ["tenant_admin", "org_admin", "org_member"] and current_user.organization_id:
+            # Organization users see organization data (filtered properly)
             scope = "organization"
         else:
+            # Regular users see only personal data
             scope = "personal"
 
+        # Get user's scope data (separate from platform stats)
         if scope == "system":
             user_dashboard = await get_system_dashboard(db, current_user)
         elif scope == "organization":
@@ -2254,11 +2525,13 @@ async def get_dashboard_post(
         else:
             user_dashboard = await get_personal_dashboard(db, current_user)
 
+        # Build response with separate objects
         response = {
             "user_dashboard": user_dashboard,
             "scope": scope
         }
 
+        # Add platform statistics as SEPARATE object if requested
         if request.include_platform_stats:
             platform_stats = await get_platform_statistics(db)
             response["platform_statistics"] = platform_stats
@@ -2268,22 +2541,27 @@ async def get_dashboard_post(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Dashboard error: {str(e)}")
 
+# Helper functions for different dashboard scopes
 async def get_system_dashboard(db: Session, current_user: User):
     """Get system-wide dashboard data"""
     total_companies = db.query(Company).count()
     
+    # Get annual and quarterly prediction counts
     annual_predictions = db.query(AnnualPrediction).count()
     quarterly_predictions = db.query(QuarterlyPrediction).count()
     total_predictions = annual_predictions + quarterly_predictions
     
+    # Calculate average default rate
     annual_avg = db.query(func.avg(AnnualPrediction.probability)).scalar() or 0
     quarterly_avg = db.query(func.avg(QuarterlyPrediction.logistic_probability)).scalar() or 0
     average_default_rate = (annual_avg + quarterly_avg) / 2 if (annual_avg or quarterly_avg) else 0
     
+    # High risk companies (>70% probability)
     high_risk_annual = db.query(AnnualPrediction).filter(AnnualPrediction.probability > 0.7).count()
     high_risk_quarterly = db.query(QuarterlyPrediction).filter(QuarterlyPrediction.logistic_probability > 0.7).count()
     high_risk_companies = high_risk_annual + high_risk_quarterly
     
+    # Sectors covered
     sectors_covered = db.query(Company.sector).distinct().count()
     
     return {
@@ -2305,16 +2583,20 @@ async def get_organization_dashboard(db: Session, current_user: User):
     if not current_user.organization_id:
         raise HTTPException(status_code=400, detail="User not associated with any organization")
     
+    # Get organization info
     organization = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
     if not organization:
         raise HTTPException(status_code=404, detail="Organization not found")
     
+    # FIXED: Get ONLY organization-specific data (no system data mixed in)
     if current_user.role == "tenant_admin":
+        # Tenant admin sees ALL organizations' data (cross-org access)
         companies = db.query(Company).all()
         annual_predictions = db.query(AnnualPrediction).all()
         quarterly_predictions = db.query(QuarterlyPrediction).all()
         data_scope_note = " (Cross-organization access - all orgs)"
     else:
+        # Regular org users see ONLY their organization's data (NOT system data)
         companies = db.query(Company).filter(
             Company.organization_id == current_user.organization_id
         ).all()
@@ -2333,15 +2615,18 @@ async def get_organization_dashboard(db: Session, current_user: User):
     quarterly_predictions_count = len(quarterly_predictions)
     total_predictions = annual_predictions_count + quarterly_predictions_count
     
+    # Calculate average default rate
     annual_probs = [p.probability for p in annual_predictions if p.probability is not None]
     quarterly_probs = [p.logistic_probability for p in quarterly_predictions if p.logistic_probability is not None]
     all_probs = annual_probs + quarterly_probs
     average_default_rate = sum(all_probs) / len(all_probs) if all_probs else 0
     
+    # High risk companies
     high_risk_annual = len([p for p in annual_predictions if p.probability and p.probability > 0.7])
     high_risk_quarterly = len([p for p in quarterly_predictions if p.logistic_probability and p.logistic_probability > 0.7])
     high_risk_companies = high_risk_annual + high_risk_quarterly
     
+    # Sectors covered
     sectors = set([c.sector for c in companies if c.sector])
     sectors_covered = len(sectors)
     
@@ -2361,8 +2646,10 @@ async def get_organization_dashboard(db: Session, current_user: User):
 
 async def get_personal_dashboard(db: Session, current_user: User):
     """Get personal dashboard data"""
+    # Personal companies
     companies = db.query(Company).filter(Company.created_by == str(current_user.id)).all()
     
+    # Personal predictions
     annual_predictions = db.query(AnnualPrediction).filter(AnnualPrediction.created_by == str(current_user.id)).all()
     quarterly_predictions = db.query(QuarterlyPrediction).filter(QuarterlyPrediction.created_by == str(current_user.id)).all()
     
@@ -2371,15 +2658,18 @@ async def get_personal_dashboard(db: Session, current_user: User):
     quarterly_predictions_count = len(quarterly_predictions)
     total_predictions = annual_predictions_count + quarterly_predictions_count
     
+    # Calculate average default rate
     annual_probs = [p.probability for p in annual_predictions if p.probability is not None]
     quarterly_probs = [p.logistic_probability for p in quarterly_predictions if p.logistic_probability is not None]
     all_probs = annual_probs + quarterly_probs
     average_default_rate = sum(all_probs) / len(all_probs) if all_probs else 0
     
+    # High risk companies
     high_risk_annual = len([p for p in annual_predictions if p.probability and p.probability > 0.7])
     high_risk_quarterly = len([p for p in quarterly_predictions if p.logistic_probability and p.logistic_probability > 0.7])
     high_risk_companies = high_risk_annual + high_risk_quarterly
     
+    # Sectors covered
     sectors = set([c.sector for c in companies if c.sector])
     sectors_covered = len(sectors)
     
@@ -2405,14 +2695,17 @@ async def get_platform_statistics(db: Session):
     total_quarterly = db.query(QuarterlyPrediction).count()
     total_predictions = total_annual + total_quarterly
     
+    # Calculate platform average default rate
     annual_avg = db.query(func.avg(AnnualPrediction.probability)).scalar() or 0
     quarterly_avg = db.query(func.avg(QuarterlyPrediction.logistic_probability)).scalar() or 0
     platform_avg_default = (annual_avg + quarterly_avg) / 2 if (annual_avg or quarterly_avg) else 0
     
+    # High risk companies platform-wide
     high_risk_annual = db.query(AnnualPrediction).filter(AnnualPrediction.probability > 0.7).count()
     high_risk_quarterly = db.query(QuarterlyPrediction).filter(QuarterlyPrediction.logistic_probability > 0.7).count()
     platform_high_risk = high_risk_annual + high_risk_quarterly
     
+    # Platform sectors
     platform_sectors = db.query(Company.sector).distinct().count()
     
     return {
@@ -2425,6 +2718,7 @@ async def get_platform_statistics(db: Session):
         "sectors_covered": platform_sectors
     }
 
+# DEBUG ENDPOINT - Remove this after fixing the issue
 @router.get("/debug/prediction/{prediction_id}")
 async def debug_prediction_ownership(
     prediction_id: str,
@@ -2433,9 +2727,11 @@ async def debug_prediction_ownership(
 ):
     """Debug endpoint to check prediction ownership details"""
     try:
+        # Find the prediction
         prediction = db.query(AnnualPrediction).filter(AnnualPrediction.id == prediction_id).first()
         
         if not prediction:
+            # Try quarterly predictions
             prediction = db.query(QuarterlyPrediction).filter(QuarterlyPrediction.id == prediction_id).first()
             prediction_type = "quarterly"
         else:
@@ -2444,6 +2740,7 @@ async def debug_prediction_ownership(
         if not prediction:
             raise HTTPException(status_code=404, detail="Prediction not found")
         
+        # Get detailed comparison info
         current_user_id_str = str(current_user.id)
         prediction_created_by = prediction.created_by
         
@@ -2487,6 +2784,9 @@ async def debug_prediction_ownership(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Debug error: {str(e)}")
 
+# ========================================
+# REDIS HEALTH CHECK ENDPOINT
+# ========================================
 
 @router.get("/health/redis", 
            summary="Redis Connection Health Check",
@@ -2494,6 +2794,7 @@ async def debug_prediction_ownership(
 async def redis_health_check():
     """Check Redis connection health"""
     try:
+        # Test connection to Redis
         with celery_app.connection() as conn:
             conn.ensure_connection(max_retries=1, timeout=5)
         

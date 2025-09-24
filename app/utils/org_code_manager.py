@@ -1,5 +1,4 @@
 """
-Organization Code Management Utilities
 Handles organization code generation, validation, and management
 """
 
@@ -11,9 +10,8 @@ from ..core.database import Organization
 class OrganizationCodeManager:
     """Manages organization codes for team joining"""
     
-    # Characters to use in codes (avoiding confusing ones)
     VALID_CHARS = string.ascii_uppercase + string.digits
-    EXCLUDED_CHARS = ['0', 'O', 'I', '1', 'L']  # Avoid confusion
+    EXCLUDED_CHARS = ['0', 'O', 'I', '1', 'L']  
     
     @classmethod
     def _get_code_chars(cls):
@@ -38,7 +36,6 @@ class OrganizationCodeManager:
         for _ in range(max_attempts):
             code = ''.join(secrets.choice(code_chars) for _ in range(length))
             
-            # Check if code already exists
             existing = db.query(Organization).filter(
                 Organization.organization_code == code
             ).first()

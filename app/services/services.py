@@ -17,7 +17,7 @@ class CompanyService:
         search: Optional[str] = None,
         sort_by: str = "name",
         sort_order: str = "asc",
-        organization_filter=None  # New parameter for multi-tenant filtering
+        organization_filter=None  
     ):
         """Get paginated list of companies with their predictions"""
         skip = (page - 1) * limit
@@ -28,7 +28,6 @@ class CompanyService:
             joinedload(Company.quarterly_predictions)
         )
 
-        # Apply organization filter if provided
         if organization_filter is not None:
             query = query.filter(organization_filter)
 
@@ -52,10 +51,8 @@ class CompanyService:
         else:
             query = query.order_by(Company.name)
 
-        # Count query
         count_query = self.db.query(Company)
         
-        # Apply organization filter to count query too
         if organization_filter is not None:
             count_query = count_query.filter(organization_filter)
             
@@ -124,7 +121,6 @@ class CompanyService:
     def get_or_create_company(self, symbol: str, name: str, market_cap: float, sector: str,
                              organization_id=None, created_by=None, is_global=False):
         """Get existing company or create new one with organization context"""
-        # Check for existing company in the same organization context
         if organization_id:
             existing_company = self.db.query(Company).filter(
                 and_(Company.symbol == symbol.upper(), 
@@ -137,7 +133,6 @@ class CompanyService:
             ).first()
         
         if existing_company:
-            # Update existing company
             existing_company.name = name
             existing_company.market_cap = market_cap
             existing_company.sector = sector
@@ -146,7 +141,6 @@ class CompanyService:
             self.db.refresh(existing_company)
             return existing_company
         else:
-            # Create new company
             company = Company(
                 symbol=symbol.upper(),
                 name=name,
@@ -163,7 +157,6 @@ class CompanyService:
     
     def upsert_company(self, company_data, prediction_result):
         """Create or update company with annual prediction"""
-        # Create/update company
         company = self.get_or_create_company(
             symbol=company_data.symbol,
             name=company_data.name,
@@ -171,7 +164,6 @@ class CompanyService:
             sector=company_data.sector
         )
         
-        # Extract financial data and prediction data
         financial_data = {
             'long_term_debt_to_total_capital': getattr(company_data, 'long_term_debt_to_total_capital', None),
             'total_debt_to_ebitda': getattr(company_data, 'total_debt_to_ebitda', None),
@@ -183,7 +175,6 @@ class CompanyService:
         reporting_year = getattr(company_data, 'reporting_year', None)
         reporting_quarter = getattr(company_data, 'reporting_quarter', None)
         
-        # Create annual prediction
         annual_prediction = self.create_annual_prediction(
             company=company,
             financial_data=financial_data,
@@ -192,7 +183,6 @@ class CompanyService:
             reporting_quarter=reporting_quarter
         )
         
-        # Add prediction attributes to company object for backward compatibility
         company.probability = annual_prediction.probability
         company.risk_level = annual_prediction.risk_level
         company.confidence = annual_prediction.confidence
@@ -223,7 +213,6 @@ class CompanyService:
         existing_company = self.get_company_by_symbol(symbol)
         
         if existing_company:
-            # Update company info if needed
             existing_company.name = name
             existing_company.market_cap = market_cap
             existing_company.sector = sector
@@ -232,7 +221,6 @@ class CompanyService:
             self.db.refresh(existing_company)
             return existing_company
         else:
-            # Create new company
             company = Company(
                 symbol=symbol.upper(),
                 name=name,
@@ -339,12 +327,10 @@ class CompanyService:
         if not prediction:
             return None
 
-        # Update financial data
         for field, value in financial_data.items():
             if hasattr(prediction, field) and value is not None:
                 setattr(prediction, field, value)
 
-        # Update prediction results
         prediction.probability = prediction_results['probability']
         prediction.risk_level = prediction_results['risk_level']
         prediction.confidence = prediction_results['confidence']
@@ -366,12 +352,10 @@ class CompanyService:
         if not prediction:
             return None
 
-        # Update financial data
         for field, value in financial_data.items():
             if hasattr(prediction, field) and value is not None:
                 setattr(prediction, field, value)
 
-        # Update prediction results
         prediction.logistic_probability = prediction_results['logistic_probability']
         prediction.gbm_probability = prediction_results['gbm_probability']
         prediction.ensemble_probability = prediction_results['ensemble_probability']
@@ -390,7 +374,7 @@ class CompanyService:
         if not company:
             return False
 
-        self.db.delete(company)  # Cascade will delete predictions
+        self.db.delete(company)  
         self.db.commit()
         return True
 
@@ -465,7 +449,6 @@ class DatabaseService:
             else:
                 raise ValueError(f"Unknown table: {table_name}")
         else:
-            # Reset all tables
             count_companies = self.db.query(Company).count()
             count_annual = self.db.query(AnnualPrediction).count()
             count_quarterly = self.db.query(QuarterlyPrediction).count()

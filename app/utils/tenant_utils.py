@@ -7,10 +7,6 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from ..core.database import Tenant, Organization, OrganizationMemberWhitelist, User
 
-# ========================================
-# TOKEN GENERATION UTILITIES
-# ========================================
-
 def generate_join_token() -> str:
     """Generate secure 32-character join token for organizations"""
     alphabet = string.ascii_letters + string.digits
@@ -18,15 +14,10 @@ def generate_join_token() -> str:
 
 def generate_slug(name: str) -> str:
     """Generate URL-friendly slug from name"""
-    # Convert to lowercase and replace spaces/special chars with hyphens
     slug = re.sub(r'[^a-zA-Z0-9\s-]', '', name.lower())
     slug = re.sub(r'[\s-]+', '-', slug)
     slug = slug.strip('-')
     return slug
-
-# ========================================
-# ORGANIZATION UTILITIES
-# ========================================
 
 def is_organization_name_unique(db: Session, name: str, exclude_id: Optional[str] = None) -> bool:
     """Check if organization name is unique across platform"""
@@ -54,10 +45,6 @@ def generate_unique_slug(db: Session, name: str, table_class, exclude_id: Option
     
     return slug
 
-# ========================================
-# WHITELIST UTILITIES
-# ========================================
-
 def is_email_whitelisted(db: Session, organization_id: str, email: str) -> bool:
     """Check if email is whitelisted for organization"""
     whitelist_entry = db.query(OrganizationMemberWhitelist).filter(
@@ -70,21 +57,18 @@ def is_email_whitelisted(db: Session, organization_id: str, email: str) -> bool:
 def add_email_to_whitelist(db: Session, organization_id: str, email: str, added_by: str) -> bool:
     """Add email to organization whitelist"""
     try:
-        # Check if already exists
         existing = db.query(OrganizationMemberWhitelist).filter(
             OrganizationMemberWhitelist.organization_id == organization_id,
             OrganizationMemberWhitelist.email == email.lower()
         ).first()
         
         if existing:
-            # Reactivate if inactive
             if existing.status == "inactive":
                 existing.status = "active"
                 db.commit()
                 return True
-            return False  # Already active
+            return False  
         
-        # Create new whitelist entry
         whitelist_entry = OrganizationMemberWhitelist(
             organization_id=organization_id,
             email=email.lower(),
@@ -115,10 +99,6 @@ def remove_email_from_whitelist(db: Session, organization_id: str, email: str) -
         db.rollback()
         return False
 
-# ========================================
-# ROLE VALIDATION UTILITIES
-# ========================================
-
 def get_user_effective_role(user: User) -> str:
     """Get user's effective role for permission checking"""
     if user.role == "super_admin":
@@ -126,9 +106,9 @@ def get_user_effective_role(user: User) -> str:
     elif user.role == "tenant_admin":
         return "tenant_admin"
     elif user.organization_id and user.role:
-        return user.role  # org_admin or org_member
+        return user.role  
     else:
-        return "user"  # No organization
+        return "user"  
 
 def can_access_tenant(user: User, tenant_id: str) -> bool:
     """Check if user can access tenant data"""
@@ -144,11 +124,8 @@ def can_access_organization(user: User, organization_id: str) -> bool:
         return True
     if user.organization_id and str(user.organization_id) == organization_id:
         return True
-    # Tenant admin can access all orgs in their tenant
     if user.role == "tenant_admin" and user.tenant_id:
-        # Need to check if org belongs to user's tenant
-        # This would require a database query in actual implementation
-        return True  # Simplified for now
+        return True  
     return False
 
 def can_manage_organization(user: User, organization_id: str) -> bool:
@@ -158,30 +135,20 @@ def can_manage_organization(user: User, organization_id: str) -> bool:
     if (user.organization_id and str(user.organization_id) == organization_id and 
         user.role == "org_admin"):
         return True
-    # Tenant admin can manage orgs in their tenant
     if user.role == "tenant_admin" and user.tenant_id:
-        return True  # Simplified for now
+        return True  
     return False
-
-# ========================================
-# DATA ACCESS UTILITIES
-# ========================================
 
 def get_accessible_predictions_filter(user: User):
     """Get SQLAlchemy filter for predictions user can access"""
     if user.role == "super_admin":
-        # Super admin sees everything
-        return None  # No filter needed
+        return None  
     elif user.organization_id:
-        # Organization members see:
-        # 1. Their organization's predictions
-        # 2. Super admin predictions (organization_id = NULL)
         return [
             {"organization_id": user.organization_id},
             {"organization_id": None}
         ]
     else:
-        # Users without organization see only super admin predictions
         return [{"organization_id": None}]
 
 def get_user_context(user: User) -> dict:
@@ -196,17 +163,12 @@ def get_user_context(user: User) -> dict:
         "effective_role": get_user_effective_role(user)
     }
 
-# ========================================
-# TENANT UTILITIES
-# ========================================
-
 def create_tenant_slug(name: str) -> str:
     """Create tenant slug from name"""
     return generate_slug(name)
 
 def validate_tenant_domain(domain: str) -> bool:
     """Validate tenant domain format"""
-    # Basic domain validation
     domain_pattern = r'^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?\.[a-zA-Z]{2,}$'
     return bool(re.match(domain_pattern, domain))
 
@@ -216,7 +178,6 @@ def create_organization_slug(name: str) -> str:
 
 def validate_organization_domain(domain: str) -> bool:
     """Validate organization domain format"""
-    # Basic domain validation
     domain_pattern = r'^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?\.[a-zA-Z]{2,}$'
     return bool(re.match(domain_pattern, domain))
 

@@ -1,6 +1,0 @@
-company_symbol,company_name,market_cap,sector,reporting_year,reporting_quarter,long_term_debt_to_total_capital,total_debt_to_ebitda,net_income_margin,ebit_to_interest_expense,return_on_assets
-AAPL,Apple Inc.,3000000,Technology,2024,Q1,0.25,1.8,0.15,12.5,0.18
-MSFT,Microsoft Corporation,2800000,Technology,2024,Q1,0.20,1.5,0.22,15.2,0.16
-GOOGL,Alphabet Inc.,1800000,Technology,2024,Q1,0.15,1.2,0.18,20.5,0.14
-TSLA,Tesla Inc.,800000,Automotive,2024,Q1,0.35,2.5,0.08,8.5,0.12
-NVDA,NVIDIA Corporation,1200000,Technology,2024,Q1,0.18,1.1,0.25,25.0,0.22

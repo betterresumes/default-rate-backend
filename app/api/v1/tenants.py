@@ -26,7 +26,6 @@ async def create_tenant(
 ):
     """Create a new enterprise tenant (Super Admin only)."""
     
-    # Validate tenant domain if provided
     if tenant_data.domain:
         if not validate_tenant_domain(tenant_data.domain):
             raise HTTPException(
@@ -34,7 +33,6 @@ async def create_tenant(
                 detail="Invalid domain format"
             )
         
-        # Check if domain already exists
         existing_domain = db.query(Tenant).filter(Tenant.domain == tenant_data.domain).first()
         if existing_domain:
             raise HTTPException(
@@ -42,17 +40,13 @@ async def create_tenant(
                 detail="Domain already registered"
             )
     
-    # Create tenant slug
     tenant_slug = create_tenant_slug(tenant_data.name)
     
-    # Check if slug already exists
     existing_slug = db.query(Tenant).filter(Tenant.slug == tenant_slug).first()
     if existing_slug:
-        # Add random suffix to make it unique
         import random
         tenant_slug = f"{tenant_slug}-{random.randint(1000, 9999)}"
     
-    # Create new tenant
     new_tenant = Tenant(
         id=uuid.uuid4(),
         name=tenant_data.name,
@@ -84,18 +78,14 @@ async def list_tenants(
     
     query = db.query(Tenant)
     
-    # Role-based filtering
     if current_user.role == "tenant_admin":
-        # Tenant admin can only see their own tenant
         if not current_user.tenant_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Tenant admin must belong to a tenant"
             )
         query = query.filter(Tenant.id == current_user.tenant_id)
-    # Super admin can see all tenants (no additional filter needed)
     
-    # Apply filters
     if search:
         query = query.filter(
             or_(
@@ -108,20 +98,16 @@ async def list_tenants(
     if is_active is not None:
         query = query.filter(Tenant.is_active == is_active)
     
-    # Get total count before pagination
     total = query.count()
     
-    # Apply pagination
     tenants = query.order_by(Tenant.created_at.desc()).offset(skip).limit(limit).all()
     
-    # Return comprehensive response with detailed information
     comprehensive_tenants = []
     total_tenant_admins = 0
     total_organizations = 0
     total_users = 0
     
     for tenant in tenants:
-        # Get tenant admins
         tenant_admins = db.query(User).filter(
             and_(User.tenant_id == tenant.id, User.role == "tenant_admin")
         ).all()
@@ -139,15 +125,13 @@ async def list_tenants(
             ) for admin in tenant_admins
         ]
         
-        # Get organizations under this tenant
         organizations = db.query(Organization).filter(Organization.tenant_id == tenant.id).all()
         
         detailed_orgs = []
-        tenant_total_users = len(tenant_admins)  # Start with tenant admins
+        tenant_total_users = len(tenant_admins) 
         tenant_active_users = len([admin for admin in tenant_admins if admin.is_active])
         
         for org in organizations:
-            # Get organization admin
             org_admin = db.query(User).filter(
                 and_(User.organization_id == org.id, User.role == "org_admin")
             ).first()
@@ -164,7 +148,6 @@ async def list_tenants(
                     created_at=org_admin.created_at
                 )
             
-            # Get organization members
             org_members = db.query(User).filter(
                 and_(User.organization_id == org.id, User.role == "org_member")
             ).all()
@@ -181,7 +164,6 @@ async def list_tenants(
                 ) for member in org_members
             ]
             
-            # Count users in this organization
             org_total_users = len(org_members) + (1 if org_admin else 0)
             tenant_total_users += org_total_users
             tenant_active_users += len([m for m in org_members if m.is_active]) + (1 if org_admin and org_admin.is_active else 0)
@@ -254,18 +236,13 @@ async def get_tenant(
             detail="Tenant not found"
         )
     
-    # Check access permissions
     if current_user.role == "tenant_admin":
-        # Tenant admin can only access their own tenant
         if str(current_user.tenant_id) != tenant_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied to this tenant"
             )
     
-    # Get comprehensive tenant information (same logic as list endpoint)
-    
-    # Get tenant admins
     tenant_admins = db.query(User).filter(
         and_(User.tenant_id == tenant.id, User.role == "tenant_admin")
     ).all()
@@ -283,15 +260,13 @@ async def get_tenant(
         ) for admin in tenant_admins
     ]
     
-    # Get organizations under this tenant
     organizations = db.query(Organization).filter(Organization.tenant_id == tenant.id).all()
     
     detailed_orgs = []
-    tenant_total_users = len(tenant_admins)  # Start with tenant admins
+    tenant_total_users = len(tenant_admins)  
     tenant_active_users = len([admin for admin in tenant_admins if admin.is_active])
     
     for org in organizations:
-        # Get organization admin
         org_admin = db.query(User).filter(
             and_(User.organization_id == org.id, User.role == "org_admin")
         ).first()
@@ -308,7 +283,6 @@ async def get_tenant(
                 created_at=org_admin.created_at
             )
         
-        # Get organization members
         org_members = db.query(User).filter(
             and_(User.organization_id == org.id, User.role == "org_member")
         ).all()
@@ -325,7 +299,6 @@ async def get_tenant(
             ) for member in org_members
         ]
         
-        # Count users in this organization
         org_total_users = len(org_members) + (1 if org_admin else 0)
         tenant_total_users += org_total_users
         tenant_active_users += len([m for m in org_members if m.is_active]) + (1 if org_admin and org_admin.is_active else 0)
@@ -384,19 +357,15 @@ async def update_tenant(
             detail="Tenant not found"
         )
     
-    # Check access permissions
     if current_user.role == "tenant_admin":
-        # Tenant admin can only update their own tenant
         if str(current_user.tenant_id) != tenant_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Can only update your own tenant"
             )
     
-    # Update fields if provided
     update_data = tenant_update.dict(exclude_unset=True)
     
-    # Validate domain if being updated
     if "domain" in update_data and update_data["domain"]:
         if not validate_tenant_domain(update_data["domain"]):
             raise HTTPException(
@@ -404,7 +373,6 @@ async def update_tenant(
                 detail="Invalid domain format"
             )
         
-        # Check if domain already exists (excluding current tenant)
         existing_domain = db.query(Tenant).filter(
             and_(Tenant.domain == update_data["domain"], Tenant.id != tenant_id)
         ).first()
@@ -414,7 +382,6 @@ async def update_tenant(
                 detail="Domain already registered"
             )
     
-    # Apply updates
     for field, value in update_data.items():
         setattr(tenant, field, value)
     
@@ -441,7 +408,6 @@ async def delete_tenant(
             detail="Tenant not found"
         )
     
-    # Check if tenant has organizations
     org_count = db.query(Organization).filter(Organization.tenant_id == tenant_id).count()
     
     if org_count > 0 and not force:
@@ -451,13 +417,10 @@ async def delete_tenant(
         )
     
     if force and org_count > 0:
-        # Delete all organizations under this tenant
-        # This will cascade delete users and predictions
         organizations = db.query(Organization).filter(Organization.tenant_id == tenant_id).all()
         for org in organizations:
             db.delete(org)
     
-    # Delete the tenant
     db.delete(tenant)
     db.commit()
     
@@ -478,26 +441,21 @@ async def get_tenant_stats(
             detail="Tenant not found"
         )
     
-    # Check access permissions
     if current_user.role == "tenant_admin":
-        # Tenant admin can only access their own tenant stats
         if str(current_user.tenant_id) != tenant_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied to this tenant's statistics"
             )
     
-    # Get organization count
     org_count = db.query(Organization).filter(Organization.tenant_id == tenant_id).count()
     
-    # Get total user count across all organizations (fix ambiguous join)
     user_count = db.query(User).join(
         Organization, User.organization_id == Organization.id
     ).filter(
         Organization.tenant_id == tenant_id
     ).count()
     
-    # Get active organization count
     active_org_count = db.query(Organization).filter(
         and_(Organization.tenant_id == tenant_id, Organization.is_active == True)
     ).count()
@@ -510,38 +468,3 @@ async def get_tenant_stats(
         total_users=user_count,
         created_at=tenant.created_at
     )
-
-# =============================================
-# COMMENTED OUT: DUPLICATE ENDPOINTS 
-# These are duplicated in tenant_admin_management.py with better business logic
-# Keeping for potential future use
-# =============================================
-
-# @router.post("/{tenant_id}/assign-admin", response_model=dict)
-# async def assign_tenant_admin(
-#     tenant_id: str,
-#     request_data: dict,
-#     db: Session = Depends(get_db),
-#     current_user: User = Depends(require_super_admin)
-# ):
-#     """DEPRECATED: Use /tenant-admin/assign-existing-user instead"""
-#     pass
-
-# @router.delete("/{tenant_id}/remove-admin/{user_id}", response_model=dict)
-# async def remove_tenant_admin(
-#     tenant_id: str,
-#     user_id: str,
-#     db: Session = Depends(get_db),
-#     current_user: User = Depends(require_super_admin)
-# ):
-#     """DEPRECATED: Use /tenant-admin/remove-tenant-admin/{user_id} instead"""
-#     pass
-
-# @router.get("/{tenant_id}/admins", response_model=List[dict])
-# async def get_tenant_admins(
-#     tenant_id: str,
-#     db: Session = Depends(get_db),
-#     current_user: User = Depends(require_super_admin)
-# ):
-#     """DEPRECATED: Use /tenant-admin/tenant/{tenant_id}/admin-info instead"""
-#     pass

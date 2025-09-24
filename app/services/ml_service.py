@@ -13,8 +13,7 @@ class MLModelService:
     def __init__(self):
         self.model = None
         self.scoring_info = None
-        # Update path to point to app/models directory
-        base_dir = os.path.dirname(os.path.dirname(__file__))  # Go up to app/
+        base_dir = os.path.dirname(os.path.dirname(__file__))  
         self.model_path = os.path.join(base_dir, "models", "annual_logistic_model.pkl")
         self.scoring_info_path = os.path.join(base_dir, "models", "scoring_info.pkl")
         self.load_model()
@@ -34,21 +33,17 @@ class MLModelService:
 
     def binned_runscoring(self, df: pd.DataFrame, value_col: str, scoring_info: Dict) -> pd.DataFrame:
         """Apply binned scoring to a column based on scoring information"""
-        # Handle None values first, then replace 'NM' with NaN and convert to numeric
         df[value_col] = df[value_col].replace([None, 'NM', 'N/A', ''], np.nan)
         df[value_col] = pd.to_numeric(df[value_col], errors='coerce')
 
         intervals = scoring_info[value_col]['intervals']
         rates = scoring_info[value_col]['rates']
 
-        # Apply mapping function to column
         def assign_rate(x):
             if pd.isna(x) or x is None:
-                # Find "Missing" category in intervals
                 if "Missing" in intervals:
                     return rates[intervals.index("Missing")]
                 else:
-                    # If no "Missing" category, use first rate as default
                     return rates[0] if rates else 0.0
             for idx, iv in enumerate(intervals):
                 if iv == "Missing":
@@ -56,10 +51,9 @@ class MLModelService:
                 low, high = iv
                 if low < x <= high:
                     return rates[idx]
-            # If value doesn't fall in any bin, use the closest rate or first rate
             if rates:
-                return rates[0]  # Use first rate as default
-            return 0.0  # Ultimate fallback
+                return rates[0] 
+            return 0.0  
 
         prefix = 'bin_'
         new_column_name = f"{prefix}{value_col}"
@@ -92,7 +86,6 @@ class MLModelService:
                     "predicted_at": datetime.utcnow().isoformat()
                 }
 
-            # The model now expects exactly these 5 features (matching your updated model)
             single_variables = [
                 'long-term debt / total capital (%)',
                 'total debt / ebitda',
@@ -101,7 +94,6 @@ class MLModelService:
                 'return on assets'
             ]
 
-            # Map API input fields to model variables (direct 1:1 mapping)
             required_fields = {
                 'long_term_debt_to_total_capital': 'long-term debt / total capital (%)',
                 'total_debt_to_ebitda': 'total debt / ebitda',
@@ -110,7 +102,6 @@ class MLModelService:
                 'return_on_assets': 'return on assets'
             }
 
-            # Check for missing fields - only check if key exists, allow None/NaN values
             missing_fields = []
             for field in required_fields.keys():
                 if field not in financial_ratios:
@@ -126,23 +117,19 @@ class MLModelService:
                     "predicted_at": datetime.utcnow().isoformat()
                 }
 
-            # Extract values - allow None/NaN values, they will be handled by binned_runscoring
             values = [
-                financial_ratios['long_term_debt_to_total_capital'],     # Can be None/NaN
-                financial_ratios['total_debt_to_ebitda'],                # Can be None/NaN
-                financial_ratios['net_income_margin'],                   # Can be None/NaN
-                financial_ratios['ebit_to_interest_expense'],            # Can be None/NaN
-                financial_ratios['return_on_assets']                     # Can be None/NaN
+                financial_ratios['long_term_debt_to_total_capital'],     
+                financial_ratios['total_debt_to_ebitda'],                
+                financial_ratios['net_income_margin'],                   
+                financial_ratios['ebit_to_interest_expense'],            
+                financial_ratios['return_on_assets']                     
             ]
 
-            # Create DataFrame with the 5 user values (including None/NaN)
             df = pd.DataFrame([values], columns=single_variables)
             
-            # Apply binned scoring to each variable (handles None/NaN internally)
             for value_col in single_variables:
                 df = self.binned_runscoring(df, value_col, self.scoring_info)
 
-            # Define the features that the model expects (the exact 5 features from your updated model)
             features = [
                 'bin_long-term debt / total capital (%)',
                 'bin_total debt / ebitda',
@@ -151,31 +138,23 @@ class MLModelService:
                 'bin_return on assets'
             ]
 
-            # Prepare the feature matrix
             X = df[features]
             
-            # Check for NaN values in the feature matrix
             if X.isnull().any().any():
                 print(f"❌ Warning: NaN values found in features: {X.isnull().sum()}")
-                # Fill NaN values with the mean rate from scoring_info for each feature
                 for feature in features:
                     if X[feature].isnull().any():
-                        # Extract the corresponding scoring info column name
                         original_col = feature.replace('bin_', '')
                         if original_col in self.scoring_info and 'rates' in self.scoring_info[original_col]:
                             rates = self.scoring_info[original_col]['rates']
-                            # Use the first rate (typically the lowest risk rate) as default
                             default_value = rates[0] if rates else 0.0
                             X[feature] = X[feature].fillna(default_value)
                             print(f"Filled NaN in {feature} with default value: {default_value}")
 
-            # Make prediction
             probability = self.model.predict_proba(X)[:, 1][0]
 
-            # Convert probability to percentage for risk level determination
             probability_percentage = probability * 100
 
-            # Determine risk level based on probability percentage
             if probability_percentage > 15:
                 risk_level = "CRITICAL"
             elif probability_percentage >= 5:
@@ -185,7 +164,6 @@ class MLModelService:
             else:
                 risk_level = "LOW"
 
-            # Calculate confidence (distance from 0.5, scaled to 0-1)
             confidence = max(abs(probability - 0.5) * 2, 0.5)
 
             return {
@@ -218,5 +196,4 @@ class MLModelService:
         """
         return self.predict_default_probability(financial_ratios)
 
-# Create a global instance
 ml_model = MLModelService()

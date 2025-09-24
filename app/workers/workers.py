@@ -44,7 +44,6 @@ def process_bulk_predictions(file_path: str) -> dict:
                         sector=sector
                     ))
 
-                # Helper function to handle NaN values
                 def safe_get_value(row, column_name):
                     value = row.get(column_name)
                     if pd.isna(value):

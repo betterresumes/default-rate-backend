@@ -3,22 +3,17 @@ import sys
 from celery import Celery
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 load_dotenv('.env.local')
 
-# Fix for macOS fork safety issues
-if sys.platform == "darwin":  # macOS
+if sys.platform == "darwin":  
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
-    # Force use of spawn instead of fork on macOS
     import multiprocessing
     multiprocessing.set_start_method('spawn', force=True)
 
-# Get Redis configuration with Railway support
 REDIS_URL = os.getenv("REDIS_URL")
 
 if not REDIS_URL:
-    # Fallback to individual Redis environment variables
     REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
     REDIS_PORT = os.getenv("REDIS_PORT", "6379")
     REDIS_DB = os.getenv("REDIS_DB", "0")
@@ -33,14 +28,12 @@ if not REDIS_URL:
     else:
         REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
 
-# Override environment variables that might interfere with Railway Redis
 if REDIS_URL and 'railway.internal' in REDIS_URL:
     os.environ['CELERY_BROKER_URL'] = REDIS_URL
     os.environ['CELERY_RESULT_BACKEND'] = REDIS_URL
 
 print(f"🔄 Celery using Redis URL: {REDIS_URL[:20]}...{REDIS_URL[-10:] if len(REDIS_URL) > 30 else REDIS_URL}")
 
-# Use the same Redis URL for both broker and backend (no separate databases)
 BROKER_URL = REDIS_URL
 BACKEND_URL = REDIS_URL
 
@@ -66,10 +59,8 @@ celery_app.conf.update(
     worker_disable_rate_limits=False,
     task_default_queue="bulk_predictions",
     
-    # Fix for exception serialization issues
     result_accept_content=["json"],
     
-    # Connection and retry configuration for Railway/Cloud deployments
     broker_connection_retry_on_startup=True,
     broker_connection_retry=True,
     broker_connection_max_retries=10,
@@ -90,17 +81,14 @@ celery_app.conf.update(
         }
     },
     
-    # Additional error handling configuration
     task_reject_on_worker_lost=True,
     task_ignore_result=False,
     result_persistent=True,
     
-    # macOS specific fixes - but allow production scaling
     worker_pool="solo" if sys.platform == "darwin" else "prefork",
-    worker_concurrency=1 if sys.platform == "darwin" else 4,  # 4 concurrent tasks in production
+    worker_concurrency=1 if sys.platform == "darwin" else 4,  
     
-    # Worker management settings
-    worker_max_tasks_per_child=100,  # Restart worker after 100 tasks to prevent memory leaks
+    worker_max_tasks_per_child=100,  
     
     task_routes={
         "app.workers.tasks.process_bulk_excel_task": {"queue": "bulk_predictions"},
@@ -113,11 +101,9 @@ celery_app.conf.update(
 
 celery_app.conf.beat_schedule = {}
 
-# Test Redis connection on startup
 def test_redis_connection():
     """Test Redis connection and provide helpful error messages"""
     try:
-        # Test the broker connection
         with celery_app.connection() as conn:
             conn.ensure_connection(max_retries=3)
         print("✅ Redis connection successful!")
@@ -132,6 +118,5 @@ def test_redis_connection():
         print(f"   - REDIS_PASSWORD: {'Set' if os.getenv('REDIS_PASSWORD') else 'Not set'}")
         return False
 
-# Only test connection if not in production auto-start
 if __name__ != "__main__" and os.getenv("CELERY_STARTUP_TEST", "true").lower() == "true":
     test_redis_connection()

@@ -103,14 +103,12 @@ class BulkUploadService:
     
     def create_or_get_company(self, db: Session, symbol: str, name: str, market_cap: float, sector: str, organization_id: Optional[str]) -> Company:
         """Create or get company with organization scoping"""
-        # Check for existing company in organization scope
         if organization_id:
             company = db.query(Company).filter(
                 Company.symbol == symbol,
                 Company.organization_id == organization_id
             ).first()
         else:
-            # Global scope
             company = db.query(Company).filter(
                 Company.symbol == symbol,
                 Company.organization_id.is_(None)
@@ -120,14 +118,13 @@ class BulkUploadService:
             company = Company(
                 symbol=symbol,
                 name=name,
-                market_cap=self.safe_float(market_cap) * 1_000_000,  # Convert to actual value
+                market_cap=self.safe_float(market_cap) * 1_000_000,  
                 sector=sector,
                 organization_id=organization_id
             )
             db.add(company)
-            db.flush()  # Get the ID without committing
+            db.flush()  
         else:
-            # Update existing company
             company.name = name
             company.market_cap = self.safe_float(market_cap) * 1_000_000
             company.sector = sector
@@ -154,7 +151,6 @@ class BulkUploadService:
         try:
             for i, row in enumerate(data):
                 try:
-                    # Create or get company
                     company = self.create_or_get_company(
                         db=db,
                         symbol=row['company_symbol'],
@@ -164,7 +160,6 @@ class BulkUploadService:
                         organization_id=organization_id
                     )
                     
-                    # Prepare financial data for ML model
                     financial_data = {
                         'long_term_debt_to_total_capital': self.safe_float(row['long_term_debt_to_total_capital']),
                         'total_debt_to_ebitda': self.safe_float(row['total_debt_to_ebitda']),
@@ -173,10 +168,8 @@ class BulkUploadService:
                         'return_on_assets': self.safe_float(row['return_on_assets'])
                     }
                     
-                    # Get ML prediction
                     ml_result = await self.ml_service.predict_annual(financial_data)
                     
-                    # Create prediction
                     prediction = AnnualPrediction(
                         company_id=company.id,
                         organization_id=organization_id,
@@ -197,7 +190,6 @@ class BulkUploadService:
                     db.add(prediction)
                     successful_rows += 1
                     
-                    # Commit every 50 rows to avoid memory issues
                     if (i + 1) % 50 == 0:
                         db.commit()
                         await self.update_job_status(
@@ -219,17 +211,15 @@ class BulkUploadService:
                     db.rollback()
                     continue
             
-            # Final commit
             db.commit()
             
-            # Update job as completed
             await self.update_job_status(
                 job_id,
                 'completed',
                 processed_rows=len(data),
                 successful_rows=successful_rows,
                 failed_rows=failed_rows,
-                error_details={'errors': error_details[:100]}  # Limit to first 100 errors
+                error_details={'errors': error_details[:100]}  
             )
             
         except Exception as e:
@@ -264,7 +254,6 @@ class BulkUploadService:
         try:
             for i, row in enumerate(data):
                 try:
-                    # Create or get company
                     company = self.create_or_get_company(
                         db=db,
                         symbol=row['company_symbol'],
@@ -274,7 +263,6 @@ class BulkUploadService:
                         organization_id=organization_id
                     )
                     
-                    # Prepare financial data for ML model
                     financial_data = {
                         'total_debt_to_ebitda': self.safe_float(row['total_debt_to_ebitda']),
                         'sga_margin': self.safe_float(row['sga_margin']),
@@ -282,10 +270,8 @@ class BulkUploadService:
                         'return_on_capital': self.safe_float(row['return_on_capital'])
                     }
                     
-                    # Get ML prediction
                     ml_result = await self.quarterly_ml_service.predict_quarterly(financial_data)
                     
-                    # Create prediction
                     prediction = QuarterlyPrediction(
                         company_id=company.id,
                         organization_id=organization_id,
@@ -307,7 +293,6 @@ class BulkUploadService:
                     db.add(prediction)
                     successful_rows += 1
                     
-                    # Commit every 50 rows
                     if (i + 1) % 50 == 0:
                         db.commit()
                         await self.update_job_status(
@@ -329,10 +314,8 @@ class BulkUploadService:
                     db.rollback()
                     continue
             
-            # Final commit
             db.commit()
             
-            # Update job as completed
             await self.update_job_status(
                 job_id,
                 'completed',
@@ -416,5 +399,4 @@ class BulkUploadService:
         finally:
             db.close()
 
-# Global service instance
 bulk_upload_service = BulkUploadService()

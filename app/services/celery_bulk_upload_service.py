@@ -70,10 +70,8 @@ class CeleryBulkUploadService:
             Celery task ID
         """
         try:
-            # Import here to avoid circular imports
             from app.workers.tasks import process_annual_bulk_upload_task
             
-            # Start Celery task
             task = process_annual_bulk_upload_task.delay(
                 job_id=job_id,
                 data=data,
@@ -81,14 +79,12 @@ class CeleryBulkUploadService:
                 organization_id=organization_id
             )
             
-            # Update job with Celery task ID
             SessionLocal = get_session_local()
             db = SessionLocal()
             
             try:
                 job = db.query(BulkUploadJob).filter(BulkUploadJob.id == job_id).first()
                 if job:
-                    # Set celery_task_id if the field exists
                     if hasattr(job, 'celery_task_id'):
                         job.celery_task_id = task.id
                     job.status = 'queued'
@@ -118,10 +114,8 @@ class CeleryBulkUploadService:
             Celery task ID
         """
         try:
-            # Import here to avoid circular imports
             from app.workers.tasks import process_quarterly_bulk_upload_task
             
-            # Start Celery task
             task = process_quarterly_bulk_upload_task.delay(
                 job_id=job_id,
                 data=data,
@@ -129,14 +123,12 @@ class CeleryBulkUploadService:
                 organization_id=organization_id
             )
             
-            # Update job with Celery task ID
             SessionLocal = get_session_local()
             db = SessionLocal()
             
             try:
                 job = db.query(BulkUploadJob).filter(BulkUploadJob.id == job_id).first()
                 if job:
-                    # Set celery_task_id if the field exists
                     if hasattr(job, 'celery_task_id'):
                         job.celery_task_id = task.id
                     job.status = 'queued'
@@ -162,7 +154,6 @@ class CeleryBulkUploadService:
             if not job:
                 return None
             
-            # Get Celery task status if available
             celery_status = None
             celery_meta = None
             celery_task_id = getattr(job, 'celery_task_id', None)
@@ -176,7 +167,6 @@ class CeleryBulkUploadService:
                 except Exception as e:
                     logger.warning(f"Could not get Celery task status: {str(e)}")
             
-            # Calculate safe progress percentage
             progress_percentage = 0
             if job.total_rows and job.total_rows > 0 and job.processed_rows is not None:
                 try:
@@ -215,5 +205,4 @@ class CeleryBulkUploadService:
             db.close()
 
 
-# Global service instance
 celery_bulk_upload_service = CeleryBulkUploadService()

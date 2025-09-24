@@ -11,7 +11,6 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 from celery import current_task
 
-# macOS fork safety fix
 if sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
@@ -85,9 +84,7 @@ def update_job_status(
 
 def create_or_get_company(db, symbol: str, name: str, market_cap: float, sector: str, organization_id: Optional[str], user_id: str) -> Company:
     """Create or get company with organization scoping"""
-    # Determine access level based on user and organization context
     if organization_id:
-        # Organization-scoped company
         access_level = "organization"
         company = db.query(Company).filter(
             Company.symbol == symbol.upper(),
@@ -95,17 +92,14 @@ def create_or_get_company(db, symbol: str, name: str, market_cap: float, sector:
             Company.access_level == "organization"
         ).first()
     else:
-        # For organization_id=None, determine if system or personal level
         user = db.query(User).filter(User.id == user_id).first()
         if user and user.role == "super_admin":
-            # Super admin creates system-level companies
             access_level = "system"
             company = db.query(Company).filter(
                 Company.symbol == symbol.upper(),
                 Company.access_level == "system"
             ).first()
         else:
-            # Non-super-admin creates personal companies
             access_level = "personal"
             company = db.query(Company).filter(
                 Company.symbol == symbol.upper(),
@@ -118,16 +112,15 @@ def create_or_get_company(db, symbol: str, name: str, market_cap: float, sector:
         company = Company(
             symbol=symbol.upper(),
             name=name,
-            market_cap=safe_float(market_cap) * 1_000_000,  # Convert to actual value
+            market_cap=safe_float(market_cap) * 1_000_000,  
             sector=sector,
             organization_id=organization_id,
             access_level=access_level,
             created_by=user_id
         )
         db.add(company)
-        db.flush()  # Get the ID without committing
+        db.flush()  
     else:
-        # Update existing company
         company.name = name
         company.market_cap = safe_float(market_cap) * 1_000_000
         company.sector = sector
@@ -158,7 +151,6 @@ def process_annual_bulk_upload_task(
     task_id = self.request.id
     start_time = time.time()
     
-    # Update job status to processing
     update_job_status(job_id, 'processing')
     
     SessionLocal = get_session_local()
@@ -182,7 +174,6 @@ def process_annual_bulk_upload_task(
         
         for i, row in enumerate(data):
             try:
-                # Create or get company
                 company = create_or_get_company(
                     db=db,
                     symbol=row['company_symbol'],
@@ -193,7 +184,6 @@ def process_annual_bulk_upload_task(
                     user_id=user_id
                 )
                 
-                # Check if prediction already exists
                 existing_query = db.query(AnnualPrediction).filter(
                     AnnualPrediction.company_id == company.id,
                     AnnualPrediction.reporting_year == str(row['reporting_year'])
@@ -217,7 +207,6 @@ def process_annual_bulk_upload_task(
                     })
                     continue
                 
-                # Prepare financial data for ML model
                 financial_data = {
                     'long_term_debt_to_total_capital': safe_float(row['long_term_debt_to_total_capital']),
                     'total_debt_to_ebitda': safe_float(row['total_debt_to_ebitda']),
@@ -226,10 +215,8 @@ def process_annual_bulk_upload_task(
                     'return_on_assets': safe_float(row['return_on_assets'])
                 }
                 
-                # Get ML prediction (direct call in Celery task)
                 ml_result = ml_model.predict_default_probability(financial_data)
                 
-                # Determine access level based on user and organization
                 if organization_id:
                     access_level = "organization"
                 else:
@@ -239,7 +226,6 @@ def process_annual_bulk_upload_task(
                     else:
                         access_level = "personal"
                 
-                # Create prediction
                 prediction = AnnualPrediction(
                     id=uuid.uuid4(),
                     company_id=company.id,
@@ -262,7 +248,6 @@ def process_annual_bulk_upload_task(
                 db.add(prediction)
                 successful_rows += 1
                 
-                # Commit every 50 rows and update progress
                 if (i + 1) % 50 == 0:
                     db.commit()
                     update_job_status(
@@ -289,27 +274,24 @@ def process_annual_bulk_upload_task(
                 failed_rows += 1
                 error_details.append({
                     'row': i + 1,
-                    'data': {k: str(v) for k, v in row.items()},  # Convert to string for JSON serialization
+                    'data': {k: str(v) for k, v in row.items()},  
                     'error': str(e)
                 })
                 logger.error(f"Error processing row {i + 1}: {str(e)}")
                 db.rollback()
                 continue
         
-        # Final commit
         db.commit()
         
-        # Calculate processing time
         processing_time = time.time() - start_time
         
-        # Update job as completed
         update_job_status(
             job_id,
             'completed',
             processed_rows=total_rows,
             successful_rows=successful_rows,
             failed_rows=failed_rows,
-            error_details={'errors': error_details[:100]}  # Limit to first 100 errors
+            error_details={'errors': error_details[:100]}  
         )
         
         result = {
@@ -319,7 +301,7 @@ def process_annual_bulk_upload_task(
             "successful_rows": successful_rows,
             "failed_rows": failed_rows,
             "processing_time_seconds": round(processing_time, 2),
-            "errors": error_details[:10]  # Return first 10 errors
+            "errors": error_details[:10]  
         }
         
         return result
@@ -346,7 +328,6 @@ def process_annual_bulk_upload_task(
             }
         )
         
-        # Return error result instead of raising exception to avoid serialization issues
         return {
             "status": "failed",
             "job_id": job_id,
@@ -383,7 +364,6 @@ def process_quarterly_bulk_upload_task(
     task_id = self.request.id
     start_time = time.time()
     
-    # Update job status to processing
     update_job_status(job_id, 'processing')
     
     SessionLocal = get_session_local()
@@ -407,7 +387,6 @@ def process_quarterly_bulk_upload_task(
         
         for i, row in enumerate(data):
             try:
-                # Create or get company
                 company = create_or_get_company(
                     db=db,
                     symbol=row['company_symbol'],
@@ -418,7 +397,6 @@ def process_quarterly_bulk_upload_task(
                     user_id=user_id
                 )
                 
-                # Check if prediction already exists
                 existing_prediction = db.query(QuarterlyPrediction).filter(
                     QuarterlyPrediction.company_id == company.id,
                     QuarterlyPrediction.reporting_year == str(row['reporting_year']),
@@ -433,7 +411,6 @@ def process_quarterly_bulk_upload_task(
                     })
                     continue
                 
-                # Prepare financial data for ML model
                 financial_data = {
                     'total_debt_to_ebitda': safe_float(row['total_debt_to_ebitda']),
                     'sga_margin': safe_float(row['sga_margin']),
@@ -441,10 +418,8 @@ def process_quarterly_bulk_upload_task(
                     'return_on_capital': safe_float(row['return_on_capital'])
                 }
                 
-                # Get ML prediction (direct call in Celery task)
                 ml_result = quarterly_ml_model.predict_quarterly_default_probability(financial_data)
                 
-                # Determine access level based on user and organization
                 if organization_id:
                     access_level = "organization"
                 else:
@@ -454,7 +429,6 @@ def process_quarterly_bulk_upload_task(
                     else:
                         access_level = "personal"
                 
-                # Create prediction
                 prediction = QuarterlyPrediction(
                     id=uuid.uuid4(),
                     company_id=company.id,
@@ -478,7 +452,6 @@ def process_quarterly_bulk_upload_task(
                 db.add(prediction)
                 successful_rows += 1
                 
-                # Commit every 50 rows and update progress
                 if (i + 1) % 50 == 0:
                     db.commit()
                     update_job_status(
@@ -505,27 +478,24 @@ def process_quarterly_bulk_upload_task(
                 failed_rows += 1
                 error_details.append({
                     'row': i + 1,
-                    'data': {k: str(v) for k, v in row.items()},  # Convert to string for JSON serialization
+                    'data': {k: str(v) for k, v in row.items()},  
                     'error': str(e)
                 })
                 logger.error(f"Error processing row {i + 1}: {str(e)}")
                 db.rollback()
                 continue
         
-        # Final commit
         db.commit()
         
-        # Calculate processing time
         processing_time = time.time() - start_time
         
-        # Update job as completed
         update_job_status(
             job_id,
             'completed',
             processed_rows=total_rows,
             successful_rows=successful_rows,
             failed_rows=failed_rows,
-            error_details={'errors': error_details[:100]}  # Limit to first 100 errors
+            error_details={'errors': error_details[:100]}  
         )
         
         result = {
@@ -535,7 +505,7 @@ def process_quarterly_bulk_upload_task(
             "successful_rows": successful_rows,
             "failed_rows": failed_rows,
             "processing_time_seconds": round(processing_time, 2),
-            "errors": error_details[:10]  # Return first 10 errors
+            "errors": error_details[:10]  
         }
         
         return result
@@ -561,7 +531,6 @@ def process_quarterly_bulk_upload_task(
             }
         )
         
-        # Return error result instead of raising exception to avoid serialization issues
         return {
             "status": "failed",
             "job_id": job_id,
@@ -722,7 +691,6 @@ def process_bulk_excel_task(self, file_content_b64: str, original_filename: str)
                     return_on_assets=ratios['return_on_assets']
                 )
                 
-                # Save to database using single table structure with upsert
                 company = company_service.upsert_company(company_data, prediction_result)
                 
                 result_item = {
@@ -855,7 +823,6 @@ def process_bulk_normalized_task(self, file_content_b64: str, original_filename:
     total_companies = 0
     
     try:
-        # Decode and read file
         file_content = base64.b64decode(file_content_b64)
         
         if original_filename.endswith('.csv'):
@@ -865,14 +832,13 @@ def process_bulk_normalized_task(self, file_content_b64: str, original_filename:
         
         total_companies = len(df)
         
-        # Validate required columns based on prediction type
         if prediction_type == "annual":
             required_columns = [
                 'stock_symbol', 'company_name',
                 'long_term_debt_to_total_capital', 'total_debt_to_ebitda', 
                 'net_income_margin', 'ebit_to_interest_expense', 'return_on_assets'
             ]
-        else:  # quarterly
+        else:  
             required_columns = [
                 'stock_symbol', 'company_name', 'reporting_year', 'reporting_quarter',
                 'total_debt_to_ebitda', 'sga_margin', 
@@ -883,25 +849,21 @@ def process_bulk_normalized_task(self, file_content_b64: str, original_filename:
         if missing_columns:
             raise ValueError(f"Missing required columns: {', '.join(missing_columns)}")
         
-        # Optional columns with defaults
         optional_columns = {
             'market_cap': 1000000000,
             'sector': 'Unknown',
             'reporting_year': '2024',
-            'reporting_quarter': 'Q4',  # Default for both annual and quarterly
+            'reporting_quarter': 'Q3',  
         }
         
-        # Add missing optional columns
         for col, default_value in optional_columns.items():
             if col not in df.columns:
                 df[col] = default_value
         
         company_service = CompanyService(db)
         
-        # Process each company
         for index, row in df.iterrows():
             try:
-                # Update progress
                 self.update_state(
                     state="PROGRESS",
                     meta={
@@ -915,14 +877,12 @@ def process_bulk_normalized_task(self, file_content_b64: str, original_filename:
                     }
                 )
                 
-                # Validate required data
                 stock_symbol = str(row['stock_symbol']).strip().upper()
                 company_name = str(row['company_name']).strip()
                 
                 if not stock_symbol or not company_name or stock_symbol.lower() == 'nan' or company_name.lower() == 'nan':
                     raise ValueError("Stock symbol and company name are required")
                 
-                # Handle optional fields
                 market_cap = row.get('market_cap', 1000000000)
                 if pd.isna(market_cap):
                     market_cap = 1000000000
@@ -938,7 +898,6 @@ def process_bulk_normalized_task(self, file_content_b64: str, original_filename:
                 reporting_year = str(row.get('reporting_year', '2024')).strip()
                 reporting_quarter = str(row.get('reporting_quarter', 'Q4')).strip()
                 
-                # Create or get company
                 company = company_service.create_company(
                     symbol=stock_symbol,
                     name=company_name,
@@ -949,7 +908,6 @@ def process_bulk_normalized_task(self, file_content_b64: str, original_filename:
                 )
                 
                 if prediction_type == "annual":
-                    # Annual prediction
                     ratios = {
                         'long_term_debt_to_total_capital': safe_float(row['long_term_debt_to_total_capital']),
                         'total_debt_to_ebitda': safe_float(row['total_debt_to_ebitda']),
@@ -963,7 +921,6 @@ def process_bulk_normalized_task(self, file_content_b64: str, original_filename:
                     if "error" in prediction_result:
                         raise ValueError(f"Annual prediction failed: {prediction_result['error']}")
                     
-                    # Create annual prediction
                     annual_prediction = company_service.create_annual_prediction(
                         company=company,
                         financial_data=ratios,
@@ -994,8 +951,7 @@ def process_bulk_normalized_task(self, file_content_b64: str, original_filename:
                         "error_message": None
                     }
                     
-                else:  # quarterly
-                    # Quarterly prediction
+                else: 
                     reporting_quarter = str(row['reporting_quarter']).strip()
                     
                     ratios = {
@@ -1011,7 +967,6 @@ def process_bulk_normalized_task(self, file_content_b64: str, original_filename:
                     if "error" in prediction_result:
                         raise ValueError(f"Quarterly prediction failed: {prediction_result['error']}")
                     
-                    # Create quarterly prediction
                     quarterly_prediction = company_service.create_quarterly_prediction(
                         company=company,
                         financial_data=ratios,
@@ -1050,7 +1005,6 @@ def process_bulk_normalized_task(self, file_content_b64: str, original_filename:
                 successful_predictions += 1
                 
             except Exception as e:
-                # Handle individual company prediction failure
                 result_item = {
                     "stock_symbol": str(row.get('stock_symbol', 'Unknown')),
                     "company_name": str(row.get('company_name', 'Unknown')),
@@ -1066,7 +1020,6 @@ def process_bulk_normalized_task(self, file_content_b64: str, original_filename:
         
         processing_time = time.time() - start_time
         
-        # Final result
         result = {
             "success": True,
             "message": f"Bulk {prediction_type} prediction completed. {successful_predictions} successful, {failed_predictions} failed.",
@@ -1087,7 +1040,6 @@ def process_bulk_normalized_task(self, file_content_b64: str, original_filename:
         print(f"Task {task_id} failed: {error_msg}")
         print(f"Traceback: {traceback.format_exc()}")
         
-        # Return error result
         return {
             "success": False,
             "message": error_msg,
@@ -1116,16 +1068,13 @@ def process_quarterly_bulk_task(file_content_b64: str, original_filename: str, o
     db = get_session_local()
     
     try:
-        # Update task status
         current_task.update_state(
             state='PROGRESS',
             meta={'status': 'Processing quarterly file...', 'progress': 0}
         )
         
-        # Decode file content
         file_content = base64.b64decode(file_content_b64)
         
-        # Read file
         if original_filename.endswith('.csv'):
             df = pd.read_csv(io.StringIO(file_content.decode('utf-8')))
         else:
@@ -1138,10 +1087,8 @@ def process_quarterly_bulk_task(file_content_b64: str, original_filename: str, o
         successful_predictions = 0
         failed_predictions = 0
         
-        # Process each company
         for index, row in df.iterrows():
             try:
-                # Update progress
                 progress = int((index / total_companies) * 100)
                 current_task.update_state(
                     state='PROGRESS',
@@ -1152,7 +1099,6 @@ def process_quarterly_bulk_task(file_content_b64: str, original_filename: str, o
                     }
                 )
                 
-                # Extract and validate data
                 stock_symbol = str(row['stock_symbol']).strip()
                 company_name = str(row['company_name']).strip()
                 reporting_year = str(row['reporting_year']).strip()
@@ -1170,7 +1116,6 @@ def process_quarterly_bulk_task(file_content_b64: str, original_filename: str, o
                     failed_predictions += 1
                     continue
                 
-                # Get or create company
                 company = company_service.get_company_by_symbol(stock_symbol)
                 if not company:
                     market_cap = safe_float(row.get('market_cap'))
@@ -1185,7 +1130,6 @@ def process_quarterly_bulk_task(file_content_b64: str, original_filename: str, o
                         created_by=created_by
                     )
                 
-                # Check if prediction already exists
                 existing_prediction = company_service.get_quarterly_prediction(
                     company.id, reporting_year, reporting_quarter
                 )
@@ -1202,7 +1146,6 @@ def process_quarterly_bulk_task(file_content_b64: str, original_filename: str, o
                     failed_predictions += 1
                     continue
                 
-                # Prepare financial ratios
                 financial_ratios = {
                     "total_debt_to_ebitda": safe_float(row['total_debt_to_ebitda']),
                     "sga_margin": safe_float(row['sga_margin']),
@@ -1210,7 +1153,6 @@ def process_quarterly_bulk_task(file_content_b64: str, original_filename: str, o
                     "return_on_capital": safe_float(row['return_on_capital'])
                 }
                 
-                # Validate financial ratios
                 missing_ratios = [k for k, v in financial_ratios.items() if v is None]
                 if missing_ratios:
                     results.append({
@@ -1224,7 +1166,6 @@ def process_quarterly_bulk_task(file_content_b64: str, original_filename: str, o
                     failed_predictions += 1
                     continue
                 
-                # Get quarterly prediction
                 prediction_result = quarterly_ml_model.predict_default_probability(financial_ratios)
                 
                 if "error" in prediction_result:
@@ -1239,7 +1180,6 @@ def process_quarterly_bulk_task(file_content_b64: str, original_filename: str, o
                     failed_predictions += 1
                     continue
                 
-                # Save to database
                 prediction = company_service.create_quarterly_prediction(
                     company=company,
                     financial_data=financial_ratios,
@@ -1274,7 +1214,6 @@ def process_quarterly_bulk_task(file_content_b64: str, original_filename: str, o
                 })
                 failed_predictions += 1
         
-        # Final status update
         current_task.update_state(
             state='SUCCESS',
             meta={
