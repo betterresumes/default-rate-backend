@@ -89,7 +89,7 @@ class UserResponse(BaseModel):
         return v
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class UserListResponse(BaseModel):
     users: List[UserResponse]
@@ -144,7 +144,7 @@ class TenantResponse(BaseModel):
         return v
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class TenantListResponse(BaseModel):
     tenants: List[TenantResponse]
@@ -161,7 +161,7 @@ class TenantStatsResponse(BaseModel):
     created_at: datetime
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class OrganizationBase(BaseModel):
     name: str = Field(..., min_length=2, max_length=100)
@@ -211,7 +211,7 @@ class OrganizationResponse(BaseModel):
         return v
     
     class Config:
-        orm_mode = True  
+        from_attributes = True
 
 class OrganizationListResponse(BaseModel):
     organizations: List[OrganizationResponse]
@@ -247,7 +247,7 @@ class WhitelistResponse(BaseModel):
         return v
     
     class Config:
-        orm_mode = True  
+        from_attributes = True
 
 class WhitelistListResponse(BaseModel):
     whitelist: List[WhitelistResponse]
@@ -305,7 +305,7 @@ class CompanyResponse(BaseModel):
         return v
     
     class Config:
-        orm_mode = True  
+        from_attributes = True
 
 class CompanyListResponse(BaseModel):
     companies: List[CompanyResponse]
@@ -412,7 +412,7 @@ class PredictionResponse(BaseModel):
         return v
     
     class Config:
-        orm_mode = True  
+        from_attributes = True
 
 class PredictionListResponse(BaseModel):
     predictions: List[PredictionResponse]
@@ -450,7 +450,7 @@ class OrgAdminInfo(BaseModel):
         return v
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class OrganizationDetailedResponse(BaseModel):
     """Enhanced organization response with admin information."""
@@ -483,7 +483,7 @@ class OrganizationDetailedResponse(BaseModel):
         return v
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class TenantAdminInfo(BaseModel):
     """Tenant admin user information"""
@@ -503,7 +503,7 @@ class TenantAdminInfo(BaseModel):
         return v
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class OrganizationAdminInfo(BaseModel):
     """Organization admin information"""
@@ -522,7 +522,7 @@ class OrganizationAdminInfo(BaseModel):
         return v
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class OrganizationUserInfo(BaseModel):
     """Organization member information"""
@@ -541,7 +541,7 @@ class OrganizationUserInfo(BaseModel):
         return v
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class DetailedOrganizationInfo(BaseModel):
     """Detailed organization information with users"""
@@ -569,7 +569,7 @@ class DetailedOrganizationInfo(BaseModel):
         return v
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class ComprehensiveTenantResponse(BaseModel):
     """Comprehensive tenant information for super admin"""
@@ -601,7 +601,7 @@ class ComprehensiveTenantResponse(BaseModel):
         return v
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class ComprehensiveTenantListResponse(BaseModel):
     """List response with comprehensive tenant information"""
@@ -699,7 +699,7 @@ class EnhancedOrganizationResponse(BaseModel):
         return v
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class EnhancedOrganizationListResponse(BaseModel):
     """Enhanced organization list response"""

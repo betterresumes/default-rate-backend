@@ -146,7 +146,7 @@ async def admin_create_user(
         db.commit()
         db.refresh(new_user)
         
-        return UserResponse.from_orm(new_user)
+        return UserResponse.model_validate(new_user)
         
     except Exception as e:
         db.rollback()
