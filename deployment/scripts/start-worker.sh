@@ -11,6 +11,12 @@ cd "$(dirname "$0")/../.."
 # Set environment variables
 export PYTHONPATH="$(pwd):${PYTHONPATH}"
 
+# Print Redis configuration for debugging
+echo "🔍 Redis Configuration:"
+echo "   - REDIS_URL: ${REDIS_URL:0:30}..."
+echo "   - REDIS_HOST: ${REDIS_HOST:-'Not set'}"
+echo "   - REDIS_PORT: ${REDIS_PORT:-'Not set'}"
+
 # Start Celery worker with production settings
 exec celery -A app.workers.celery_app worker \
     --loglevel=info \

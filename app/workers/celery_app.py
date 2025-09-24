@@ -33,12 +33,21 @@ if not REDIS_URL:
     else:
         REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
 
+# Override environment variables that might interfere with Railway Redis
+if REDIS_URL and 'railway.internal' in REDIS_URL:
+    os.environ['CELERY_BROKER_URL'] = REDIS_URL
+    os.environ['CELERY_RESULT_BACKEND'] = REDIS_URL
+
 print(f"🔄 Celery using Redis URL: {REDIS_URL[:20]}...{REDIS_URL[-10:] if len(REDIS_URL) > 30 else REDIS_URL}")
+
+# Use the same Redis URL for both broker and backend (no separate databases)
+BROKER_URL = REDIS_URL
+BACKEND_URL = REDIS_URL
 
 celery_app = Celery(
     "bulk_prediction_worker",
-    broker=REDIS_URL,
-    backend=REDIS_URL,
+    broker=BROKER_URL,
+    backend=BACKEND_URL,
     include=["app.workers.tasks"]
 )
 
@@ -86,16 +95,19 @@ celery_app.conf.update(
     task_ignore_result=False,
     result_persistent=True,
     
-    # macOS specific fixes
+    # macOS specific fixes - but allow production scaling
     worker_pool="solo" if sys.platform == "darwin" else "prefork",
-    worker_concurrency=1 if sys.platform == "darwin" else None,
+    worker_concurrency=1 if sys.platform == "darwin" else 4,  # 4 concurrent tasks in production
+    
+    # Worker management settings
+    worker_max_tasks_per_child=100,  # Restart worker after 100 tasks to prevent memory leaks
     
     task_routes={
         "app.workers.tasks.process_bulk_excel_task": {"queue": "bulk_predictions"},
         "app.workers.tasks.process_annual_bulk_upload_task": {"queue": "bulk_predictions"},
         "app.workers.tasks.process_quarterly_bulk_upload_task": {"queue": "bulk_predictions"},
-        "app.workers.tasks.send_verification_email_task": {"queue": "emails"},
-        "app.workers.tasks.send_password_reset_email_task": {"queue": "emails"},
+        "app.workers.tasks.process_bulk_normalized_task": {"queue": "bulk_predictions"},
+        "app.workers.tasks.process_quarterly_bulk_task": {"queue": "bulk_predictions"},
     }
 )
 

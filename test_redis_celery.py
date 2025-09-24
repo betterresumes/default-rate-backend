@@ -12,7 +12,7 @@ from datetime import datetime
 sys.path.insert(0, '/Users/nikhil/Downloads/pranit/work/final/default-rate/backend')
 
 from app.workers.celery_app import celery_app
-from app.workers.tasks import send_verification_email_task
+# Email tasks have been removed - test will use basic Celery functionality
 
 def test_redis_connection():
     """Test Redis connection"""
@@ -35,27 +35,18 @@ def test_celery_task():
     """Test a simple Celery task"""
     print("\n🔍 Testing Celery Task...")
     try:
-        # Send a test task
-        result = send_verification_email_task.delay(
-            email="test@example.com",
-            username="testuser", 
-            otp="123456"
-        )
+        # Just test task inspection since email tasks were removed
+        inspect = celery_app.control.inspect()
+        stats = inspect.stats()
         
-        print(f"📤 Task sent - ID: {result.id}")
-        print(f"📊 Initial status: {result.status}")
-        
-        # Wait a bit and check status
-        time.sleep(2)
-        
-        try:
-            task_result = result.get(timeout=10)
-            print(f"✅ Task completed successfully: {task_result}")
-        except Exception as e:
-            print(f"⚠️  Task execution issue: {e}")
-            print(f"📊 Final status: {result.status}")
+        if stats:
+            print("✅ Celery worker inspection successful")
+            print(f"📊 Active workers: {list(stats.keys())}")
+            return True
+        else:
+            print("⚠️  No active workers found (normal if worker not running)")
+            return True  # This is OK for testing
             
-        return True
     except Exception as e:
         print(f"❌ Celery task test failed: {e}")
         return False

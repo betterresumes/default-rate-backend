@@ -22,7 +22,7 @@ celery -A app.workers.celery_app worker \
     --loglevel=info \
     --pool=solo \
     --concurrency=1 \
-    --queues=bulk_predictions,emails \
+    --queues=bulk_predictions \
     --hostname=macos-worker@%h
 
 echo "✅ Celery worker started for macOS!"

@@ -575,52 +575,6 @@ def process_quarterly_bulk_upload_task(
         db.close()
 
 
-@celery_app.task(name="app.workers.tasks.send_verification_email_task")
-def send_verification_email_task(email: str, username: str, otp: str) -> bool:
-    """
-    Background task to send verification email.
-    Currently disabled - email service not configured.
-    
-    Args:
-        email: User's email address
-        username: User's username
-        otp: Generated OTP code
-        
-    Returns:
-        Boolean indicating success
-    """
-    try:
-        # Email service disabled for now
-        print(f"Would send verification email to {email} with OTP: {otp}")
-        return True  # Return success for testing
-    except Exception as e:
-        print(f"Failed to send verification email to {email}: {str(e)}")
-        return False
-
-
-@celery_app.task(name="app.workers.tasks.send_password_reset_email_task")
-def send_password_reset_email_task(email: str, username: str, otp: str) -> bool:
-    """
-    Background task to send password reset email.
-    Currently disabled - email service not configured.
-    
-    Args:
-        email: User's email address
-        username: User's username
-        otp: Generated OTP code
-        
-    Returns:
-        Boolean indicating success
-    """
-    try:
-        # Email service disabled for now
-        print(f"Would send password reset email to {email} with OTP: {otp}")
-        return True  # Return success for testing
-    except Exception as e:
-        print(f"Failed to send password reset email to {email}: {str(e)}")
-        return False
-
-
 @celery_app.task(bind=True, name="app.workers.tasks.process_bulk_excel_task")
 def process_bulk_excel_task(self, file_content_b64: str, original_filename: str) -> Dict[str, Any]:
     """
