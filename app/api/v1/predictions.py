@@ -1661,12 +1661,39 @@ async def delete_job(
         if not job:
             raise HTTPException(status_code=404, detail="Job not found or access denied")
 
-        # Only prevent deletion of jobs that are currently processing
+        # Enhanced job deletion logic
+        # Allow deletion of jobs that aren't actively processing or that can be safely cancelled
         if job.status == "processing":
-            raise HTTPException(
-                status_code=400, 
-                detail="Cannot delete job that is currently processing. Please cancel the job first or wait for it to complete."
-            )
+            # Check if job has been running for a reasonable time
+            # If it's been processing for less than 30 seconds, allow deletion (likely just started)
+            processing_duration = None
+            if job.started_at:
+                processing_duration = (datetime.utcnow() - job.started_at).total_seconds()
+            
+            if processing_duration and processing_duration > 30:
+                # Job has been processing for more than 30 seconds, require explicit cancellation
+                raise HTTPException(
+                    status_code=400, 
+                    detail="Cannot delete job that has been processing for more than 30 seconds. Please cancel the job first or wait for it to complete."
+                )
+            else:
+                # Job just started processing or no start time, allow deletion but try to cancel Celery task
+                if hasattr(job, 'celery_task_id') and job.celery_task_id:
+                    try:
+                        from app.workers.celery_app import celery_app
+                        celery_app.control.revoke(job.celery_task_id, terminate=True)
+                        logger.info(f"Cancelled Celery task {job.celery_task_id} for job {job_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to cancel Celery task {job.celery_task_id}: {str(e)}")
+        
+        # For pending/queued jobs, also try to cancel Celery task if it exists
+        elif job.status in ["pending", "queued"] and hasattr(job, 'celery_task_id') and job.celery_task_id:
+            try:
+                from app.workers.celery_app import celery_app
+                celery_app.control.revoke(job.celery_task_id, terminate=True)
+                logger.info(f"Cancelled Celery task {job.celery_task_id} for {job.status} job {job_id}")
+            except Exception as e:
+                logger.warning(f"Failed to cancel Celery task {job.celery_task_id}: {str(e)}")
 
         # Delete the job
         db.delete(job)
