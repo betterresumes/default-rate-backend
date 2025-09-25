@@ -1,46 +1,50 @@
-# Production Dockerfile for Railway
-# Use existing local Python image to avoid Docker Hub authentication issues
-# syntax=docker/dockerfile:1
-FROM backend-fastapi-app:latest
+# Railway Production Dockerfile
+# Optimized for Railway deployment with Neon PostgreSQL
+
+FROM python:3.11-slim
 
 # Set working directory
 WORKDIR /app
 
-# Set environment variables
+# Set environment variables for Railway
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONPATH=/app
 
-# Update existing packages and install additional dependencies if needed
+# Install system dependencies required for PostgreSQL and ML packages
 RUN apt-get update && apt-get install -y \
+    build-essential \
     curl \
-    wget \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    libpq-dev \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better Docker layer caching
+# Copy requirements file
 COPY requirements.prod.txt .
 
 # Install Python dependencies
-RUN pip install --upgrade pip && \
-    pip install -r requirements.prod.txt
+RUN pip install --no-cache-dir -r requirements.prod.txt
 
-# Copy application code
+# Copy the application code
 COPY . .
 
-# Make scripts executable
-RUN chmod +x deployment/scripts/start-railway.sh deployment/scripts/start-worker.sh
+# Create a non-root user for security
+RUN useradd -m -u 1000 appuser && \
+    chown -R appuser:appuser /app && \
+    chmod -R 755 /app
 
-# Create non-root user for security
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+# Switch to non-root user
 USER appuser
 
-# Expose port (Railway sets PORT env var)
+# Expose the port that Railway will use
 EXPOSE $PORT
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=10s --retries=3 \
-  CMD curl -f http://localhost:${PORT:-8000}/health || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:${PORT:-8000}/health || exit 1
 
-# Production command
-CMD ["./deployment/scripts/start-railway.sh"]
+# Command to run the application
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

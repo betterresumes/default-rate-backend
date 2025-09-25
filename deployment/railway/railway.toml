@@ -1,33 +1,23 @@
-# Main API Service
+# Railway Configuration for Default Rate API
+# Optimized for Railway + Neon PostgreSQL deployment
+
 [build]
 builder = "dockerfile"
 dockerfilePath = "Dockerfile"
+buildCommand = "echo 'Building with Railway..'"
 
 [deploy]
-startCommand = "./deployment/scripts/start-railway.sh"
+startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
 healthcheckPath = "/health"
-healthcheckTimeout = 300
-restartPolicyType = "always"
+healthcheckTimeout = 60
+restartPolicyType = "on-failure"
+restartPolicyMaxRetries = 3
 
 [environments.production]
-variables = { 
-  DEBUG = "False", 
-  CORS_ORIGIN = "*", 
-  PYTHONUNBUFFERED = "1",
-  PYTHONPATH = "/app"
-}
-
-# Worker Service Configuration
-# This will need to be deployed as a separate service
-[services.worker]
-build.builder = "dockerfile"
-build.dockerfilePath = "Dockerfile"
-deploy.startCommand = "./deployment/scripts/start-worker.sh"
-deploy.restartPolicyType = "always"
-
-[services.worker.environments.production]
-variables = { 
-  DEBUG = "False", 
-  PYTHONUNBUFFERED = "1",
-  PYTHONPATH = "/app"
-}
+[environments.production.variables]
+ENVIRONMENT = "production"
+DEBUG = "false"
+PYTHONUNBUFFERED = "1"
+PYTHONPATH = "/app"
+API_V1_STR = "/api/v1"
+PROJECT_NAME = "Default Rate API"
