@@ -31,6 +31,9 @@ RUN pip install --no-cache-dir -r requirements.prod.txt
 # Copy the application code
 COPY . .
 
+# Make start script executable
+RUN chmod +x start.sh
+
 # Create a non-root user for security
 RUN useradd -m -u 1000 appuser && \
     chown -R appuser:appuser /app && \
@@ -47,4 +50,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:${PORT:-8000}/health || exit 1
 
 # Command to run the application
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["./start.sh"]
