@@ -1,6 +1,7 @@
 # Production Dockerfile for Railway
-# Use official Python image from GitHub Container Registry (more reliable than Docker Hub)
-FROM ghcr.io/library/python:3.11-slim
+# Use existing local Python image to avoid Docker Hub authentication issues
+# syntax=docker/dockerfile:1
+FROM backend-fastapi-app:latest
 
 # Set working directory
 WORKDIR /app
@@ -11,20 +12,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system dependencies with retry logic
+# Update existing packages and install additional dependencies if needed
 RUN apt-get update && apt-get install -y \
-  gcc \
-  curl \
-  wget \
-  && rm -rf /var/lib/apt/lists/* \
-  && apt-get clean
+    curl \
+    wget \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better Docker layer caching
 COPY requirements.prod.txt .
 
 # Install Python dependencies
-RUN pip install --no-cache-dir --upgrade pip \
-  && pip install --no-cache-dir -r requirements.prod.txt
+RUN pip install --upgrade pip && \
+    pip install -r requirements.prod.txt
 
 # Copy application code
 COPY . .
