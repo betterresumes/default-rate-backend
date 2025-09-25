@@ -1,4 +1,4 @@
-# Railway Service Configuration for Celery Worker
+# Railway Service Configuration for Auto-Scaling Celery Worker
 # Create a separate Railway service with this configuration
 
 [build]
@@ -10,6 +10,7 @@ startCommand = "./deployment/scripts/start-worker.sh"
 restartPolicyType = "always"
 healthcheckTimeout = 300
 
+# AUTO-SCALING CONFIGURATION
 [environments.production]
 variables = { 
   DEBUG = "false",
@@ -17,5 +18,18 @@ variables = {
   PYTHONPATH = "/app",
   CELERY_BROKER_URL = "$REDIS_URL",
   CELERY_RESULT_BACKEND = "$REDIS_URL",
-  DATABASE_URL = "$DATABASE_URL"
+  DATABASE_URL = "$DATABASE_URL",
+  
+  # AUTO-SCALING ENVIRONMENT VARIABLES
+  AUTO_SCALING_ENABLED = "true",
+  MAX_WORKER_INSTANCES = "8",
+  MIN_WORKER_INSTANCES = "2", 
+  SCALE_UP_THRESHOLD = "100",
+  SCALE_DOWN_THRESHOLD = "20",
+  WORKER_CONCURRENCY = "8",
+  
+  # RAILWAY SPECIFIC AUTO-SCALING
+  RAILWAY_SERVICE_NAME = "workers",
+  RAILWAY_PROJECT_ID = "$RAILWAY_PROJECT_ID",
+  RAILWAY_TOKEN = "$RAILWAY_TOKEN"
 }

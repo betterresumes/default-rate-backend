@@ -1034,7 +1034,7 @@ async def bulk_upload_annual_async(
             total_rows=total_rows
         )
         
-        task_id = await celery_bulk_upload_service.process_annual_bulk_upload(
+        task_info = await celery_bulk_upload_service.process_annual_bulk_upload(
             job_id=job_id,
             data=data,
             user_id=str(current_user.id),
@@ -1045,9 +1045,16 @@ async def bulk_upload_annual_async(
             "success": True,
             "message": "Bulk upload job started successfully using Celery workers",
             "job_id": job_id,
-            "task_id": task_id,
+            "task_id": task_info['task_id'],
             "total_rows": total_rows,
-            "estimated_time_minutes": max(1, total_rows // 100)  # Rough estimate
+            "estimated_time_minutes": task_info['estimated_time_minutes'],
+            
+            # NEW AUTO-SCALING FIELDS:
+            "queue_priority": task_info['queue_priority'],
+            "queue_position": task_info['queue_position'],
+            "current_system_load": task_info['system_load'],
+            "processing_message": task_info['processing_message'],
+            "worker_capacity": task_info['current_worker_capacity']
         }
         
     except HTTPException:
@@ -1128,7 +1135,7 @@ async def bulk_upload_quarterly_async(
             total_rows=total_rows
         )
         
-        task_id = await celery_bulk_upload_service.process_quarterly_bulk_upload(
+        task_info = await celery_bulk_upload_service.process_quarterly_bulk_upload(
             job_id=job_id,
             data=data,
             user_id=str(current_user.id),
@@ -1139,9 +1146,16 @@ async def bulk_upload_quarterly_async(
             "success": True,
             "message": "Bulk upload job started successfully using Celery workers",
             "job_id": job_id,
-            "task_id": task_id,
+            "task_id": task_info['task_id'],
             "total_rows": total_rows,
-            "estimated_time_minutes": max(1, total_rows // 100)
+            "estimated_time_minutes": task_info['estimated_time_minutes'],
+            
+            # NEW AUTO-SCALING FIELDS:
+            "queue_priority": task_info['queue_priority'],
+            "queue_position": task_info['queue_position'],
+            "current_system_load": task_info['system_load'],
+            "processing_message": task_info['processing_message'],
+            "worker_capacity": task_info['current_worker_capacity']
         }
         
     except HTTPException:

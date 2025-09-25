@@ -24,6 +24,7 @@ from app.api.v1.tenants import router as tenants_router
 from app.api.v1.organizations_multi_tenant import router as organizations_router
 from app.api.v1.users import router as users_router
 from app.api.v1 import companies, predictions
+from app.api.v1.scaling import router as scaling_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -84,12 +85,24 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"⚠️ Celery: Worker check failed - {e}")
     
+    logger.info("🔄 Starting Auto-Scaling Monitor...")
+    try:
+        import asyncio
+        from app.workers.auto_scaling_monitor import start_auto_scaling_monitor
+        
+        # Start auto-scaling monitor as background task
+        asyncio.create_task(start_auto_scaling_monitor())
+        logger.info("✅ Auto-Scaling: Monitor started successfully")
+    except Exception as e:
+        logger.warning(f"⚠️ Auto-Scaling: Monitor startup failed - {e}")
+    
     logger.info("🎯 API startup completed!")
     logger.info("📋 Available endpoints:")
     logger.info("   • Health Check: /health")
     logger.info("   • API Documentation: /docs")
     logger.info("   • API Root: /")
     logger.info("   • Main API: /api/v1/")
+    logger.info("   • Auto-Scaling: /api/v1/scaling/")
     
     yield
     
@@ -181,6 +194,7 @@ def create_app() -> FastAPI:
     app.include_router(users_router, prefix="/api/v1/users", tags=["User Management"])
     app.include_router(companies.router, prefix="/api/v1/companies", tags=["Companies"])
     app.include_router(predictions.router, prefix="/api/v1/predictions", tags=["Predictions"])
+    app.include_router(scaling_router, tags=["Auto-Scaling"])
 
     @app.get("/")
     async def root():

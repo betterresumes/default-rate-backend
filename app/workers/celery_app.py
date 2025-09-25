@@ -50,14 +50,19 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
-    result_expires=3600, 
+    result_expires=7200,  # Increased to 2 hours for better auto-scaling
     task_track_started=True,
-    task_time_limit=30 * 60,  
-    task_soft_time_limit=25 * 60,  
-    worker_prefetch_multiplier=1,
+    
+    # AUTO-SCALING OPTIMIZED SETTINGS
+    task_time_limit=10 * 60,  # Reduced to 10 minutes per task for faster scaling
+    task_soft_time_limit=8 * 60,  # 8 minute soft limit
+    worker_prefetch_multiplier=2,  # Workers can prefetch 2 tasks for efficiency
     task_acks_late=True,
     worker_disable_rate_limits=False,
-    task_default_queue="bulk_predictions",
+    
+    # PRIORITY QUEUE SYSTEM FOR AUTO-SCALING
+    task_default_queue="medium_priority",
+    task_default_routing_key="medium_priority",
     
     result_accept_content=["json"],
     
@@ -86,17 +91,31 @@ celery_app.conf.update(
     result_persistent=True,
     
     worker_pool="solo" if sys.platform == "darwin" else "prefork",
-    worker_concurrency=1 if sys.platform == "darwin" else 4,  
+    # AUTO-SCALING WORKER CONFIGURATION
+    worker_concurrency=1 if sys.platform == "darwin" else 8,  # Increased from 4 to 8 workers per instance
     
-    worker_max_tasks_per_child=100,  
+    worker_max_tasks_per_child=50,  # Restart workers more frequently for stability
     
+    # PRIORITY QUEUE ROUTING FOR AUTO-SCALING
     task_routes={
-        "app.workers.tasks.process_bulk_excel_task": {"queue": "bulk_predictions"},
-        "app.workers.tasks.process_annual_bulk_upload_task": {"queue": "bulk_predictions"},
-        "app.workers.tasks.process_quarterly_bulk_upload_task": {"queue": "bulk_predictions"},
-        "app.workers.tasks.process_bulk_normalized_task": {"queue": "bulk_predictions"},
-        "app.workers.tasks.process_quarterly_bulk_task": {"queue": "bulk_predictions"},
-    }
+        # HIGH PRIORITY - Small files (< 2000 rows) - Process immediately  
+        "app.workers.tasks.process_small_bulk_task": {"queue": "high_priority", "routing_key": "high_priority"},
+        "app.workers.tasks.process_chunk_task": {"queue": "high_priority", "routing_key": "high_priority"},
+        
+        # MEDIUM PRIORITY - Normal bulk uploads
+        "app.workers.tasks.process_bulk_excel_task": {"queue": "medium_priority", "routing_key": "medium_priority"},
+        "app.workers.tasks.process_annual_bulk_upload_task": {"queue": "medium_priority", "routing_key": "medium_priority"},
+        "app.workers.tasks.process_quarterly_bulk_upload_task": {"queue": "medium_priority", "routing_key": "medium_priority"},
+        "app.workers.tasks.process_bulk_normalized_task": {"queue": "medium_priority", "routing_key": "medium_priority"},
+        "app.workers.tasks.process_quarterly_bulk_task": {"queue": "medium_priority", "routing_key": "medium_priority"},
+        
+        # LOW PRIORITY - Large files (> 8000 rows) - Background processing
+        "app.workers.tasks.process_large_bulk_task": {"queue": "low_priority", "routing_key": "low_priority"},
+    },
+    
+    # AUTO-SCALING QUEUE DECLARATIONS
+    task_create_missing_queues=True,
+    task_queue_max_priority=10,
 )
 
 celery_app.conf.beat_schedule = {}
