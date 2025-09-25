@@ -1,19 +1,10 @@
 # Railway Configuration for Default Rate API
-# Optimized for Railway + Neon PostgreSQL deployment
-
-[build]
-builder = "dockerfile"
-dockerfilePath = "Dockerfile"
-buildCommand = "echo 'Building with Railway..'"
+# Using current Railway configuration format
 
 [deploy]
 startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
 healthcheckPath = "/health"
-healthcheckTimeout = 60
-restartPolicyType = "on-failure"
-restartPolicyMaxRetries = 3
 
-[environments.production]
 [environments.production.variables]
 ENVIRONMENT = "production"
 DEBUG = "false"
