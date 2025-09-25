@@ -1002,7 +1002,7 @@ async def bulk_upload_annual_async(
         
         required_columns = [
             'company_symbol', 'company_name', 'market_cap', 'sector',
-            'reporting_year', 'reporting_quarter',
+            'reporting_year',
             'long_term_debt_to_total_capital', 'total_debt_to_ebitda',
             'net_income_margin', 'ebit_to_interest_expense', 'return_on_assets'
         ]

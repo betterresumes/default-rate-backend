@@ -174,7 +174,7 @@ class BulkUploadService:
                         company_id=company.id,
                         organization_id=organization_id,
                         reporting_year=int(row['reporting_year']),
-                        reporting_quarter=int(row['reporting_quarter']),
+                        reporting_quarter=int(row['reporting_quarter']) if row.get('reporting_quarter') else None,
                         long_term_debt_to_total_capital=self.safe_float(row['long_term_debt_to_total_capital']),
                         total_debt_to_ebitda=self.safe_float(row['total_debt_to_ebitda']),
                         net_income_margin=self.safe_float(row['net_income_margin']),

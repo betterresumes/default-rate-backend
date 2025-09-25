@@ -41,6 +41,22 @@ cd "$(dirname "$0")/../.." || {
     exit 1
 }
 
+# Load environment variables from .env file if it exists
+if [ -f ".env" ]; then
+    log_info "📋 Loading environment variables from .env file..."
+    # Export each line from .env file that doesn't start with # and isn't empty
+    while IFS= read -r line; do
+        # Skip comments and empty lines
+        [[ "$line" =~ ^#.*$ ]] || [[ -z "$line" ]] && continue
+        # Remove quotes if present and export the variable
+        cleaned_line=$(echo "$line" | sed 's/^"//' | sed 's/"$//')
+        export "$cleaned_line"
+    done < .env
+    log_info "✅ Environment variables loaded successfully"
+else
+    log_warning "⚠️ No .env file found - relying on system environment variables"
+fi
+
 # Set environment variables
 export PYTHONPATH="$(pwd):${PYTHONPATH}"
 
@@ -48,7 +64,7 @@ export PYTHONPATH="$(pwd):${PYTHONPATH}"
 log_info "🔍 Auto-Scaling Worker Configuration:"
 log_info "   - Working Directory: $(pwd)"
 log_info "   - PYTHONPATH: ${PYTHONPATH}"
-log_info "   - REDIS_URL: ${REDIS_URL:0:30}...${REDIS_URL: -10}"
+log_info "   - REDIS_URL: ${REDIS_URL:-'Not set'}"
 log_info "   - DATABASE_URL: ${DATABASE_URL:0:30}...${DATABASE_URL: -10}"
 log_info "   - Workers per instance: 8"
 log_info "   - Priority queues: high_priority, medium_priority, low_priority"
@@ -285,9 +301,7 @@ exec celery -A app.workers.celery_app worker \
     --prefetch-multiplier=2 \
     --without-gossip \
     --without-mingle \
-    --optimization=fair \
-    --logformat="[%(asctime)s] [%(levelname)s] [%(processName)s] [TASK:%(task_name)s] [USER:%(task_user_id)s] %(message)s" \
-    --task-events &
+    --optimization=fair &
 
 # Capture the celery PID for cleanup
 CELERY_PID=$!
