@@ -199,8 +199,32 @@ class CeleryBulkUploadService:
             if not job:
                 return None
             
-            # Get basic job info
-            job_data = {
+            # Get Celery task status if available
+            celery_status = None
+            celery_meta = None
+            celery_task_id = getattr(job, 'celery_task_id', None)
+            
+            if celery_task_id:
+                try:
+                    from app.workers.celery_app import celery_app
+                    result = celery_app.AsyncResult(celery_task_id)
+                    celery_status = result.status
+                    celery_meta = result.info if result.info else {}
+                except Exception as e:
+                    logger.warning(f"Could not get Celery task status: {str(e)}")
+            
+            # Calculate progress percentage
+            progress_percentage = 0
+            if job.total_rows and job.total_rows > 0 and job.processed_rows is not None:
+                try:
+                    progress = (job.processed_rows / job.total_rows) * 100
+                    import math
+                    progress_percentage = round(progress, 2) if not (math.isnan(progress) or math.isinf(progress)) else 0
+                except (ZeroDivisionError, TypeError):
+                    progress_percentage = 0
+            
+            # Build response with enhanced auto-scaling info
+            response = {
                 'id': str(job.id),
                 'status': job.status,
                 'job_type': job.job_type,
@@ -210,17 +234,15 @@ class CeleryBulkUploadService:
                 'successful_rows': job.successful_rows or 0,
                 'failed_rows': job.failed_rows or 0,
                 'error_message': job.error_message,
+                'error_details': json.loads(job.error_details) if job.error_details else None,
                 'created_at': job.created_at.isoformat() if job.created_at else None,
                 'started_at': job.started_at.isoformat() if job.started_at else None,
                 'completed_at': job.completed_at.isoformat() if job.completed_at else None,
+                'progress_percentage': progress_percentage,
+                'celery_task_id': celery_task_id,
+                'celery_status': celery_status,
+                'celery_meta': celery_meta
             }
-            
-            # Calculate progress percentage
-            if job.total_rows and job.total_rows > 0:
-                progress = (job.processed_rows or 0) / job.total_rows * 100
-                job_data['progress_percentage'] = round(progress, 2)
-            else:
-                job_data['progress_percentage'] = 0
             
             # ADD AUTO-SCALING INFORMATION
             try:
@@ -248,7 +270,7 @@ class CeleryBulkUploadService:
                         estimated_completion = (datetime.now() + timedelta(minutes=estimated_minutes)).isoformat()
                 
                 # Add auto-scaling fields
-                job_data.update({
+                response.update({
                     'queue_priority': queue_priority,
                     'queue_position': queue_position,
                     'estimated_completion': estimated_completion,
@@ -260,7 +282,7 @@ class CeleryBulkUploadService:
             except Exception as e:
                 logger.warning(f"Could not add auto-scaling info to job status: {e}")
                 # Add default values if auto-scaling service unavailable
-                job_data.update({
+                response.update({
                     'queue_priority': 'medium_priority',
                     'queue_position': 0,
                     'estimated_completion': None,
@@ -268,56 +290,6 @@ class CeleryBulkUploadService:
                     'system_load': 'unknown',
                     'processing_rate': '4.0 tasks/min'
                 })
-            
-            return job_data
-            
-        except Exception as e:
-            logger.error(f"Error getting job status: {str(e)}")
-            return None
-        finally:
-            db.close()
-            
-            celery_status = None
-            celery_meta = None
-            celery_task_id = getattr(job, 'celery_task_id', None)
-            
-            if celery_task_id:
-                try:
-                    from app.workers.celery_app import celery_app
-                    result = celery_app.AsyncResult(celery_task_id)
-                    celery_status = result.status
-                    celery_meta = result.info if result.info else {}
-                except Exception as e:
-                    logger.warning(f"Could not get Celery task status: {str(e)}")
-            
-            progress_percentage = 0
-            if job.total_rows and job.total_rows > 0 and job.processed_rows is not None:
-                try:
-                    progress = (job.processed_rows / job.total_rows) * 100
-                    import math
-                    progress_percentage = round(progress, 2) if not (math.isnan(progress) or math.isinf(progress)) else 0
-                except (ZeroDivisionError, TypeError):
-                    progress_percentage = 0
-            
-            response = {
-                'id': str(job.id),
-                'status': job.status,
-                'job_type': job.job_type,
-                'original_filename': job.original_filename,
-                'total_rows': job.total_rows or 0,
-                'processed_rows': job.processed_rows or 0,
-                'successful_rows': job.successful_rows or 0,
-                'failed_rows': job.failed_rows or 0,
-                'error_message': job.error_message,
-                'error_details': json.loads(job.error_details) if job.error_details else None,
-                'created_at': job.created_at.isoformat() if job.created_at else None,
-                'started_at': job.started_at.isoformat() if job.started_at else None,
-                'completed_at': job.completed_at.isoformat() if job.completed_at else None,
-                'progress_percentage': progress_percentage,
-                'celery_task_id': celery_task_id,
-                'celery_status': celery_status,
-                'celery_meta': celery_meta
-            }
             
             return response
             
