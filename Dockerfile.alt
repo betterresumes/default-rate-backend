@@ -1,6 +1,15 @@
-# Production Dockerfile for Railway
-# Use official Python image from GitHub Container Registry (more reliable than Docker Hub)
-FROM ghcr.io/library/python:3.11-slim
+# Alternative Dockerfile with multiple base image options
+# Try these base images in order if Docker Hub fails:
+# 1. python:3.11-slim (Docker Hub)
+# 2. ghcr.io/python/python:3.11-slim (GitHub Container Registry)
+# 3. registry.access.redhat.com/ubi9/python-311 (Red Hat)
+
+# Primary option - Docker Hub
+FROM python:3.11-slim as base
+
+# Alternative base images (uncomment if Docker Hub fails)
+# FROM ghcr.io/python/python:3.11-slim as base
+# FROM registry.access.redhat.com/ubi9/python-311 as base
 
 # Set working directory
 WORKDIR /app
@@ -9,22 +18,29 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies with retry logic
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
   gcc \
   curl \
   wget \
+  build-essential \
   && rm -rf /var/lib/apt/lists/* \
   && apt-get clean
+
+# Upgrade pip with retry mechanism
+RUN python -m pip install --upgrade pip --retries 5 --timeout 30
 
 # Copy requirements first for better Docker layer caching
 COPY requirements.prod.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir --upgrade pip \
-  && pip install --no-cache-dir -r requirements.prod.txt
+# Install Python dependencies with retry logic
+RUN pip install --no-cache-dir \
+  --retries 5 \
+  --timeout 300 \
+  -r requirements.prod.txt
 
 # Copy application code
 COPY . .
