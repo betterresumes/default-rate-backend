@@ -69,7 +69,7 @@ log_info "   - DATABASE_URL: ${DATABASE_URL:0:30}...${DATABASE_URL: -10}"
 log_info "   - Workers per instance: 8"
 log_info "   - Priority queues: high_priority, medium_priority, low_priority"
 log_info "   - Max tasks per child: 50 (auto-restart for stability)"
-log_info "   - Task timeout: 10 minutes"
+log_info "   - Task timeout: 30 minutes"
 log_info "   - Auto-scaling enabled: ${AUTO_SCALING_ENABLED:-true}"
 
 # Test Redis connection with detailed error handling

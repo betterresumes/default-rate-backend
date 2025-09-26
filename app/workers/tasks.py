@@ -620,7 +620,7 @@ def process_quarterly_bulk_upload_task(
     organization_id: Optional[str]
 ) -> Dict[str, Any]:
     """
-    Celery task to process quarterly predictions bulk upload
+    Enhanced Celery task to process quarterly predictions bulk upload with comprehensive logging
     
     Args:
         job_id: Bulk upload job ID
@@ -634,191 +634,317 @@ def process_quarterly_bulk_upload_task(
     task_id = self.request.id
     start_time = time.time()
     
-    update_job_status(job_id, 'processing')
+    # Initialize enhanced logger
+    task_logger = TaskLogger("process_quarterly_bulk_upload_task")
     
+    # Get job details for logging
     SessionLocal = get_session_local()
     db = SessionLocal()
     
-    successful_rows = 0
-    failed_rows = 0
-    error_details = []
-    total_rows = len(data)
-    
     try:
-        logger.info(f"[process_quarterly_bulk_upload_task] 📊 Starting quarterly bulk upload processing")
+        job = db.query(BulkUploadJob).filter(BulkUploadJob.id == job_id).first()
+        file_name = job.original_filename if job else "unknown-file"
+        total_rows = len(data)
         
-        self.update_state(
-            state="PROGRESS",
-            meta={
-                "status": "Processing quarterly predictions...",
-                "current": 0,
-                "total": total_rows,
-                "job_id": job_id
-            }
+        # Determine queue priority based on file size
+        if total_rows <= 100:
+            queue_priority = "high"
+        elif total_rows <= 1000:
+            queue_priority = "medium"
+        else:
+            queue_priority = "low"
+        
+        # Log detailed task start
+        task_logger.info(
+            f"📊 Starting quarterly bulk upload processing",
+            job_id=job_id,
+            user_id=user_id,
+            file_name=file_name,
+            total_rows=total_rows,
+            queue_priority=queue_priority,
+            organization_id=organization_id or "global"
         )
         
-        logger.info(f"[process_quarterly_bulk_upload_task] 🔄 Processing {total_rows} rows")
+        # Update job status
+        update_job_status(job_id, 'processing')
         
-        for i, row in enumerate(data):
-            logger.info(f"[process_quarterly_bulk_upload_task] 📝 Processing row {i+1}/{total_rows}: {row.get('company_symbol', 'Unknown')}")
+        successful_rows = 0
+        failed_rows = 0
+        error_details = []
+        
+        # Progress tracking for large files
+        progress_interval = max(1, total_rows // 20)  # Report progress every 5%
+        next_progress_report = progress_interval
+        
+        # Main processing loop with enhanced logging
+        try:
+            self.update_state(
+                state="PROGRESS",
+                meta={
+                    "status": "Processing quarterly predictions...",
+                    "current": 0,
+                    "total": total_rows,
+                    "job_id": job_id
+                }
+            )
             
-            try:
-                logger.info(f"[process_quarterly_bulk_upload_task] 🏢 Creating/getting company for {row.get('company_symbol', 'Unknown')}")
+            for i, row in enumerate(data):
+                try:
+                    # Progress reporting with detailed logging
+                    if i >= next_progress_report or i == total_rows - 1:
+                        progress_percent = (i / total_rows) * 100
+                        elapsed_time = time.time() - start_time
+                        rows_per_second = i / elapsed_time if elapsed_time > 0 else 0
+                        estimated_remaining = ((total_rows - i) / rows_per_second) if rows_per_second > 0 else 0
+                        
+                        task_logger.info(
+                            f"� Processing progress: {progress_percent:.1f}% ({i}/{total_rows} rows)",
+                            job_id=job_id,
+                            user_id=user_id,
+                            file_name=file_name,
+                            total_rows=total_rows,
+                            processed_rows=i,
+                            queue_priority=queue_priority,
+                            successful_rows=successful_rows,
+                            failed_rows=failed_rows,
+                            estimated_remaining_seconds=estimated_remaining
+                        )
+                        next_progress_report = min(i + progress_interval, total_rows)
+                        
+                        # Update job progress
+                        update_job_status(
+                            job_id, 
+                            'processing', 
+                            processed_rows=i,
+                            successful_rows=successful_rows,
+                            failed_rows=failed_rows
+                        )
+                    
+                    # Process individual row with error resilience
+                    try:
+                        company = create_or_get_company(
+                            db=db,
+                            symbol=row['company_symbol'],
+                            name=row['company_name'],
+                            market_cap=safe_float(row['market_cap']),
+                            sector=row['sector'],
+                            organization_id=organization_id,
+                            user_id=user_id
+                        )
+                        
+                        # Check for existing prediction
+                        existing_prediction = db.query(QuarterlyPrediction).filter(
+                            QuarterlyPrediction.company_id == company.id,
+                            QuarterlyPrediction.reporting_year == str(row['reporting_year']),
+                            QuarterlyPrediction.reporting_quarter == row['reporting_quarter']
+                        ).first()
+                        
+                        if existing_prediction:
+                            failed_rows += 1
+                            error_details.append({
+                                'row': i + 1,
+                                'company_symbol': row.get('company_symbol', 'N/A'),
+                                'error': f"Quarterly prediction already exists for {row['reporting_year']} Q{row['reporting_quarter']}"
+                            })
+                            continue
+                        
+                        # Prepare financial data
+                        financial_data = {
+                            'total_debt_to_ebitda': safe_float(row['total_debt_to_ebitda']),
+                            'sga_margin': safe_float(row['sga_margin']),
+                            'long_term_debt_to_total_capital': safe_float(row['long_term_debt_to_total_capital']),
+                            'return_on_capital': safe_float(row['return_on_capital'])
+                        }
+                        
+                        # ML Prediction with timeout protection
+                        try:
+                            ml_result = quarterly_ml_model.predict_quarterly_default_probability(financial_data)
+                        except Exception as ml_error:
+                            failed_rows += 1
+                            error_details.append({
+                                'row': i + 1,
+                                'company_symbol': row.get('company_symbol', 'N/A'),
+                                'error': f"ML prediction failed: {str(ml_error)[:100]}"
+                            })
+                            continue
+                        
+                        # Determine access level
+                        if organization_id:
+                            access_level = "organization"
+                        else:
+                            user = db.query(User).filter(User.id == user_id).first()
+                            if user and user.role == "super_admin":
+                                access_level = "system"
+                            else:
+                                access_level = "personal"
+                        
+                        # Create prediction record
+                        prediction = QuarterlyPrediction(
+                            id=uuid.uuid4(),
+                            company_id=company.id,
+                            organization_id=organization_id,
+                            access_level=access_level,
+                            reporting_year=str(row['reporting_year']),
+                            reporting_quarter=row['reporting_quarter'],
+                            total_debt_to_ebitda=safe_float(row['total_debt_to_ebitda']),
+                            sga_margin=safe_float(row['sga_margin']),
+                            long_term_debt_to_total_capital=safe_float(row['long_term_debt_to_total_capital']),
+                            return_on_capital=safe_float(row['return_on_capital']),
+                            logistic_probability=safe_float(ml_result.get('logistic_probability', 0)),
+                            gbm_probability=safe_float(ml_result.get('gbm_probability', 0)),
+                            ensemble_probability=safe_float(ml_result.get('ensemble_probability', 0)),
+                            risk_level=ml_result.get('risk_level', 'Unknown'),
+                            confidence=safe_float(ml_result.get('confidence', 0)),
+                            predicted_at=datetime.utcnow(),
+                            created_by=user_id
+                        )
+                        
+                        db.add(prediction)
+                        successful_rows += 1
+                        
+                        # Commit in batches for performance
+                        if (i + 1) % 50 == 0:
+                            db.commit()
+                        
+                        # Update task state for UI
+                        self.update_state(
+                            state="PROGRESS",
+                            meta={
+                                "status": f"Processed {i + 1}/{total_rows} quarterly predictions",
+                                "current": i + 1,
+                                "total": total_rows,
+                                "successful": successful_rows,
+                                "failed": failed_rows,
+                                "job_id": job_id
+                            }
+                        )
+                        
+                    except Exception as row_error:
+                        failed_rows += 1
+                        error_details.append({
+                            'row': i + 1,
+                            'company_symbol': row.get('company_symbol', 'N/A'),
+                            'error': f"Row processing failed: {str(row_error)[:100]}"
+                        })
+                        
+                        # Rollback this row's changes but continue processing
+                        db.rollback()
+                        continue
                 
-                company = create_or_get_company(
-                    db=db,
-                    symbol=row['company_symbol'],
-                    name=row['company_name'],
-                    market_cap=safe_float(row['market_cap']),
-                    sector=row['sector'],
-                    organization_id=organization_id,
-                    user_id=user_id
-                )
-                
-                logger.info(f"[process_quarterly_bulk_upload_task] ✅ Company created/found: {company.id}")
-                
-                logger.info(f"[process_quarterly_bulk_upload_task] 🔍 Checking for existing prediction")
-                
-                existing_prediction = db.query(QuarterlyPrediction).filter(
-                    QuarterlyPrediction.company_id == company.id,
-                    QuarterlyPrediction.reporting_year == str(row['reporting_year']),
-                    QuarterlyPrediction.reporting_quarter == row['reporting_quarter']
-                ).first()
-                
-                if existing_prediction:
-                    logger.warning(f"[process_quarterly_bulk_upload_task] ⚠️ Prediction already exists for {row['company_symbol']} {row['reporting_year']} Q{row['reporting_quarter']}")
+                except Exception as loop_error:
                     failed_rows += 1
                     error_details.append({
                         'row': i + 1,
-                        'error': f"Prediction already exists for {row['company_symbol']} {row['reporting_year']} {row['reporting_quarter']}"
+                        'company_symbol': row.get('company_symbol', 'N/A') if 'row' in locals() else 'N/A',
+                        'error': f"Unexpected error: {str(loop_error)[:100]}"
                     })
                     continue
-                
-                logger.info(f"[process_quarterly_bulk_upload_task] 🧮 Preparing financial data for ML prediction")
-                
-                financial_data = {
-                    'total_debt_to_ebitda': safe_float(row['total_debt_to_ebitda']),
-                    'sga_margin': safe_float(row['sga_margin']),
-                    'long_term_debt_to_total_capital': safe_float(row['long_term_debt_to_total_capital']),
-                    'return_on_capital': safe_float(row['return_on_capital'])
-                }
-                
-                logger.info(f"[process_quarterly_bulk_upload_task] 🤖 Running ML prediction for {row['company_symbol']}")
-                logger.info(f"[process_quarterly_bulk_upload_task] 📊 Financial data: {financial_data}")
-                
-                ml_result = quarterly_ml_model.predict_quarterly_default_probability(financial_data)
-                
-                logger.info(f"[process_quarterly_bulk_upload_task] ✅ ML prediction completed: {ml_result.get('ensemble_probability', 'N/A')}")
-                
-                logger.info(f"[process_quarterly_bulk_upload_task] 🔐 Determining access level")
-                
-                if organization_id:
-                    access_level = "organization"
-                else:
-                    user = db.query(User).filter(User.id == user_id).first()
-                    if user and user.role == "super_admin":
-                        access_level = "system"
-                    else:
-                        access_level = "personal"
-                
-                prediction = QuarterlyPrediction(
-                    id=uuid.uuid4(),
-                    company_id=company.id,
-                    organization_id=organization_id,
-                    access_level=access_level,
-                    reporting_year=str(row['reporting_year']),
-                    reporting_quarter=row['reporting_quarter'],
-                    total_debt_to_ebitda=safe_float(row['total_debt_to_ebitda']),
-                    sga_margin=safe_float(row['sga_margin']),
-                    long_term_debt_to_total_capital=safe_float(row['long_term_debt_to_total_capital']),
-                    return_on_capital=safe_float(row['return_on_capital']),
-                    logistic_probability=safe_float(ml_result.get('logistic_probability', 0)),
-                    gbm_probability=safe_float(ml_result.get('gbm_probability', 0)),
-                    ensemble_probability=safe_float(ml_result.get('ensemble_probability', 0)),
-                    risk_level=ml_result['risk_level'],
-                    confidence=safe_float(ml_result['confidence']),
-                    predicted_at=datetime.utcnow(),
-                    created_by=user_id
-                )
-                
-                db.add(prediction)
-                successful_rows += 1
-                
-                if (i + 1) % 50 == 0:
-                    db.commit()
-                    update_job_status(
-                        job_id, 
-                        'processing',
-                        processed_rows=i + 1,
-                        successful_rows=successful_rows,
-                        failed_rows=failed_rows
-                    )
-                    
-                    self.update_state(
-                        state="PROGRESS",
-                        meta={
-                            "status": f"Processed {i + 1}/{total_rows} rows",
-                            "current": i + 1,
-                            "total": total_rows,
-                            "successful": successful_rows,
-                            "failed": failed_rows,
-                            "job_id": job_id
-                        }
-                    )
-                    
-            except Exception as row_error:
-                failed_rows += 1
-                error_details.append({
-                    'row': i + 1,
-                    'data': {k: str(v) for k, v in row.items()},  
-                    'error': str(row_error)
-                })
-                
-                db.rollback()
-                continue
             
-        # Final commit and completion logging
-        db.commit()
-        
-        processing_time = time.time() - start_time
-        
-        update_job_status(
-            job_id,
-            'completed',
-            processed_rows=total_rows,
-            successful_rows=successful_rows,
-            failed_rows=failed_rows,
-            error_details={'errors': error_details[:100]}  
-        )
-        
-        result = {
-            "status": "completed",
-            "job_id": job_id,
-            "total_rows": total_rows,
-            "successful_rows": successful_rows,
-            "failed_rows": failed_rows,
-            "processing_time_seconds": round(processing_time, 2),
-            "errors": error_details[:10]  
-        }
-        
-        return result
+            # Final commit
+            db.commit()
+            
+            # Calculate final metrics
+            processing_time = time.time() - start_time
+            rows_per_second = successful_rows / processing_time if processing_time > 0 else 0
+            success_rate = (successful_rows / total_rows * 100) if total_rows > 0 else 0
+            
+            # Final status update with comprehensive metrics
+            task_logger.success(
+                f"🎉 Quarterly bulk upload completed successfully",
+                job_id=job_id,
+                user_id=user_id,
+                file_name=file_name,
+                total_rows=total_rows,
+                successful_rows=successful_rows,
+                failed_rows=failed_rows,
+                processing_time_seconds=processing_time,
+                rows_per_second=rows_per_second,
+                success_rate_percent=success_rate,
+                queue_priority=queue_priority
+            )
+            
+            # Update database job status
+            update_job_status(
+                job_id,
+                'completed',
+                processed_rows=total_rows,
+                successful_rows=successful_rows,
+                failed_rows=failed_rows,
+                error_details={'errors': error_details[:100]}  # Limit stored errors
+            )
+            
+            return {
+                "status": "completed",
+                "job_id": job_id,
+                "total_rows": total_rows,
+                "successful_rows": successful_rows,
+                "failed_rows": failed_rows,
+                "processing_time_seconds": round(processing_time, 2),
+                "rows_per_second": round(rows_per_second, 2),
+                "success_rate_percent": round(success_rate, 1),
+                "errors": error_details[:10]  # Return limited errors for response
+            }
+            
+        except Exception as processing_error:
+            # Handle processing loop errors
+            error_msg = f"Processing loop failed: {str(processing_error)}"
+            
+            task_logger.error(
+                f"❌ Quarterly bulk upload processing failed",
+                job_id=job_id,
+                user_id=user_id,
+                file_name=file_name,
+                total_rows=total_rows,
+                processed_rows=successful_rows + failed_rows,
+                error_message=error_msg,
+                queue_priority=queue_priority
+            )
+            
+            db.rollback()
+            
+            update_job_status(
+                job_id,
+                'failed',
+                processed_rows=successful_rows + failed_rows,
+                successful_rows=successful_rows,
+                failed_rows=failed_rows,
+                error_message=error_msg,
+                error_details={'errors': error_details}
+            )
+            
+            return {
+                "status": "failed",
+                "job_id": job_id,
+                "error": error_msg,
+                "total_rows": total_rows,
+                "successful_rows": successful_rows,
+                "failed_rows": failed_rows,
+                "processing_time_seconds": round(time.time() - start_time, 2),
+                "errors": error_details[:10]
+            }
             
     except Exception as e:
+        # Handle initialization/setup errors
         db.rollback()
-        error_msg = str(e)
-        logger.error(f"Bulk upload job {job_id} failed: {error_msg}")
+        error_msg = f"Task initialization failed: {str(e)}"
+        
+        task_logger.error(
+            f"❌ Quarterly bulk upload task failed",
+            job_id=job_id,
+            error_message=error_msg
+        )
         
         update_job_status(
             job_id,
             'failed',
             error_message=error_msg,
-            error_details={'errors': error_details}
+            error_details={'initialization_error': str(e)}
         )
         
         self.update_state(
             state="FAILURE",
             meta={
-                "status": f"Job failed: {error_msg}",
+                "status": f"Task failed: {error_msg}",
                 "job_id": job_id,
                 "error": error_msg
             }
@@ -829,8 +955,9 @@ def process_quarterly_bulk_upload_task(
             "job_id": job_id,
             "error": error_msg,
             "total_rows": len(data) if 'data' in locals() else 0,
-            "successful_rows": successful_rows,
-            "failed_rows": failed_rows
+            "successful_rows": 0,
+            "failed_rows": 0,
+            "processing_time_seconds": round(time.time() - start_time, 2)
         }
             
     finally:
