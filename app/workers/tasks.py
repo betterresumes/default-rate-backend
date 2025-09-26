@@ -665,6 +665,15 @@ def process_quarterly_bulk_upload_task(
             organization_id=organization_id or "global"
         )
         
+        task_logger.info(
+            f"🔄 Processing {total_rows} rows",
+            job_id=job_id,
+            user_id=user_id,
+            file_name=file_name,
+            total_rows=total_rows,
+            queue_priority=queue_priority
+        )
+        
         # Update job status
         update_job_status(job_id, 'processing')
         
@@ -722,6 +731,27 @@ def process_quarterly_bulk_upload_task(
                     
                     # Process individual row with error resilience
                     try:
+                        # Add detailed logging for first row
+                        if i == 0:
+                            task_logger.info(
+                                f"📝 Processing row {i + 1}/{total_rows}: {row.get('company_symbol', 'unknown')}",
+                                job_id=job_id,
+                                user_id=user_id,
+                                file_name=file_name,
+                                total_rows=total_rows,
+                                processed_rows=i,
+                                queue_priority=queue_priority
+                            )
+                            task_logger.info(
+                                f"🏢 Creating/getting company for {row.get('company_symbol', 'unknown')}",
+                                job_id=job_id,
+                                user_id=user_id,
+                                file_name=file_name,
+                                total_rows=total_rows,
+                                processed_rows=i,
+                                queue_priority=queue_priority
+                            )
+                        
                         company = create_or_get_company(
                             db=db,
                             symbol=row['company_symbol'],
@@ -732,12 +762,36 @@ def process_quarterly_bulk_upload_task(
                             user_id=user_id
                         )
                         
+                        # Add logging after company creation
+                        if i == 0:
+                            task_logger.info(
+                                f"✅ Company created/found: {company.id}",
+                                job_id=job_id,
+                                user_id=user_id,
+                                file_name=file_name,
+                                total_rows=total_rows,
+                                processed_rows=i,
+                                queue_priority=queue_priority
+                            )
+                        
                         # Check for existing prediction
                         existing_prediction = db.query(QuarterlyPrediction).filter(
                             QuarterlyPrediction.company_id == company.id,
                             QuarterlyPrediction.reporting_year == str(row['reporting_year']),
                             QuarterlyPrediction.reporting_quarter == row['reporting_quarter']
                         ).first()
+                        
+                        # Add logging after prediction check
+                        if i == 0:
+                            task_logger.info(
+                                f"🔍 Checking for existing prediction",
+                                job_id=job_id,
+                                user_id=user_id,
+                                file_name=file_name,
+                                total_rows=total_rows,
+                                processed_rows=i,
+                                queue_priority=queue_priority
+                            )
                         
                         if existing_prediction:
                             failed_rows += 1
@@ -756,9 +810,51 @@ def process_quarterly_bulk_upload_task(
                             'return_on_capital': safe_float(row['return_on_capital'])
                         }
                         
+                        # Add logging before ML prediction
+                        if i == 0:
+                            task_logger.info(
+                                f"🧮 Preparing financial data for ML prediction",
+                                job_id=job_id,
+                                user_id=user_id,
+                                file_name=file_name,
+                                total_rows=total_rows,
+                                processed_rows=i,
+                                queue_priority=queue_priority
+                            )
+                            task_logger.info(
+                                f"🤖 Running ML prediction for {row.get('company_symbol', 'unknown')}",
+                                job_id=job_id,
+                                user_id=user_id,
+                                file_name=file_name,
+                                total_rows=total_rows,
+                                processed_rows=i,
+                                queue_priority=queue_priority
+                            )
+                            task_logger.info(
+                                f"📊 Financial data: {financial_data}",
+                                job_id=job_id,
+                                user_id=user_id,
+                                file_name=file_name,
+                                total_rows=total_rows,
+                                processed_rows=i,
+                                queue_priority=queue_priority
+                            )
+                        
                         # ML Prediction with timeout protection
                         try:
                             ml_result = quarterly_ml_model.predict_quarterly_default_probability(financial_data)
+                            
+                            # Add logging after ML prediction
+                            if i == 0:
+                                task_logger.info(
+                                    f"✅ ML prediction completed: {ml_result.get('risk_level', 'unknown')} risk",
+                                    job_id=job_id,
+                                    user_id=user_id,
+                                    file_name=file_name,
+                                    total_rows=total_rows,
+                                    processed_rows=i,
+                                    queue_priority=queue_priority
+                                )
                         except Exception as ml_error:
                             failed_rows += 1
                             error_details.append({
