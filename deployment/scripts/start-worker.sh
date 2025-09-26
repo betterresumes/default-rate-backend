@@ -278,8 +278,8 @@ log_success "🎯 All pre-flight checks passed! Starting Celery worker..."
 log_info "📋 Worker Configuration Summary:"
 log_info "   - Concurrency: 8 workers"
 log_info "   - Queues: high_priority, medium_priority, low_priority"
-log_info "   - Task timeout: 10 minutes (600 seconds)"
-log_info "   - Soft timeout: 8 minutes (480 seconds)"
+log_info "   - Task timeout: 30 minutes (1800 seconds)"
+log_info "   - Soft timeout: 25 minutes (1500 seconds)"
 log_info "   - Tasks per child: 50 (then restart for stability)"
 log_info "   - Prefetch multiplier: 2"
 log_info "   - Hostname: autoscale-worker@$(hostname)"
@@ -291,8 +291,8 @@ exec celery -A app.workers.celery_app worker \
     --queues=high_priority,medium_priority,low_priority \
     --hostname=autoscale-worker@%h \
     --max-tasks-per-child=50 \
-    --time-limit=600 \
-    --soft-time-limit=480 \
+    --time-limit=1800 \
+    --soft-time-limit=1500 \
     --prefetch-multiplier=2 \
     --without-gossip \
     --without-mingle \

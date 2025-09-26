@@ -645,6 +645,8 @@ def process_quarterly_bulk_upload_task(
     total_rows = len(data)
     
     try:
+        logger.info(f"[process_quarterly_bulk_upload_task] 📊 Starting quarterly bulk upload processing")
+        
         self.update_state(
             state="PROGRESS",
             meta={
@@ -655,8 +657,14 @@ def process_quarterly_bulk_upload_task(
             }
         )
         
+        logger.info(f"[process_quarterly_bulk_upload_task] 🔄 Processing {total_rows} rows")
+        
         for i, row in enumerate(data):
+            logger.info(f"[process_quarterly_bulk_upload_task] 📝 Processing row {i+1}/{total_rows}: {row.get('company_symbol', 'Unknown')}")
+            
             try:
+                logger.info(f"[process_quarterly_bulk_upload_task] 🏢 Creating/getting company for {row.get('company_symbol', 'Unknown')}")
+                
                 company = create_or_get_company(
                     db=db,
                     symbol=row['company_symbol'],
@@ -667,6 +675,10 @@ def process_quarterly_bulk_upload_task(
                     user_id=user_id
                 )
                 
+                logger.info(f"[process_quarterly_bulk_upload_task] ✅ Company created/found: {company.id}")
+                
+                logger.info(f"[process_quarterly_bulk_upload_task] 🔍 Checking for existing prediction")
+                
                 existing_prediction = db.query(QuarterlyPrediction).filter(
                     QuarterlyPrediction.company_id == company.id,
                     QuarterlyPrediction.reporting_year == str(row['reporting_year']),
@@ -674,12 +686,15 @@ def process_quarterly_bulk_upload_task(
                 ).first()
                 
                 if existing_prediction:
+                    logger.warning(f"[process_quarterly_bulk_upload_task] ⚠️ Prediction already exists for {row['company_symbol']} {row['reporting_year']} Q{row['reporting_quarter']}")
                     failed_rows += 1
                     error_details.append({
                         'row': i + 1,
                         'error': f"Prediction already exists for {row['company_symbol']} {row['reporting_year']} {row['reporting_quarter']}"
                     })
                     continue
+                
+                logger.info(f"[process_quarterly_bulk_upload_task] 🧮 Preparing financial data for ML prediction")
                 
                 financial_data = {
                     'total_debt_to_ebitda': safe_float(row['total_debt_to_ebitda']),
@@ -688,7 +703,14 @@ def process_quarterly_bulk_upload_task(
                     'return_on_capital': safe_float(row['return_on_capital'])
                 }
                 
+                logger.info(f"[process_quarterly_bulk_upload_task] 🤖 Running ML prediction for {row['company_symbol']}")
+                logger.info(f"[process_quarterly_bulk_upload_task] 📊 Financial data: {financial_data}")
+                
                 ml_result = quarterly_ml_model.predict_quarterly_default_probability(financial_data)
+                
+                logger.info(f"[process_quarterly_bulk_upload_task] ✅ ML prediction completed: {ml_result.get('ensemble_probability', 'N/A')}")
+                
+                logger.info(f"[process_quarterly_bulk_upload_task] 🔐 Determining access level")
                 
                 if organization_id:
                     access_level = "organization"
