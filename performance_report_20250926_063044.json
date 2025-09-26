@@ -1,0 +1,77 @@
+{
+  "timestamp": "20250926_063044",
+  "base_url": "https://default-rate-backend-production.up.railway.app",
+  "total_tests": 8,
+  "successful_tests": 2,
+  "success_rate": 25.0,
+  "results": [
+    {
+      "file": "test_data/annual_test_10_rows.xlsx",
+      "rows": 10,
+      "type": "annual",
+      "job_id": "43506499-6894-499c-b253-b56117f103bf",
+      "upload_time": 19.75721502304077,
+      "processing_time": 36.94300699234009,
+      "total_time": 56.700573205947876,
+      "time_per_row": 5.670057320594788,
+      "rows_per_second": 0.17636506007933977,
+      "time_per_100_rows": 567.0057320594788,
+      "job_status": "completed",
+      "successful_rows": 4,
+      "failed_rows": 6,
+      "error_message": null
+    },
+    {
+      "file": "test_data/annual_test_20_rows.xlsx",
+      "rows": 20,
+      "type": "annual",
+      "job_id": "5162a5f4-b7db-4685-9455-28f1ee585565",
+      "upload_time": 19.43617272377014,
+      "processing_time": 57.40241885185242,
+      "total_time": 76.83888101577759,
+      "time_per_row": 3.8419440507888796,
+      "rows_per_second": 0.26028489399648247,
+      "time_per_100_rows": 384.19440507888794,
+      "job_status": "completed",
+      "successful_rows": 14,
+      "failed_rows": 6,
+      "error_message": null
+    },
+    {
+      "file": "test_data/annual_test_50_rows.xlsx",
+      "rows": 50,
+      "type": "annual",
+      "job_id": "74b9a1da-3006-45fb-87ac-d6764e45bd1e",
+      "upload_time": 18.716166734695435,
+      "processing_time": 0.5833399295806885,
+      "total_time": 19.302759885787964,
+      "time_per_row": 0.3860551977157593,
+      "rows_per_second": 2.590303163684561,
+      "time_per_100_rows": 38.60551977157593,
+      "job_status": "error",
+      "successful_rows": 0,
+      "failed_rows": 0,
+      "error_message": null
+    },
+    {
+      "error": "Upload failed",
+      "status_code": 401
+    },
+    {
+      "error": "Upload failed",
+      "status_code": 401
+    },
+    {
+      "error": "Upload failed",
+      "status_code": 401
+    },
+    {
+      "error": "Upload failed",
+      "status_code": 401
+    },
+    {
+      "error": "Upload failed",
+      "status_code": 401
+    }
+  ]
+}
