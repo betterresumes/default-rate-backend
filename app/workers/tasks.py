@@ -665,15 +665,6 @@ def process_quarterly_bulk_upload_task(
             organization_id=organization_id or "global"
         )
         
-        task_logger.info(
-            f"🔄 Processing {total_rows} rows",
-            job_id=job_id,
-            user_id=user_id,
-            file_name=file_name,
-            total_rows=total_rows,
-            queue_priority=queue_priority
-        )
-        
         # Update job status
         update_job_status(job_id, 'processing')
         
@@ -731,27 +722,6 @@ def process_quarterly_bulk_upload_task(
                     
                     # Process individual row with error resilience
                     try:
-                        # Add detailed logging for first row
-                        if i == 0:
-                            task_logger.info(
-                                f"📝 Processing row {i + 1}/{total_rows}: {row.get('company_symbol', 'unknown')}",
-                                job_id=job_id,
-                                user_id=user_id,
-                                file_name=file_name,
-                                total_rows=total_rows,
-                                processed_rows=i,
-                                queue_priority=queue_priority
-                            )
-                            task_logger.info(
-                                f"🏢 Creating/getting company for {row.get('company_symbol', 'unknown')}",
-                                job_id=job_id,
-                                user_id=user_id,
-                                file_name=file_name,
-                                total_rows=total_rows,
-                                processed_rows=i,
-                                queue_priority=queue_priority
-                            )
-                        
                         company = create_or_get_company(
                             db=db,
                             symbol=row['company_symbol'],
@@ -762,36 +732,12 @@ def process_quarterly_bulk_upload_task(
                             user_id=user_id
                         )
                         
-                        # Add logging after company creation
-                        if i == 0:
-                            task_logger.info(
-                                f"✅ Company created/found: {company.id}",
-                                job_id=job_id,
-                                user_id=user_id,
-                                file_name=file_name,
-                                total_rows=total_rows,
-                                processed_rows=i,
-                                queue_priority=queue_priority
-                            )
-                        
                         # Check for existing prediction
                         existing_prediction = db.query(QuarterlyPrediction).filter(
                             QuarterlyPrediction.company_id == company.id,
                             QuarterlyPrediction.reporting_year == str(row['reporting_year']),
-                            QuarterlyPrediction.reporting_quarter == row['reporting_quarter']
+                            QuarterlyPrediction.reporting_quarter == str(row['reporting_quarter'])
                         ).first()
-                        
-                        # Add logging after prediction check
-                        if i == 0:
-                            task_logger.info(
-                                f"🔍 Checking for existing prediction",
-                                job_id=job_id,
-                                user_id=user_id,
-                                file_name=file_name,
-                                total_rows=total_rows,
-                                processed_rows=i,
-                                queue_priority=queue_priority
-                            )
                         
                         if existing_prediction:
                             failed_rows += 1
@@ -810,101 +756,8 @@ def process_quarterly_bulk_upload_task(
                             'return_on_capital': safe_float(row['return_on_capital'])
                         }
                         
-                        # Add logging before ML prediction
-                        if i == 0:
-                            task_logger.info(
-                                f"🧮 Preparing financial data for ML prediction",
-                                job_id=job_id,
-                                user_id=user_id,
-                                file_name=file_name,
-                                total_rows=total_rows,
-                                processed_rows=i,
-                                queue_priority=queue_priority
-                            )
-                            task_logger.info(
-                                f"🤖 Running ML prediction for {row.get('company_symbol', 'unknown')}",
-                                job_id=job_id,
-                                user_id=user_id,
-                                file_name=file_name,
-                                total_rows=total_rows,
-                                processed_rows=i,
-                                queue_priority=queue_priority
-                            )
-                            task_logger.info(
-                                f"📊 Financial data: {financial_data}",
-                                job_id=job_id,
-                                user_id=user_id,
-                                file_name=file_name,
-                                total_rows=total_rows,
-                                processed_rows=i,
-                                queue_priority=queue_priority
-                            )
-                        
-                        # ML Prediction with detailed debugging and fallback
-                        try:
-                            task_logger.info(
-                                f"🔬 About to call ML prediction",
-                                job_id=job_id,
-                                user_id=user_id,
-                                file_name=file_name,
-                                financial_data=financial_data
-                            )
-                            
-                            # Validate financial data first
-                            for key, value in financial_data.items():
-                                if value is None or (isinstance(value, float) and (math.isnan(value) or math.isinf(value))):
-                                    task_logger.warning(
-                                        f"⚠️ Invalid value for {key}: {value}, setting to 0",
-                                        job_id=job_id
-                                    )
-                                    financial_data[key] = 0.0
-                            
-                            # Try a simple test first
-                            if quarterly_ml_model is None:
-                                raise Exception("quarterly_ml_model is None")
-                            
-                            task_logger.info(
-                                f"🔬 ML model exists, calling predict method",
-                                job_id=job_id
-                            )
-                            
-                            ml_result = quarterly_ml_model.predict_quarterly_default_probability(financial_data)
-                            
-                            task_logger.info(
-                                f"✅ ML prediction completed: {ml_result.get('risk_level', 'unknown')} risk",
-                                job_id=job_id,
-                                user_id=user_id,
-                                file_name=file_name,
-                                total_rows=total_rows,
-                                processed_rows=i,
-                                queue_priority=queue_priority,
-                                ml_result_keys=list(ml_result.keys()) if ml_result else "None"
-                            )
-                            
-                        except Exception as ml_error:
-                            task_logger.error(
-                                f"❌ ML prediction failed: {str(ml_error)}",
-                                job_id=job_id,
-                                user_id=user_id,
-                                file_name=file_name,
-                                error=str(ml_error),
-                                company_symbol=row.get('company_symbol', 'unknown')
-                            )
-                            
-                            # Provide a fallback prediction so processing can continue
-                            ml_result = {
-                                'logistic_probability': 0.5,
-                                'gbm_probability': 0.5,
-                                'ensemble_probability': 0.5,
-                                'risk_level': 'MEDIUM',
-                                'confidence': 0.5
-                            }
-                            
-                            task_logger.warning(
-                                f"⚠️ Using fallback prediction for {row.get('company_symbol', 'unknown')}",
-                                job_id=job_id,
-                                user_id=user_id
-                            )
+                        # ML Prediction  
+                        ml_result = quarterly_ml_model.predict_quarterly_default_probability(financial_data)
                         
                         # Determine access level
                         if organization_id:
@@ -923,7 +776,7 @@ def process_quarterly_bulk_upload_task(
                             organization_id=organization_id,
                             access_level=access_level,
                             reporting_year=str(row['reporting_year']),
-                            reporting_quarter=row['reporting_quarter'],
+                            reporting_quarter=str(row['reporting_quarter']),
                             total_debt_to_ebitda=safe_float(row['total_debt_to_ebitda']),
                             sga_margin=safe_float(row['sga_margin']),
                             long_term_debt_to_total_capital=safe_float(row['long_term_debt_to_total_capital']),
