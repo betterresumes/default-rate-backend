@@ -191,6 +191,44 @@ except Exception as e:
     exit 1
 }
 
+log_info "📦 Testing Quarterly ML Models..."
+python3 -c "
+import sys
+import traceback
+from datetime import datetime
+
+def log_ml_test(level, msg):
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    print(f'[{timestamp}] [ML-TEST] [{level}] {msg}')
+
+try:
+    log_ml_test('INFO', 'Testing quarterly ML model loading...')
+    from app.services.quarterly_ml_service import quarterly_ml_model
+    log_ml_test('SUCCESS', '✅ Quarterly ML models loaded successfully!')
+    
+    # Test prediction
+    test_data = {
+        'total_debt_to_ebitda': 7.933,
+        'sga_margin': 7.474,
+        'long_term_debt_to_total_capital': 36.912,
+        'return_on_capital': 9.948
+    }
+    
+    log_ml_test('INFO', 'Testing quarterly prediction...')
+    result = quarterly_ml_model.predict_quarterly_default_probability(test_data)
+    log_ml_test('SUCCESS', f'✅ Quarterly prediction successful: {result.get(\"risk_level\", \"Unknown\")}')
+    
+except ImportError as e:
+    log_ml_test('ERROR', f'❌ Import failed: {str(e)}')
+    log_ml_test('ERROR', 'This indicates missing dependencies (likely LightGBM)')
+    
+except Exception as e:
+    log_ml_test('ERROR', f'❌ Prediction failed: {str(e)}')
+    log_ml_test('ERROR', f'Traceback: {traceback.format_exc()[:500]}')
+" || {
+    log_warning "⚠️ Quarterly ML model test failed, but continuing startup..."
+}
+
 # Create a monitoring function for worker health
 create_worker_monitor() {
     log_info "🔍 Setting up worker health monitoring..."

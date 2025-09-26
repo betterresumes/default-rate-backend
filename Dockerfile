@@ -13,23 +13,30 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONPATH=/app
 
-# Install system dependencies required for PostgreSQL and ML packages
+# Install system dependencies required for PostgreSQL and ML packages (including LightGBM)
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
     libpq-dev \
     gcc \
     g++ \
+    cmake \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements file
 COPY requirements.prod.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.prod.txt
+# Install Python dependencies with explicit LightGBM installation
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir lightgbm==4.6.0 --verbose && \
+    pip install --no-cache-dir -r requirements.prod.txt
 
 # Copy the application code
 COPY . .
+
+# Verify that quarterly ML models can be loaded (this will catch LightGBM issues early)
+RUN python -c "import sys; sys.path.insert(0, '/app'); from app.services.quarterly_ml_service import QuarterlyMLModelService; service = QuarterlyMLModelService(); print('✅ Quarterly ML models loaded successfully in Docker build')"
 
 # Make start script executable
 RUN chmod +x start.sh

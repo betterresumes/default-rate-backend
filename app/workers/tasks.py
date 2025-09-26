@@ -888,21 +888,22 @@ def process_quarterly_bulk_upload_task(
                                 user_id=user_id,
                                 file_name=file_name,
                                 error=str(ml_error),
-                                error_type=type(ml_error).__name__
+                                company_symbol=row.get('company_symbol', 'unknown')
                             )
                             
-                            # Use fallback prediction
+                            # Provide a fallback prediction so processing can continue
                             ml_result = {
-                                "logistic_probability": 0.05,
-                                "gbm_probability": 0.05,
-                                "ensemble_probability": 0.05,
-                                "risk_level": "LOW",
-                                "confidence": 0.6
+                                'logistic_probability': 0.5,
+                                'gbm_probability': 0.5,
+                                'ensemble_probability': 0.5,
+                                'risk_level': 'MEDIUM',
+                                'confidence': 0.5
                             }
                             
-                            task_logger.info(
-                                f"🔄 Using fallback prediction",
-                                job_id=job_id
+                            task_logger.warning(
+                                f"⚠️ Using fallback prediction for {row.get('company_symbol', 'unknown')}",
+                                job_id=job_id,
+                                user_id=user_id
                             )
                         
                         # Determine access level
