@@ -764,35 +764,34 @@ def process_quarterly_bulk_upload_task(
             )
             
             for i, row in enumerate(data):
-                task_logger.info(
-                    f"🔍 DEBUG Step 7: Started processing row {i + 1}",
-                    job_id=job_id,
-                    user_id=user_id,
-                    file_name=file_name
-                )
+                # Use simple print instead of task_logger to avoid logging system issues
+                print(f"[DEBUG] Row {i + 1} - Type: {type(row)}")
                 
-                task_logger.info(
-                    f"🔍 DEBUG Step 7.1: Row data type: {type(row)}, keys: {list(row.keys()) if isinstance(row, dict) else 'not dict'}",
-                    job_id=job_id,
-                    user_id=user_id,
-                    file_name=file_name
-                )
+                # Test basic row access
+                if row is None:
+                    print(f"[DEBUG] Row {i + 1} - IS NONE, skipping")
+                    failed_rows += 1
+                    continue
                 
-                # Check each required field individually
+                # Test dict access
+                if not isinstance(row, dict):
+                    print(f"[DEBUG] Row {i + 1} - NOT A DICT: {type(row)}")
+                    failed_rows += 1
+                    continue
+                
+                print(f"[DEBUG] Row {i + 1} - Keys: {list(row.keys())}")
+                
+                # Test field access one by one
                 try:
                     company_symbol = row.get('company_symbol', 'MISSING')
-                    task_logger.info(
-                        f"🔍 DEBUG Step 7.2: company_symbol = {company_symbol}",
-                        job_id=job_id,
-                        user_id=user_id
-                    )
+                    print(f"[DEBUG] Row {i + 1} - company_symbol: {company_symbol}")
                 except Exception as e:
-                    task_logger.error(
-                        f"❌ DEBUG Step 7.2 FAILED: company_symbol access error: {e}",
-                        job_id=job_id,
-                        user_id=user_id
-                    )
-                    break
+                    print(f"[DEBUG] Row {i + 1} - company_symbol ACCESS ERROR: {e}")
+                    failed_rows += 1
+                    continue
+                    
+                # If we get here, basic row access works - now try the actual processing
+                print(f"[DEBUG] Row {i + 1} - Starting actual processing")
                 
                 try:
                     # Progress reporting with detailed logging
@@ -803,7 +802,7 @@ def process_quarterly_bulk_upload_task(
                         estimated_remaining = ((total_rows - i) / rows_per_second) if rows_per_second > 0 else 0
                         
                         task_logger.info(
-                            f"� Processing progress: {progress_percent:.1f}% ({i}/{total_rows} rows)",
+                            f"📈 Processing progress: {progress_percent:.1f}% ({i}/{total_rows} rows)",
                             job_id=job_id,
                             user_id=user_id,
                             file_name=file_name,
