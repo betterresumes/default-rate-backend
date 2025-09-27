@@ -668,16 +668,46 @@ def process_quarterly_bulk_upload_task(
         # Update job status
         update_job_status(job_id, 'processing')
         
+        # DEBUG: Add logging to identify where task hangs
+        task_logger.info(
+            f"🔍 DEBUG Step 1: Job status updated to processing",
+            job_id=job_id,
+            user_id=user_id,
+            file_name=file_name
+        )
+        
         successful_rows = 0
         failed_rows = 0
         error_details = []
+        
+        task_logger.info(
+            f"🔍 DEBUG Step 2: Variables initialized",
+            job_id=job_id,
+            user_id=user_id,
+            file_name=file_name
+        )
         
         # Progress tracking for large files
         progress_interval = max(1, total_rows // 20)  # Report progress every 5%
         next_progress_report = progress_interval
         
+        task_logger.info(
+            f"🔍 DEBUG Step 3: Progress tracking setup - interval: {progress_interval}",
+            job_id=job_id,
+            user_id=user_id,
+            file_name=file_name,
+            progress_interval=progress_interval
+        )
+        
         # Main processing loop with enhanced logging
         try:
+            task_logger.info(
+                f"🔍 DEBUG Step 4: About to start main processing loop",
+                job_id=job_id,
+                user_id=user_id,
+                file_name=file_name
+            )
+            
             self.update_state(
                 state="PROGRESS",
                 meta={
@@ -688,7 +718,31 @@ def process_quarterly_bulk_upload_task(
                 }
             )
             
+            task_logger.info(
+                f"🔍 DEBUG Step 5: Celery state updated",
+                job_id=job_id,
+                user_id=user_id,
+                file_name=file_name
+            )
+            
+            task_logger.info(
+                f"🔍 DEBUG Step 6: About to access data variable",
+                job_id=job_id,
+                user_id=user_id,
+                file_name=file_name,
+                data_type=type(data).__name__,
+                data_length=len(data) if data else "None"
+            )
+            
             for i, row in enumerate(data):
+                task_logger.info(
+                    f"🔍 DEBUG Step 7: Started processing row {i + 1}",
+                    job_id=job_id,
+                    user_id=user_id,
+                    file_name=file_name,
+                    row_data=str(row)[:100] if row else "None"
+                )
+                
                 try:
                     # Progress reporting with detailed logging
                     if i >= next_progress_report or i == total_rows - 1:
