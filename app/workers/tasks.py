@@ -708,32 +708,126 @@ def process_quarterly_bulk_upload_task(
                 file_name=file_name
             )
             
-            self.update_state(
-                state="PROGRESS",
-                meta={
-                    "status": "Processing quarterly predictions...",
-                    "current": 0,
-                    "total": total_rows,
-                    "job_id": job_id
-                }
+            # Test data access BEFORE state update
+            task_logger.info(
+                f"🔍 DEBUG Step 4a: Testing data variable access",
+                job_id=job_id,
+                data_type=type(data).__name__ if data is not None else "None"
             )
             
+            try:
+                data_length = len(data) if data is not None else 0
+                task_logger.info(
+                    f"🔍 DEBUG Step 4b: Data length check passed - {data_length} rows",
+                    job_id=job_id,
+                    data_length=data_length
+                )
+            except Exception as data_len_error:
+                task_logger.error(
+                    f"🔍 DEBUG Step 4b: Data length check failed: {data_len_error}",
+                    job_id=job_id
+                )
+                raise
+            
+            # Test data iteration BEFORE state update
             task_logger.info(
-                f"🔍 DEBUG Step 5: Celery state updated",
+                f"🔍 DEBUG Step 4c: Testing data iteration",
+                job_id=job_id
+            )
+            
+            try:
+                if data:
+                    # Test if we can iterate over data
+                    for i, row in enumerate(data):
+                        task_logger.info(
+                            f"🔍 DEBUG Step 4d: Successfully accessed row {i+1}",
+                            job_id=job_id,
+                            row_type=type(row).__name__,
+                            row_keys=list(row.keys()) if hasattr(row, 'keys') else "no_keys"
+                        )
+                        # Only test first row then break
+                        break
+                    task_logger.info(
+                        f"🔍 DEBUG Step 4e: Data iteration test completed successfully",
+                        job_id=job_id
+                    )
+                else:
+                    task_logger.error(
+                        f"🔍 DEBUG Step 4e: Data is empty or None",
+                        job_id=job_id
+                    )
+                    raise ValueError("Data is empty or None")
+            except Exception as iteration_error:
+                task_logger.error(
+                    f"🔍 DEBUG Step 4e: Data iteration failed: {iteration_error}",
+                    job_id=job_id
+                )
+                raise
+            
+            task_logger.info(
+                f"🔍 DEBUG Step 5: About to update Celery state",
+                job_id=job_id,
+                user_id=user_id,
+                file_name=file_name,
+                total_rows=total_rows
+            )
+            
+            # Simplified state update to avoid hang
+            try:
+                task_logger.info(f"🔍 DEBUG Step 5a: Calling basic state update", job_id=job_id)
+                self.update_state(state="PROGRESS")
+                task_logger.info(f"🔍 DEBUG Step 5a: Basic state update successful", job_id=job_id)
+            except Exception as state_error:
+                task_logger.error(f"🔍 DEBUG Step 5a: State update failed: {state_error}", job_id=job_id)
+                raise
+                
+            try:
+                task_logger.info(f"🔍 DEBUG Step 5b: Calling meta state update", job_id=job_id)
+                self.update_state(
+                    state="PROGRESS", 
+                    meta={"status": "Processing quarterly predictions..."}
+                )
+                task_logger.info(f"🔍 DEBUG Step 5b: Meta state update successful", job_id=job_id)
+            except Exception as meta_error:
+                task_logger.error(f"🔍 DEBUG Step 5b: Meta state update failed: {meta_error}", job_id=job_id)
+                raise
+            
+            task_logger.info(
+                f"🔍 DEBUG Step 6: Celery state updated successfully",
                 job_id=job_id,
                 user_id=user_id,
                 file_name=file_name
             )
             
             task_logger.info(
-                f"🔍 DEBUG Step 6: About to access data variable",
+                f"🔍 DEBUG Step 7: Starting actual data processing loop",
                 job_id=job_id,
                 user_id=user_id,
                 file_name=file_name,
-                data_type=type(data).__name__,
-                data_length=len(data) if data else "None",
-                data_sample=str(data[0]) if data and len(data) > 0 else "No data"
+                total_rows=total_rows
             )
+            
+            # Test data access in steps to identify hang location
+            try:
+                data_type = type(data).__name__
+                task_logger.info(f"🔍 DEBUG Step 7a: Data type: {data_type}", job_id=job_id)
+            except Exception as e:
+                task_logger.error(f"🔍 DEBUG Step 7a: Failed to get data type: {e}", job_id=job_id)
+                raise
+                
+            try:
+                data_length = len(data) if data else 0
+                task_logger.info(f"🔍 DEBUG Step 7b: Data length: {data_length}", job_id=job_id)
+            except Exception as e:
+                task_logger.error(f"🔍 DEBUG Step 7b: Failed to get data length: {e}", job_id=job_id)
+                raise
+            
+            try:
+                first_row_preview = str(data[0])[:50] if data and len(data) > 0 else "No data"
+                task_logger.info(f"🔍 DEBUG Step 7c: First row preview: {first_row_preview}", job_id=job_id)
+            except Exception as e:
+                task_logger.error(f"🔍 DEBUG Step 7c: Failed to preview first row: {e}", job_id=job_id)
+                raise
             
             if not data:
                 raise ValueError("Data parameter is None or empty")
@@ -757,45 +851,123 @@ def process_quarterly_bulk_upload_task(
                 raise ValueError(f"Data access test failed: {str(e)}")
             
             task_logger.info(
-                f"🔍 DEBUG Step 7: Data validation passed, starting enumeration",
+                f"🔍 DEBUG Step 8: Data validation passed, about to start enumeration",
                 job_id=job_id,
                 data_length=len(data),
                 first_row_keys=list(data[0].keys()) if data and len(data) > 0 else []
             )
             
+            # CRITICAL: Add logging around the enumerate call
+            try:
+                task_logger.info(f"🔍 DEBUG Step 8a: Calling enumerate(data)", job_id=job_id)
+                data_iterator = enumerate(data)
+                task_logger.info(f"🔍 DEBUG Step 8b: enumerate() call successful", job_id=job_id)
+                
+                task_logger.info(f"🔍 DEBUG Step 8c: Starting for loop", job_id=job_id)
+                
+                for i, row in data_iterator:
+                    task_logger.info(
+                        f"🔍 DEBUG Step 9: Processing row {i+1}",
+                        job_id=job_id,
+                        row_index=i,
+                        row_type=type(row).__name__,
+                        has_keys=hasattr(row, 'keys')
+                    )
+                    
+                    # Test row access immediately
+                    try:
+                        task_logger.info(f"🔍 DEBUG Step 9a: Testing row data access", job_id=job_id, row_index=i)
+                        
+                        # Test basic row properties
+                        row_str = str(row)[:100]  # First 100 chars
+                        task_logger.info(f"🔍 DEBUG Step 9b: Row string preview: {row_str}", job_id=job_id, row_index=i)
+                        
+                        # Test dictionary access
+                        if hasattr(row, 'keys'):
+                            row_keys = list(row.keys())[:10]  # First 10 keys
+                            task_logger.info(f"🔍 DEBUG Step 9c: Row keys: {row_keys}", job_id=job_id, row_index=i)
+                            
+                            # Test specific key access
+                            company_symbol = row.get('company_symbol', 'MISSING')
+                            task_logger.info(f"🔍 DEBUG Step 9d: Company symbol: {company_symbol}", job_id=job_id, row_index=i)
+                        
+                    except Exception as row_access_error:
+                        task_logger.error(
+                            f"🔍 DEBUG Step 9: Row access failed: {row_access_error}",
+                            job_id=job_id,
+                            row_index=i,
+                            error_type=type(row_access_error).__name__
+                        )
+                        raise
+            
+            except Exception as enumerate_error:
+                task_logger.error(
+                    f"🔍 DEBUG Step 8: Enumerate failed: {enumerate_error}",
+                    job_id=job_id,
+                    error_type=type(enumerate_error).__name__
+                )
+                raise
+            
+            # THIS IS WHERE THE ACTUAL PROCESSING STARTS
+            task_logger.info(f"🔍 DEBUG Step 10: Starting real processing loop", job_id=job_id)
+            
             for i, row in enumerate(data):
-                # Use simple print instead of task_logger to avoid logging system issues
-                print(f"[DEBUG] Row {i + 1} - Type: {type(row)}")
+                # CRITICAL: Add immediate logging when row processing starts
+                task_logger.info(f"🔍 DEBUG Step 11: Row {i+1} processing started", job_id=job_id, row_index=i)
+                
+                # Use both print and task_logger to ensure we capture the logs
+                print(f"[QUARTERLY-DEBUG] Row {i + 1}/{total_rows} - Starting processing")
+                print(f"[QUARTERLY-DEBUG] Row {i + 1} - Type: {type(row)}")
                 
                 # Test basic row access
-                if row is None:
-                    print(f"[DEBUG] Row {i + 1} - IS NONE, skipping")
-                    failed_rows += 1
-                    continue
-                
-                # Test dict access
-                if not isinstance(row, dict):
-                    print(f"[DEBUG] Row {i + 1} - NOT A DICT: {type(row)}")
-                    failed_rows += 1
-                    continue
-                
-                print(f"[DEBUG] Row {i + 1} - Keys: {list(row.keys())}")
-                
-                # Test field access one by one
                 try:
-                    company_symbol = row.get('company_symbol', 'MISSING')
-                    print(f"[DEBUG] Row {i + 1} - company_symbol: {company_symbol}")
-                except Exception as e:
-                    print(f"[DEBUG] Row {i + 1} - company_symbol ACCESS ERROR: {e}")
-                    failed_rows += 1
-                    continue
+                    if row is None:
+                        print(f"[QUARTERLY-DEBUG] Row {i + 1} - IS NONE, skipping")
+                        task_logger.error(f"🔍 Row {i+1} is None", job_id=job_id, row_index=i)
+                        continue
                     
-                # If we get here, basic row access works - now try the actual processing
-                print(f"[DEBUG] Row {i + 1} - Starting actual processing")
+                    print(f"[QUARTERLY-DEBUG] Row {i + 1} - Not None, checking type")
+                    
+                    if not isinstance(row, dict):
+                        print(f"[QUARTERLY-DEBUG] Row {i + 1} - Not a dict: {type(row)}")
+                        task_logger.error(f"🔍 Row {i+1} is not dict: {type(row)}", job_id=job_id, row_index=i)
+                        continue
+                        
+                    print(f"[QUARTERLY-DEBUG] Row {i + 1} - Is dict, checking keys")
+                    
+                    # Test key access
+                    row_keys = list(row.keys())
+                    print(f"[QUARTERLY-DEBUG] Row {i + 1} - Keys: {row_keys[:5]}...")  # First 5 keys
+                    
+                    # Test specific key access that might cause hang
+                    company_symbol = row.get('company_symbol')
+                    print(f"[QUARTERLY-DEBUG] Row {i + 1} - Company: {company_symbol}")
+                    
+                    task_logger.info(
+                        f"🔍 DEBUG Step 11a: Row {i+1} basic validation passed",
+                        job_id=job_id,
+                        row_index=i,
+                        company_symbol=company_symbol
+                    )
+                    
+                except Exception as row_validation_error:
+                    print(f"[QUARTERLY-DEBUG] Row {i + 1} - Validation failed: {row_validation_error}")
+                    task_logger.error(
+                        f"🔍 DEBUG Step 11a: Row {i+1} validation failed: {row_validation_error}",
+                        job_id=job_id,
+                        row_index=i
+                    )
+                    continue
+                
+                print(f"[QUARTERLY-DEBUG] Row {i + 1} - Basic validation passed, starting progress check")
                 
                 try:
                     # Progress reporting with detailed logging
+                    task_logger.info(f"🔍 DEBUG Step 12: Progress check for row {i+1}", job_id=job_id, row_index=i)
+                    
                     if i >= next_progress_report or i == total_rows - 1:
+                        print(f"[QUARTERLY-DEBUG] Row {i + 1} - Progress reporting triggered")
+                        
                         progress_percent = (i / total_rows) * 100
                         elapsed_time = time.time() - start_time
                         rows_per_second = i / elapsed_time if elapsed_time > 0 else 0
@@ -815,6 +987,8 @@ def process_quarterly_bulk_upload_task(
                         )
                         next_progress_report = min(i + progress_interval, total_rows)
                         
+                        print(f"[QUARTERLY-DEBUG] Row {i + 1} - About to update job status")
+                        
                         # Update job progress
                         update_job_status(
                             job_id, 
@@ -823,9 +997,17 @@ def process_quarterly_bulk_upload_task(
                             successful_rows=successful_rows,
                             failed_rows=failed_rows
                         )
+                        
+                        print(f"[QUARTERLY-DEBUG] Row {i + 1} - Job status updated successfully")
+                    
+                    print(f"[QUARTERLY-DEBUG] Row {i + 1} - Progress check completed, starting individual row processing")
                     
                     # Process individual row with error resilience
                     try:
+                        task_logger.info(f"🔍 DEBUG Step 13: Processing individual row {i+1}", job_id=job_id, row_index=i)
+                        
+                        print(f"[QUARTERLY-DEBUG] Row {i + 1} - About to create/get company")
+                        
                         company = create_or_get_company(
                             db=db,
                             symbol=row['company_symbol'],
