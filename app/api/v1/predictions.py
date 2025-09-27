@@ -1124,6 +1124,60 @@ async def bulk_upload_quarterly_async(
         if total_rows > 10000:
             raise HTTPException(status_code=400, detail="File contains too many rows (max 10,000)")
         
+        # ADDITIONAL DATA VALIDATION - Fail early if data is invalid
+        try:
+            # Test the first row to ensure all required fields are accessible
+            if len(data) > 0:
+                test_row = data[0]
+                
+                # Validate required fields exist and are not None/empty
+                required_test_fields = {
+                    'company_symbol': test_row.get('company_symbol'),
+                    'company_name': test_row.get('company_name'),
+                    'reporting_year': test_row.get('reporting_year'),
+                    'reporting_quarter': test_row.get('reporting_quarter'),
+                    'total_debt_to_ebitda': test_row.get('total_debt_to_ebitda'),
+                    'sga_margin': test_row.get('sga_margin'),
+                    'long_term_debt_to_total_capital': test_row.get('long_term_debt_to_total_capital'),
+                    'return_on_capital': test_row.get('return_on_capital')
+                }
+                
+                # Check for missing or invalid field values
+                invalid_fields = []
+                for field_name, field_value in required_test_fields.items():
+                    if field_value is None or str(field_value).strip() == '' or str(field_value).lower() in ['nan', 'null']:
+                        invalid_fields.append(field_name)
+                
+                if invalid_fields:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"First row has invalid/missing values for required fields: {', '.join(invalid_fields)}. Please check your data format."
+                    )
+                
+                # Test data iteration (same as worker task does)
+                test_iteration_count = 0
+                for i, row in enumerate(data[:3]):  # Test first 3 rows
+                    if not row or not isinstance(row, dict):
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Row {i+1} is invalid or not a dictionary. Data format error."
+                        )
+                    test_iteration_count += 1
+                
+                if test_iteration_count == 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Data iteration test failed - unable to access rows. File format may be corrupted."
+                    )
+                    
+        except HTTPException:
+            raise  # Re-raise HTTP exceptions
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Data validation failed: {str(e)}. Please check your file format and ensure all required columns have valid data."
+            )
+        
         from app.services.celery_bulk_upload_service import celery_bulk_upload_service
         
         job_id = await celery_bulk_upload_service.create_bulk_upload_job(

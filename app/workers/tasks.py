@@ -731,7 +731,36 @@ def process_quarterly_bulk_upload_task(
                 user_id=user_id,
                 file_name=file_name,
                 data_type=type(data).__name__,
-                data_length=len(data) if data else "None"
+                data_length=len(data) if data else "None",
+                data_sample=str(data[0]) if data and len(data) > 0 else "No data"
+            )
+            
+            if not data:
+                raise ValueError("Data parameter is None or empty")
+            
+            if len(data) == 0:
+                raise ValueError("Data list is empty")
+            
+            # CRITICAL: Test data access immediately
+            try:
+                first_row = data[0]
+                if not isinstance(first_row, dict):
+                    raise ValueError(f"First row is not a dictionary: {type(first_row)}")
+                    
+                # Test required keys
+                required_keys = ['company_symbol', 'company_name', 'reporting_year', 'reporting_quarter']
+                missing_keys = [key for key in required_keys if key not in first_row]
+                if missing_keys:
+                    raise ValueError(f"First row missing required keys: {missing_keys}")
+                    
+            except (IndexError, KeyError, TypeError) as e:
+                raise ValueError(f"Data access test failed: {str(e)}")
+            
+            task_logger.info(
+                f"🔍 DEBUG Step 7: Data validation passed, starting enumeration",
+                job_id=job_id,
+                data_length=len(data),
+                first_row_keys=list(data[0].keys()) if data and len(data) > 0 else []
             )
             
             for i, row in enumerate(data):
@@ -739,9 +768,31 @@ def process_quarterly_bulk_upload_task(
                     f"🔍 DEBUG Step 7: Started processing row {i + 1}",
                     job_id=job_id,
                     user_id=user_id,
-                    file_name=file_name,
-                    row_data=str(row)[:100] if row else "None"
+                    file_name=file_name
                 )
+                
+                task_logger.info(
+                    f"🔍 DEBUG Step 7.1: Row data type: {type(row)}, keys: {list(row.keys()) if isinstance(row, dict) else 'not dict'}",
+                    job_id=job_id,
+                    user_id=user_id,
+                    file_name=file_name
+                )
+                
+                # Check each required field individually
+                try:
+                    company_symbol = row.get('company_symbol', 'MISSING')
+                    task_logger.info(
+                        f"🔍 DEBUG Step 7.2: company_symbol = {company_symbol}",
+                        job_id=job_id,
+                        user_id=user_id
+                    )
+                except Exception as e:
+                    task_logger.error(
+                        f"❌ DEBUG Step 7.2 FAILED: company_symbol access error: {e}",
+                        job_id=job_id,
+                        user_id=user_id
+                    )
+                    break
                 
                 try:
                     # Progress reporting with detailed logging
@@ -1042,6 +1093,7 @@ def process_bulk_excel_task(self, file_content_b64: str, original_filename: str)
     successful_predictions = 0
     failed_predictions = 0
     total_companies = 0
+    error_details = []  # Initialize error_details list
     
     try:
         file_content = base64.b64decode(file_content_b64)
