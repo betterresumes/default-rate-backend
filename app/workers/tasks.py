@@ -313,6 +313,10 @@ def process_annual_bulk_upload_task(
         # Update job status
         update_job_status(job_id, 'processing')
         
+        # Initialize caches for performance optimization
+        user_cache = {}  # Cache user lookups
+        company_cache = {}  # Cache company lookups
+        
         successful_rows = 0
         failed_rows = 0
         error_details = []
@@ -367,14 +371,16 @@ def process_annual_bulk_upload_task(
                     
                     # Process individual row with error resilience
                     try:
-                        company = create_or_get_company(
+                        company = create_or_get_company_cached(
                             db=db,
                             symbol=row['company_symbol'],
                             name=row['company_name'],
                             market_cap=safe_float(row['market_cap']),
                             sector=row['sector'],
                             organization_id=organization_id,
-                            user_id=user_id
+                            user_id=user_id,
+                            user_cache=user_cache,
+                            company_cache=company_cache
                         )
                     
                         existing_query = db.query(AnnualPrediction).filter(
@@ -632,6 +638,75 @@ def process_annual_bulk_upload_task(
         db.close()
 
 
+# PERFORMANCE OPTIMIZATION: Add caching for database lookups
+def create_or_get_company_cached(db, symbol: str, name: str, market_cap: float, sector: str, 
+                                organization_id: Optional[str], user_id: str, 
+                                user_cache: dict, company_cache: dict) -> Company:
+    """Optimized version with caching to avoid repeated DB queries"""
+    cache_key = f"{symbol}_{organization_id or 'none'}_{user_id}"
+    
+    # Check company cache first
+    if cache_key in company_cache:
+        company = company_cache[cache_key]
+        # Update company data
+        company.name = name
+        company.market_cap = safe_float(market_cap) * 1_000_000
+        company.sector = sector
+        return company
+    
+    # Check user cache
+    if user_id not in user_cache:
+        user = db.query(User).filter(User.id == user_id).first()
+        user_cache[user_id] = user
+    else:
+        user = user_cache[user_id]
+    
+    # Determine access level
+    if organization_id:
+        access_level = "organization"
+        company = db.query(Company).filter(
+            Company.symbol == symbol.upper(),
+            Company.organization_id == organization_id,
+            Company.access_level == "organization"
+        ).first()
+    else:
+        if user and user.role == "super_admin":
+            access_level = "system"
+            company = db.query(Company).filter(
+                Company.symbol == symbol.upper(),
+                Company.access_level == "system"
+            ).first()
+        else:
+            access_level = "personal"
+            company = db.query(Company).filter(
+                Company.symbol == symbol.upper(),
+                Company.organization_id.is_(None),
+                Company.access_level == "personal",
+                Company.created_by == user_id
+            ).first()
+    
+    if not company:
+        company = Company(
+            symbol=symbol.upper(),
+            name=name,
+            market_cap=safe_float(market_cap) * 1_000_000,
+            sector=sector,
+            organization_id=organization_id,
+            access_level=access_level,
+            created_by=user_id
+        )
+        db.add(company)
+        db.flush()
+    else:
+        company.name = name
+        company.market_cap = safe_float(market_cap) * 1_000_000
+        company.sector = sector
+    
+    # Cache the result
+    company_cache[cache_key] = company
+    return company
+
+
 @celery_app.task(bind=True, name="app.workers.tasks.process_quarterly_bulk_upload_task")
 @enhanced_task_logging("process_quarterly_bulk_upload_task")
 def process_quarterly_bulk_upload_task(
@@ -689,6 +764,10 @@ def process_quarterly_bulk_upload_task(
         
         # Update job status
         update_job_status(job_id, 'processing')
+        
+        # Initialize caches for performance optimization
+        user_cache = {}  # Cache user lookups
+        company_cache = {}  # Cache company lookups
         
         # DEBUG: Add logging to identify where task hangs
         task_logger.info(
@@ -1030,14 +1109,16 @@ def process_quarterly_bulk_upload_task(
                         
                         print(f"[QUARTERLY-DEBUG] Row {i + 1} - About to create/get company")
                         
-                        company = create_or_get_company(
+                        company = create_or_get_company_cached(
                             db=db,
                             symbol=row['company_symbol'],
                             name=row['company_name'],
                             market_cap=safe_float(row['market_cap']),
                             sector=row['sector'],
                             organization_id=organization_id,
-                            user_id=user_id
+                            user_id=user_id,
+                            user_cache=user_cache,
+                            company_cache=company_cache
                         )
                         
                         # Check for existing prediction
