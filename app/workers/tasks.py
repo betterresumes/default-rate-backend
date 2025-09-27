@@ -80,31 +80,47 @@ def update_job_status(
 
 def create_or_get_company(db, symbol: str, name: str, market_cap: float, sector: str, organization_id: Optional[str], user_id: str) -> Company:
     """Create or get company with organization scoping"""
+    print(f"[COMPANY-DEBUG] Starting create_or_get_company for {symbol}")
+    
     if organization_id:
+        print(f"[COMPANY-DEBUG] Using organization scope: {organization_id}")
         access_level = "organization"
+        print(f"[COMPANY-DEBUG] About to query company with organization")
         company = db.query(Company).filter(
             Company.symbol == symbol.upper(),
             Company.organization_id == organization_id,
             Company.access_level == "organization"
         ).first()
+        print(f"[COMPANY-DEBUG] Organization company query completed: {'Found' if company else 'Not found'}")
     else:
+        print(f"[COMPANY-DEBUG] No organization, checking user: {user_id}")
+        print(f"[COMPANY-DEBUG] About to query user")
         user = db.query(User).filter(User.id == user_id).first()
+        print(f"[COMPANY-DEBUG] User query completed: {'Found' if user else 'Not found'}")
+        
         if user and user.role == "super_admin":
+            print(f"[COMPANY-DEBUG] User is super_admin")
             access_level = "system"
+            print(f"[COMPANY-DEBUG] About to query system company")
             company = db.query(Company).filter(
                 Company.symbol == symbol.upper(),
                 Company.access_level == "system"
             ).first()
+            print(f"[COMPANY-DEBUG] System company query completed: {'Found' if company else 'Not found'}")
         else:
+            print(f"[COMPANY-DEBUG] User is regular user or not found")
             access_level = "personal"
+            print(f"[COMPANY-DEBUG] About to query personal company")
             company = db.query(Company).filter(
                 Company.symbol == symbol.upper(),
                 Company.organization_id.is_(None),
                 Company.access_level == "personal",
                 Company.created_by == user_id
             ).first()
+            print(f"[COMPANY-DEBUG] Personal company query completed: {'Found' if company else 'Not found'}")
     
     if not company:
+        print(f"[COMPANY-DEBUG] No existing company found, creating new one")
         company = Company(
             symbol=symbol.upper(),
             name=name,
@@ -114,13 +130,19 @@ def create_or_get_company(db, symbol: str, name: str, market_cap: float, sector:
             access_level=access_level,
             created_by=user_id
         )
+        print(f"[COMPANY-DEBUG] Company object created, about to add to DB")
         db.add(company)
+        print(f"[COMPANY-DEBUG] Company added to DB, about to flush")
         db.flush()  
+        print(f"[COMPANY-DEBUG] DB flush completed")
     else:
+        print(f"[COMPANY-DEBUG] Updating existing company")
         company.name = name
         company.market_cap = safe_float(market_cap) * 1_000_000
         company.sector = sector
+        print(f"[COMPANY-DEBUG] Company update completed")
     
+    print(f"[COMPANY-DEBUG] create_or_get_company completed for {symbol}")
     return company
 
 
