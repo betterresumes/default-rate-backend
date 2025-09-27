@@ -276,6 +276,16 @@ class CeleryBulkUploadService:
             return None
         finally:
             db.close()
+    
+    async def get_enhanced_job_status(self, job_id: str) -> Optional[Dict]:
+        """Get enhanced job status with Celery task information"""
+        SessionLocal = get_session_local()
+        db = SessionLocal()
+        
+        try:
+            job = db.query(BulkUploadJob).filter(BulkUploadJob.id == job_id).first()
+            if not job:
+                return None
             
             celery_status = None
             celery_meta = None
@@ -322,7 +332,7 @@ class CeleryBulkUploadService:
             return response
             
         except Exception as e:
-            logger.error(f"Error getting job status: {str(e)}")
+            logger.error(f"Error getting enhanced job status: {str(e)}")
             return None
         finally:
             db.close()

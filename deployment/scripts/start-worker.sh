@@ -128,8 +128,10 @@ def log_db(level, msg):
 
 try:
     from sqlalchemy import create_engine, text
+    from app.core.database import get_database_url
     log_db('INFO', 'Testing database connection...')
-    engine = create_engine(os.getenv('DATABASE_URL'))
+    database_url = get_database_url()
+    engine = create_engine(database_url)
     with engine.connect() as conn:
         result = conn.execute(text('SELECT 1')).fetchone()
         log_db('SUCCESS', '✅ Database connection successful!')

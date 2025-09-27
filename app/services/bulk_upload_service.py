@@ -5,7 +5,21 @@ import pandas as pd
 import json
 from datetime import datetime
 from typing import List, Dict, Any, Optional
-from sqlalchemy.orm import Session
+from sq                           company = self.create_or_get_company(
+                        db,
+                        symbol=row['company_symbol'],
+                        name=row['company_name'],
+                        market_cap=self.safe_float(row['market_cap']),  # Market cap already in millions
+                        sector=row['sector'],
+                        organization_id=organization_id
+                    )     company = self.create_or_get_company(
+                        db, 
+                        symbol=row['company_symbol'],
+                        name=row['company_name'],
+                        market_cap=self.safe_float(row['market_cap']),  # Market cap already in millions
+                        sector=row['sector'],
+                        organization_id=organization_id
+                    ).orm import Session
 from app.core.database import get_session_local, BulkUploadJob, Company, AnnualPrediction, QuarterlyPrediction, User
 from app.services.ml_service import MLModelService
 from app.services.quarterly_ml_service import QuarterlyMLModelService
@@ -118,7 +132,7 @@ class BulkUploadService:
             company = Company(
                 symbol=symbol,
                 name=name,
-                market_cap=self.safe_float(market_cap) * 1_000_000,  
+                market_cap=self.safe_float(market_cap),  # Raw dollar values
                 sector=sector,
                 organization_id=organization_id
             )
@@ -126,7 +140,7 @@ class BulkUploadService:
             db.flush()  
         else:
             company.name = name
-            company.market_cap = self.safe_float(market_cap) * 1_000_000
+            company.market_cap = self.safe_float(market_cap)  # Raw dollar values
             company.sector = sector
         
         return company

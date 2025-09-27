@@ -124,7 +124,7 @@ class OptimizedCompanyManager:
                 companies_to_create.append({
                     'symbol': symbol,
                     'name': company_data['name'],
-                    'market_cap': company_data['market_cap'] * 1_000_000,
+                    'market_cap': company_data['market_cap'],  # Already in millions
                     'sector': company_data['sector'],
                     'organization_id': organization_id,
                     'access_level': access_level,

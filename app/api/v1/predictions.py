@@ -1302,7 +1302,6 @@ async def get_job_details(
         if job.total_rows and job.total_rows > 0 and job.processed_rows is not None:
             try:
                 progress = (job.processed_rows / job.total_rows) * 100
-                import math
                 progress_percentage = round(progress, 2) if not (math.isnan(progress) or math.isinf(progress)) else 0
             except (ZeroDivisionError, TypeError):
                 progress_percentage = 0
@@ -1406,6 +1405,279 @@ async def get_job_details(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting job details: {str(e)}")
+
+@router.get("/jobs/{job_id}/results")
+async def get_job_results(
+    job_id: str,
+    include_predictions: bool = False,
+    include_companies: bool = False,
+    include_errors: bool = False,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(current_verified_user)
+):
+    """Get complete job results including all processing output and generated data"""
+    try:
+        if not check_user_permissions(current_user, "user"):
+            raise HTTPException(
+                status_code=403,
+                detail="Authentication required to view job results"
+            )
+
+        # Get the job
+        organization_id = get_organization_context(current_user)
+        query = db.query(BulkUploadJob).filter(BulkUploadJob.id == job_id)
+        
+        if organization_id:
+            query = query.filter(BulkUploadJob.organization_id == organization_id)
+        else:
+            query = query.filter(BulkUploadJob.user_id == current_user.id)
+        
+        job = query.first()
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found or access denied")
+
+        # Calculate processing time
+        processing_time_seconds = None
+        if job.started_at and job.completed_at:
+            processing_time_seconds = (job.completed_at - job.started_at).total_seconds()
+
+        # Get created companies during this job time window
+        created_companies = []
+        if include_companies and job.started_at:
+            # Companies created around the job time
+            companies_query = db.query(Company).join(
+                AnnualPrediction if job.job_type == 'annual' else QuarterlyPrediction,
+                Company.id == (AnnualPrediction.company_id if job.job_type == 'annual' else QuarterlyPrediction.company_id)
+            ).filter(
+                (AnnualPrediction.created_at if job.job_type == 'annual' else QuarterlyPrediction.created_at) >= job.started_at,
+                (AnnualPrediction.created_at if job.job_type == 'annual' else QuarterlyPrediction.created_at) <= (job.completed_at or job.started_at)
+            )
+            
+            if organization_id:
+                companies_query = companies_query.filter(Company.organization_id == organization_id)
+            
+            companies_result = companies_query.distinct().all()
+            
+            for company in companies_result:
+                created_companies.append({
+                    "id": str(company.id),
+                    "symbol": company.symbol,
+                    "name": company.name,
+                    "market_cap": float(company.market_cap),
+                    "sector": company.sector,
+                    "access_level": company.access_level
+                })
+
+        # Get predictions created during this job
+        created_predictions = []
+        prediction_summary = {
+            "by_sector": {},
+            "by_risk_level": {},
+            "risk_distribution": {
+                "low_risk": 0,
+                "medium_risk": 0,
+                "high_risk": 0
+            },
+            "average_probability": 0,
+            "confidence_stats": {
+                "min": 0,
+                "max": 0,
+                "average": 0
+            }
+        }
+        
+        if include_predictions and job.started_at:
+            if job.job_type == 'annual':
+                predictions_query = db.query(AnnualPrediction).join(Company).filter(
+                    AnnualPrediction.created_at >= job.started_at,
+                    AnnualPrediction.created_at <= (job.completed_at or job.started_at)
+                )
+                
+                if organization_id:
+                    predictions_query = predictions_query.filter(AnnualPrediction.organization_id == organization_id)
+                
+                predictions = predictions_query.all()
+                
+                # Process annual predictions
+                probabilities = []
+                confidences = []
+                
+                for pred in predictions:
+                    # Add to results
+                    created_predictions.append({
+                        "id": str(pred.id),
+                        "company": {
+                            "symbol": pred.company.symbol,
+                            "name": pred.company.name,
+                            "sector": pred.company.sector
+                        },
+                        "reporting_year": pred.reporting_year,
+                        "reporting_quarter": pred.reporting_quarter,
+                        "financial_metrics": {
+                            "long_term_debt_to_total_capital": float(pred.long_term_debt_to_total_capital) if pred.long_term_debt_to_total_capital else None,
+                            "total_debt_to_ebitda": float(pred.total_debt_to_ebitda) if pred.total_debt_to_ebitda else None,
+                            "net_income_margin": float(pred.net_income_margin) if pred.net_income_margin else None,
+                            "ebit_to_interest_expense": float(pred.ebit_to_interest_expense) if pred.ebit_to_interest_expense else None,
+                            "return_on_assets": float(pred.return_on_assets) if pred.return_on_assets else None
+                        },
+                        "prediction": {
+                            "probability": float(pred.probability),
+                            "risk_level": pred.risk_level,
+                            "confidence": float(pred.confidence),
+                            "predicted_at": pred.predicted_at.isoformat() if pred.predicted_at else None
+                        }
+                    })
+                    
+                    # Collect stats
+                    probabilities.append(float(pred.probability))
+                    confidences.append(float(pred.confidence))
+                    
+                    # Sector stats
+                    sector = pred.company.sector
+                    if sector not in prediction_summary["by_sector"]:
+                        prediction_summary["by_sector"][sector] = {"count": 0, "avg_probability": 0, "probabilities": []}
+                    prediction_summary["by_sector"][sector]["count"] += 1
+                    prediction_summary["by_sector"][sector]["probabilities"].append(float(pred.probability))
+                    
+                    # Risk level stats
+                    risk_level = pred.risk_level.lower().replace(' ', '_')
+                    if risk_level not in prediction_summary["by_risk_level"]:
+                        prediction_summary["by_risk_level"][risk_level] = 0
+                    prediction_summary["by_risk_level"][risk_level] += 1
+                    
+                    # Risk distribution
+                    if float(pred.probability) <= 0.3:
+                        prediction_summary["risk_distribution"]["low_risk"] += 1
+                    elif float(pred.probability) <= 0.7:
+                        prediction_summary["risk_distribution"]["medium_risk"] += 1
+                    else:
+                        prediction_summary["risk_distribution"]["high_risk"] += 1
+                
+                # Calculate averages
+                if probabilities:
+                    prediction_summary["average_probability"] = sum(probabilities) / len(probabilities)
+                    
+                if confidences:
+                    prediction_summary["confidence_stats"] = {
+                        "min": min(confidences),
+                        "max": max(confidences),
+                        "average": sum(confidences) / len(confidences)
+                    }
+                
+                # Calculate sector averages
+                for sector in prediction_summary["by_sector"]:
+                    probs = prediction_summary["by_sector"][sector]["probabilities"]
+                    prediction_summary["by_sector"][sector]["avg_probability"] = sum(probs) / len(probs)
+                    del prediction_summary["by_sector"][sector]["probabilities"]  # Remove raw data
+                    
+            else:  # Quarterly predictions
+                predictions_query = db.query(QuarterlyPrediction).join(Company).filter(
+                    QuarterlyPrediction.created_at >= job.started_at,
+                    QuarterlyPrediction.created_at <= (job.completed_at or job.started_at)
+                )
+                
+                if organization_id:
+                    predictions_query = predictions_query.filter(QuarterlyPrediction.organization_id == organization_id)
+                
+                predictions = predictions_query.all()
+                
+                # Process quarterly predictions (similar logic but with quarterly fields)
+                probabilities = []
+                confidences = []
+                
+                for pred in predictions:
+                    created_predictions.append({
+                        "id": str(pred.id),
+                        "company": {
+                            "symbol": pred.company.symbol,
+                            "name": pred.company.name,
+                            "sector": pred.company.sector
+                        },
+                        "reporting_year": pred.reporting_year,
+                        "reporting_quarter": pred.reporting_quarter,
+                        "financial_metrics": {
+                            "total_debt_to_ebitda": float(pred.total_debt_to_ebitda) if pred.total_debt_to_ebitda else None,
+                            "sga_margin": float(pred.sga_margin) if pred.sga_margin else None,
+                            "long_term_debt_to_total_capital": float(pred.long_term_debt_to_total_capital) if pred.long_term_debt_to_total_capital else None,
+                            "return_on_capital": float(pred.return_on_capital) if pred.return_on_capital else None
+                        },
+                        "prediction": {
+                            "logistic_probability": float(pred.logistic_probability) if pred.logistic_probability else None,
+                            "gbm_probability": float(pred.gbm_probability) if pred.gbm_probability else None,
+                            "ensemble_probability": float(pred.ensemble_probability) if pred.ensemble_probability else None,
+                            "risk_level": pred.risk_level,
+                            "confidence": float(pred.confidence),
+                            "predicted_at": pred.predicted_at.isoformat() if pred.predicted_at else None
+                        }
+                    })
+                    
+                    # Use ensemble probability for stats, fall back to logistic
+                    main_prob = pred.ensemble_probability or pred.logistic_probability
+                    if main_prob:
+                        probabilities.append(float(main_prob))
+                    confidences.append(float(pred.confidence))
+
+                # Calculate quarterly summary stats (similar to annual)
+                if probabilities:
+                    prediction_summary["average_probability"] = sum(probabilities) / len(probabilities)
+                    
+                if confidences:
+                    prediction_summary["confidence_stats"] = {
+                        "min": min(confidences),
+                        "max": max(confidences),
+                        "average": sum(confidences) / len(confidences)
+                    }
+
+        # Parse error details
+        error_details_parsed = None
+        if job.error_details and include_errors:
+            try:
+                import json
+                error_details_parsed = json.loads(job.error_details)
+            except (json.JSONDecodeError, TypeError):
+                error_details_parsed = {"raw_error": job.error_details}
+
+        # Build comprehensive response
+        results = {
+            "success": True,
+            "job_id": str(job.id),
+            "status": job.status,
+            "job_summary": {
+                "job_type": job.job_type,
+                "file_name": job.original_filename,
+                "total_rows": job.total_rows or 0,
+                "successful_rows": job.successful_rows or 0,
+                "failed_rows": job.failed_rows or 0,
+                "success_rate": round((job.successful_rows or 0) / max(job.total_rows or 1, 1) * 100, 2),
+                "processing_time_seconds": processing_time_seconds,
+                "rows_per_second": round((job.successful_rows or 0) / max(processing_time_seconds or 1, 1), 2)
+            },
+            "created_data": {
+                "companies_count": len(created_companies),
+                "predictions_count": len(created_predictions),
+                "companies": created_companies if include_companies else None,
+                "predictions": created_predictions if include_predictions else None
+            },
+            "analysis": prediction_summary if (include_predictions and created_predictions) else None,
+            "timestamps": {
+                "created_at": job.created_at.isoformat() if job.created_at else None,
+                "started_at": job.started_at.isoformat() if job.started_at else None,
+                "completed_at": job.completed_at.isoformat() if job.completed_at else None
+            },
+            "errors": {
+                "has_errors": bool(job.error_message or job.error_details),
+                "error_message": job.error_message if include_errors else None,
+                "error_details": error_details_parsed if include_errors else None,
+                "error_count": len(error_details_parsed.get('errors', [])) if error_details_parsed and isinstance(error_details_parsed, dict) else 0
+            } if include_errors or bool(job.error_message or job.error_details) else None
+        }
+
+        return results
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting job results: {str(e)}")
 
 @router.delete("/jobs/{job_id}")
 async def delete_job(
@@ -1681,76 +1953,7 @@ async def update_annual_prediction(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error updating annual prediction: {str(e)}")
 
-@router.delete("/annual/{prediction_id}")
-async def delete_annual_prediction(
-    prediction_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(current_verified_user)
-):
-    """Delete an annual prediction with proper access control"""
-    try:
-        if not check_user_permissions(current_user, "user"):
-            raise HTTPException(
-                status_code=403,
-                detail="Authentication required to delete predictions"
-            )
-
-        prediction = db.query(AnnualPrediction).filter(AnnualPrediction.id == prediction_id).first()
-        if not prediction:
-            raise HTTPException(status_code=404, detail="Prediction not found")
-        
-        if prediction.access_level == "system":
-            if current_user.role != "super_admin":
-                raise HTTPException(
-                    status_code=403,
-                    detail="Only super admin can delete system-level predictions"
-                )
-        else:
-            can_delete = False
-            
-            if current_user.role == "super_admin":
-                can_delete = True
-                
-            elif is_prediction_owner(prediction, current_user):
-                can_delete = True
-                
-            elif (prediction.access_level == "organization" and 
-                  current_user.organization_id and 
-                  prediction.organization_id == current_user.organization_id and
-                  current_user.role in ["org_admin", "org_member"]):
-                can_delete = True
-            
-            if not can_delete:
-                if prediction.access_level == "organization":
-                    if not current_user.organization_id:
-                        detail = "You must be part of an organization to delete organization predictions"
-                    elif prediction.organization_id != current_user.organization_id:
-                        detail = "You can only delete predictions within your organization"
-                    elif current_user.role not in ["org_admin", "org_member"]:
-                        detail = "You need organization member role to delete organization predictions"
-                    else:
-                        detail = "You can only delete predictions that you created or organization predictions within your org"
-                else:
-                    detail = "You can only delete predictions that you created"
-                    
-                raise HTTPException(status_code=403, detail=detail)
-        
-        db.delete(prediction)
-        db.commit()
-        
-        return {
-            "success": True,
-            "message": f"Annual prediction deleted successfully",
-            "deleted_id": prediction_id
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error deleting annual prediction: {str(e)}")
-
-@router.put("/quarterly/{prediction_id}")
+@router.post("/quarterly/{prediction_id}")
 async def update_quarterly_prediction(
     prediction_id: str,
     request: QuarterlyPredictionRequest,
@@ -1882,6 +2085,75 @@ async def update_quarterly_prediction(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error updating quarterly prediction: {str(e)}")
+
+@router.delete("/annual/{prediction_id}")
+async def delete_annual_prediction(
+    prediction_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(current_verified_user)
+):
+    """Delete an annual prediction with proper access control"""
+    try:
+        if not check_user_permissions(current_user, "user"):
+            raise HTTPException(
+                status_code=403,
+                detail="Authentication required to delete predictions"
+            )
+
+        prediction = db.query(AnnualPrediction).filter(AnnualPrediction.id == prediction_id).first()
+        if not prediction:
+            raise HTTPException(status_code=404, detail="Prediction not found")
+        
+        if prediction.access_level == "system":
+            if current_user.role != "super_admin":
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only super admin can delete system-level predictions"
+                )
+        else:
+            can_delete = False
+            
+            if current_user.role == "super_admin":
+                can_delete = True
+                
+            elif is_prediction_owner(prediction, current_user):
+                can_delete = True
+                
+            elif (prediction.access_level == "organization" and 
+                  current_user.organization_id and 
+                  prediction.organization_id == current_user.organization_id and
+                  current_user.role in ["org_admin", "org_member"]):
+                can_delete = True
+            
+            if not can_delete:
+                if prediction.access_level == "organization":
+                    if not current_user.organization_id:
+                        detail = "You must be part of an organization to delete organization predictions"
+                    elif prediction.organization_id != current_user.organization_id:
+                        detail = "You can only delete predictions within your organization"
+                    elif current_user.role not in ["org_admin", "org_member"]:
+                        detail = "You need organization member role to delete organization predictions"
+                    else:
+                        detail = "You can only delete predictions that you created or organization predictions within your org"
+                else:
+                    detail = "You can only delete predictions that you created"
+                    
+                raise HTTPException(status_code=403, detail=detail)
+        
+        db.delete(prediction)
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": f"Annual prediction deleted successfully",
+            "deleted_id": prediction_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error deleting annual prediction: {str(e)}")
 
 @router.delete("/quarterly/{prediction_id}")
 async def delete_quarterly_prediction(
@@ -2343,22 +2615,33 @@ async def get_personal_dashboard(db: Session, current_user: User):
     }
 
 async def get_platform_statistics(db: Session):
-    """Get platform-wide statistics for inclusion in dashboard"""
-    total_companies = db.query(Company).count()
+    """Get platform-wide statistics - ONLY SYSTEM-LEVEL DATA (access_level='system')"""
+    # Only count companies with system-level access (created by super admin)
+    total_companies = db.query(Company).filter(Company.access_level == "system").count()
     
-    total_annual = db.query(AnnualPrediction).count()
-    total_quarterly = db.query(QuarterlyPrediction).count()
+    # Only count predictions with system-level access
+    total_annual = db.query(AnnualPrediction).filter(AnnualPrediction.access_level == "system").count()
+    total_quarterly = db.query(QuarterlyPrediction).filter(QuarterlyPrediction.access_level == "system").count()
     total_predictions = total_annual + total_quarterly
     
-    annual_avg = db.query(func.avg(AnnualPrediction.probability)).scalar() or 0
-    quarterly_avg = db.query(func.avg(QuarterlyPrediction.logistic_probability)).scalar() or 0
+    # Average default rate for system-level data only
+    annual_avg = db.query(func.avg(AnnualPrediction.probability)).filter(AnnualPrediction.access_level == "system").scalar() or 0
+    quarterly_avg = db.query(func.avg(QuarterlyPrediction.logistic_probability)).filter(QuarterlyPrediction.access_level == "system").scalar() or 0
     platform_avg_default = (annual_avg + quarterly_avg) / 2 if (annual_avg or quarterly_avg) else 0
     
-    high_risk_annual = db.query(AnnualPrediction).filter(AnnualPrediction.probability > 0.7).count()
-    high_risk_quarterly = db.query(QuarterlyPrediction).filter(QuarterlyPrediction.logistic_probability > 0.7).count()
+    # High risk count for system-level data only
+    high_risk_annual = db.query(AnnualPrediction).filter(
+        AnnualPrediction.access_level == "system",
+        AnnualPrediction.probability > 0.7
+    ).count()
+    high_risk_quarterly = db.query(QuarterlyPrediction).filter(
+        QuarterlyPrediction.access_level == "system",
+        QuarterlyPrediction.logistic_probability > 0.7
+    ).count()
     platform_high_risk = high_risk_annual + high_risk_quarterly
     
-    platform_sectors = db.query(Company.sector).distinct().count()
+    # Sectors covered in system-level companies only
+    platform_sectors = db.query(Company.sector).filter(Company.access_level == "system").distinct().count()
     
     return {
         "total_companies": total_companies,
