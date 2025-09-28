@@ -797,7 +797,46 @@ def process_quarterly_bulk_upload_task(
                     'return_on_capital': safe_float(row['return_on_capital'])
                 }
                 
-                ml_result = quarterly_ml_model.predict_quarterly_default_probability(financial_data)
+                logger.info(f"🔍 DEBUG: Processing row {i+1}/{len(data)} - {row['company_symbol']} with financial_data: {financial_data}")
+                
+                # Check for None/invalid values that might cause hanging
+                for key, value in financial_data.items():
+                    if value is None or (isinstance(value, float) and (math.isnan(value) or math.isinf(value))):
+                        logger.warning(f"⚠️ DEBUG: Invalid value for {key}: {value} in row {i+1}")
+                
+                try:
+                    import signal
+                    
+                    def timeout_handler(signum, frame):
+                        raise TimeoutError("ML prediction timed out")
+                    
+                    # Set a 30-second timeout for ML prediction
+                    signal.signal(signal.SIGALRM, timeout_handler)
+                    signal.alarm(30)  # 30 seconds timeout
+                    
+                    try:
+                        ml_result = quarterly_ml_model.predict_quarterly_default_probability(financial_data)
+                        signal.alarm(0)  # Cancel the alarm
+                        logger.info(f"✅ DEBUG: ML prediction successful for {row['company_symbol']}: {ml_result.get('logistic_probability', 'N/A')}")
+                    except TimeoutError:
+                        signal.alarm(0)  # Cancel the alarm
+                        logger.error(f"⏰ DEBUG: ML prediction timed out for {row['company_symbol']} after 30 seconds")
+                        failed_rows += 1
+                        error_details.append({
+                            'row': i + 1,
+                            'error': f"ML prediction timed out after 30 seconds"
+                        })
+                        continue
+                        
+                except Exception as ml_error:
+                    signal.alarm(0)  # Cancel the alarm if set
+                    logger.error(f"❌ DEBUG: ML prediction failed for {row['company_symbol']}: {str(ml_error)}")
+                    failed_rows += 1
+                    error_details.append({
+                        'row': i + 1,
+                        'error': f"ML prediction failed: {str(ml_error)}"
+                    })
+                    continue
                 
                 if organization_id:
                     access_level = "organization"
