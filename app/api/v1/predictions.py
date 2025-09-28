@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Backgro
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_, text
 from typing import Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
 import pandas as pd
 import io
@@ -1947,15 +1947,38 @@ async def get_job_results(
         
         if request.include_predictions and job.started_at:
             if job.job_type == 'annual':
+                # Filter by created_by user_id for more accurate linking to job
                 predictions_query = db.query(AnnualPrediction).join(Company).filter(
-                    AnnualPrediction.created_at >= job.started_at,
-                    AnnualPrediction.created_at <= (job.completed_at or job.started_at)
+                    AnnualPrediction.created_by == str(job.user_id)
                 )
+                
+                # Use time window as secondary filter with proper end time
+                if job.completed_at:
+                    # Job is completed - use tight window
+                    start_time = job.started_at - timedelta(minutes=1)  # 1 minute buffer before
+                    end_time = job.completed_at + timedelta(minutes=1)   # 1 minute buffer after
+                    predictions_query = predictions_query.filter(
+                        AnnualPrediction.created_at >= start_time,
+                        AnnualPrediction.created_at <= end_time
+                    )
+                else:
+                    # Job might still be processing - use start time only
+                    predictions_query = predictions_query.filter(
+                        AnnualPrediction.created_at >= job.started_at
+                    )
                 
                 if organization_id:
                     predictions_query = predictions_query.filter(AnnualPrediction.organization_id == organization_id)
                 
                 predictions = predictions_query.all()
+                
+                # Debug logging for prediction count mismatch investigation
+                if len(predictions) != (job.successful_rows or 0):
+                    logger.warning(
+                        f"Prediction count mismatch for job {job_id}: "
+                        f"Found {len(predictions)} predictions, expected {job.successful_rows or 0}. "
+                        f"Job: started={job.started_at}, completed={job.completed_at}, user={job.user_id}"
+                    )
                 
                 # Process annual predictions
                 probabilities = []
@@ -2030,15 +2053,38 @@ async def get_job_results(
                     del prediction_summary["by_sector"][sector]["probabilities"]  # Remove raw data
                     
             else:  # Quarterly predictions
+                # Filter by created_by user_id for more accurate linking to job
                 predictions_query = db.query(QuarterlyPrediction).join(Company).filter(
-                    QuarterlyPrediction.created_at >= job.started_at,
-                    QuarterlyPrediction.created_at <= (job.completed_at or job.started_at)
+                    QuarterlyPrediction.created_by == str(job.user_id)
                 )
+                
+                # Use time window as secondary filter with proper end time
+                if job.completed_at:
+                    # Job is completed - use tight window
+                    start_time = job.started_at - timedelta(minutes=1)  # 1 minute buffer before
+                    end_time = job.completed_at + timedelta(minutes=1)   # 1 minute buffer after
+                    predictions_query = predictions_query.filter(
+                        QuarterlyPrediction.created_at >= start_time,
+                        QuarterlyPrediction.created_at <= end_time
+                    )
+                else:
+                    # Job might still be processing - use start time only
+                    predictions_query = predictions_query.filter(
+                        QuarterlyPrediction.created_at >= job.started_at
+                    )
                 
                 if organization_id:
                     predictions_query = predictions_query.filter(QuarterlyPrediction.organization_id == organization_id)
                 
                 predictions = predictions_query.all()
+                
+                # Debug logging for prediction count mismatch investigation
+                if len(predictions) != (job.successful_rows or 0):
+                    logger.warning(
+                        f"Prediction count mismatch for job {job_id}: "
+                        f"Found {len(predictions)} predictions, expected {job.successful_rows or 0}. "
+                        f"Job: started={job.started_at}, completed={job.completed_at}, user={job.user_id}"
+                    )
                 
                 # Process quarterly predictions (similar logic but with quarterly fields)
                 probabilities = []

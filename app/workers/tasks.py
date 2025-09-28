@@ -417,6 +417,14 @@ def process_annual_bulk_upload_task(
                                 'row': i + 1,
                                 'error': f"Prediction already exists for {row['company_symbol']} {row['reporting_year']}"
                             })
+                            # Log duplicate skip for debugging
+                            task_logger.warning(
+                                f"⚠️ Skipping duplicate prediction for {row['company_symbol']} {row['reporting_year']}",
+                                job_id=job_id,
+                                row_number=i+1,
+                                company_symbol=row['company_symbol'],
+                                reporting_year=row['reporting_year']
+                            )
                             continue
                         
                         financial_data = {
@@ -547,6 +555,20 @@ def process_annual_bulk_upload_task(
                 success_rate_percent=success_rate,
                 processing_time_seconds=processing_time,
                 rows_per_second=rows_per_second
+            )
+            
+            # Log final summary for debugging
+            task_logger.success(
+                f"🎉 Job completion summary: Processed {total_rows} rows, "
+                f"Created {successful_rows} predictions, "
+                f"Skipped {failed_rows} duplicates/errors",
+                job_id=job_id,
+                user_id=user_id,
+                total_rows=total_rows,
+                successful_rows=successful_rows,
+                failed_rows=failed_rows,
+                success_rate_percent=success_rate,
+                processing_time_seconds=processing_time
             )
             
             update_job_status(
