@@ -108,7 +108,7 @@ def create_or_get_company(db, symbol: str, name: str, market_cap: float, sector:
         company = Company(
             symbol=symbol.upper(),
             name=name,
-            market_cap=safe_float(market_cap) * 1_000_000,  
+            market_cap=safe_float(market_cap),  # Market cap already in millions
             sector=sector,
             organization_id=organization_id,
             access_level=access_level,
@@ -118,7 +118,7 @@ def create_or_get_company(db, symbol: str, name: str, market_cap: float, sector:
         db.flush()  
     else:
         company.name = name
-        company.market_cap = safe_float(market_cap) * 1_000_000
+        company.market_cap = safe_float(market_cap)  # Market cap already in millions
         company.sector = sector
     
     return company
@@ -178,6 +178,19 @@ class TaskLogger:
         
     def error(self, message: str, **kwargs):
         self.log('ERROR', message, **kwargs)
+    
+    def log_task_start(self, message: str, **kwargs):
+        """Log task start with full context"""
+        self.info(f"🚀 Task started")
+        self.info(message, **kwargs)
+        
+    def log_progress(self, message: str, **kwargs):
+        """Log progress updates"""
+        self.info(message, **kwargs)
+        
+    def log_completion(self, message: str, **kwargs):
+        """Log task completion"""
+        self.success(message, **kwargs)
         
     def warning(self, message: str, **kwargs):
         self.log('WARN', message, **kwargs)
@@ -580,11 +593,14 @@ def process_annual_bulk_upload_task(
         logger.error(f"Bulk upload job {job_id} failed: {error_msg}")
         logger.error(f"Full traceback: {traceback.format_exc()}")
         
+        # Use empty list if error_details is not defined yet
+        error_list = locals().get('error_details', [])
+        
         update_job_status(
             job_id,
             'failed',
             error_message=error_msg,
-            error_details={'errors': error_details, 'exception': traceback.format_exc()}
+            error_details={'errors': error_list, 'exception': traceback.format_exc()}
         )
         
         self.update_state(
@@ -593,7 +609,9 @@ def process_annual_bulk_upload_task(
                 "status": f"Job failed: {error_msg}",
                 "job_id": job_id,
                 "error": error_msg,
-                "processing_time_seconds": round(processing_time, 2)
+                "processing_time_seconds": round(processing_time, 2),
+                "exc_type": type(e).__name__,
+                "exc_message": error_msg
             }
         )
         
@@ -620,7 +638,7 @@ def process_quarterly_bulk_upload_task(
     organization_id: Optional[str]
 ) -> Dict[str, Any]:
     """
-    Celery task to process quarterly predictions bulk upload
+    Enhanced Celery task to process quarterly predictions bulk upload with comprehensive logging
     
     Args:
         job_id: Bulk upload job ID
@@ -634,17 +652,49 @@ def process_quarterly_bulk_upload_task(
     task_id = self.request.id
     start_time = time.time()
     
-    update_job_status(job_id, 'processing')
+    # Initialize enhanced logger
+    task_logger = TaskLogger("process_quarterly_bulk_upload_task")
     
+    # Initialize error tracking
+    error_details = []
+    successful_rows = 0
+    failed_rows = 0
+    
+    # Get job details for logging
     SessionLocal = get_session_local()
     db = SessionLocal()
     
-    successful_rows = 0
-    failed_rows = 0
-    error_details = []
-    total_rows = len(data)
-    
     try:
+        job = db.query(BulkUploadJob).filter(BulkUploadJob.id == job_id).first()
+        file_name = job.original_filename if job else "unknown-file"
+        total_rows = len(data)
+        
+        # Determine queue priority based on file size
+        if total_rows <= 100:
+            queue_priority = "high"
+        elif total_rows <= 1000:
+            queue_priority = "medium"
+        else:
+            queue_priority = "low"
+        
+        # Log detailed task start
+        task_logger.log_task_start(
+            f"📊 Starting quarterly bulk upload processing",
+            job_id=job_id,
+            user_id=user_id,
+            file_name=file_name,
+            total_rows=total_rows,
+            processed_rows=0,
+            queue_priority=queue_priority,
+            successful_rows=0,
+            failed_rows=0,
+            success_rate_percent=0,
+            processing_time_seconds=0,
+            rows_per_second=0
+        )
+        
+        update_job_status(job_id, 'processing')
+        
         self.update_state(
             state="PROGRESS",
             meta={
@@ -722,7 +772,15 @@ def process_quarterly_bulk_upload_task(
                 db.add(prediction)
                 successful_rows += 1
                 
-                if (i + 1) % 50 == 0:
+                # Enhanced progress logging every 7 rows or at specific intervals
+                if (i + 1) % 7 == 0 or (i + 1) in [1, 5, 10, 15, 20] or (i + 1) == total_rows:
+                    current_time = time.time()
+                    processing_time = current_time - start_time
+                    rows_per_second = (i + 1) / processing_time if processing_time > 0 else 0
+                    progress_percent = ((i + 1) / total_rows) * 100 if total_rows > 0 else 0
+                    success_rate = (successful_rows / (i + 1)) * 100 if (i + 1) > 0 else 0
+                    
+                    # Database commit for progress updates
                     db.commit()
                     update_job_status(
                         job_id, 
@@ -730,6 +788,22 @@ def process_quarterly_bulk_upload_task(
                         processed_rows=i + 1,
                         successful_rows=successful_rows,
                         failed_rows=failed_rows
+                    )
+                    
+                    # Enhanced progress logging
+                    task_logger.log_progress(
+                        f"📈 Processing progress: {progress_percent:.1f}% ({i + 1}/{total_rows} rows)",
+                        job_id=job_id,
+                        user_id=user_id,
+                        file_name=file_name,
+                        total_rows=total_rows,
+                        processed_rows=i + 1,
+                        queue_priority=queue_priority,
+                        successful_rows=successful_rows,
+                        failed_rows=failed_rows,
+                        success_rate_percent=success_rate,
+                        processing_time_seconds=processing_time,
+                        rows_per_second=rows_per_second
                     )
                     
                     self.update_state(
@@ -742,6 +816,15 @@ def process_quarterly_bulk_upload_task(
                             "failed": failed_rows,
                             "job_id": job_id
                         }
+                    )
+                elif (i + 1) % 50 == 0:  # Fallback for larger files
+                    db.commit()
+                    update_job_status(
+                        job_id, 
+                        'processing',
+                        processed_rows=i + 1,
+                        successful_rows=successful_rows,
+                        failed_rows=failed_rows
                     )
                     
             except Exception as row_error:
@@ -759,6 +842,24 @@ def process_quarterly_bulk_upload_task(
         db.commit()
         
         processing_time = time.time() - start_time
+        rows_per_second = total_rows / processing_time if processing_time > 0 else 0
+        success_rate = (successful_rows / total_rows) * 100 if total_rows > 0 else 0
+        
+        # Enhanced completion logging
+        task_logger.log_completion(
+            f"🎉 Bulk upload completed successfully",
+            job_id=job_id,
+            user_id=user_id,
+            file_name=file_name,
+            total_rows=total_rows,
+            processed_rows=total_rows,
+            queue_priority=queue_priority,
+            successful_rows=successful_rows,
+            failed_rows=failed_rows,
+            success_rate_percent=success_rate,
+            processing_time_seconds=processing_time,
+            rows_per_second=rows_per_second
+        )
         
         update_job_status(
             job_id,
@@ -776,6 +877,8 @@ def process_quarterly_bulk_upload_task(
             "successful_rows": successful_rows,
             "failed_rows": failed_rows,
             "processing_time_seconds": round(processing_time, 2),
+            "rows_per_second": round(rows_per_second, 2),
+            "success_rate_percent": round(success_rate, 2),
             "errors": error_details[:10]  
         }
         
@@ -786,11 +889,14 @@ def process_quarterly_bulk_upload_task(
         error_msg = str(e)
         logger.error(f"Bulk upload job {job_id} failed: {error_msg}")
         
+        # Use empty list if error_details is not defined yet
+        error_list = locals().get('error_details', [])
+        
         update_job_status(
             job_id,
             'failed',
             error_message=error_msg,
-            error_details={'errors': error_details}
+            error_details={'errors': error_list}
         )
         
         self.update_state(
@@ -798,7 +904,9 @@ def process_quarterly_bulk_upload_task(
             meta={
                 "status": f"Job failed: {error_msg}",
                 "job_id": job_id,
-                "error": error_msg
+                "error": error_msg,
+                "exc_type": type(e).__name__,
+                "exc_message": error_msg
             }
         )
         
@@ -845,6 +953,7 @@ def process_bulk_excel_task(self, file_content_b64: str, original_filename: str)
     db = session_factory()
     
     results = []
+    error_details = []
     successful_predictions = 0
     failed_predictions = 0
     total_companies = 0

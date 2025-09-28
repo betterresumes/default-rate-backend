@@ -3,8 +3,28 @@ import sys
 from celery import Celery
 from dotenv import load_dotenv
 
-load_dotenv()
-load_dotenv('.env.local')
+# Load environment variables from .env file
+# Try loading from current directory and parent directories
+load_dotenv()  # Default behavior
+load_dotenv('.env.local')  # Local overrides
+
+# Also try loading from the project root explicitly
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+env_file = os.path.join(project_root, '.env')
+if os.path.exists(env_file):
+    load_dotenv(env_file)
+    
+# Debug: Print environment loading status
+print(f"🔄 Celery using Redis URL: {os.getenv('REDIS_URL', 'NOT FOUND')[:20]}...{os.getenv('REDIS_URL', '')}")
+
+# Test database URL availability
+db_url = os.getenv('DATABASE_URL')
+if db_url:
+    # Clean the database URL
+    db_url_clean = db_url.strip().strip('"').strip("'")
+    print(f"✅ Database URL loaded: {db_url_clean[:20]}...{db_url_clean[-20:]}")
+else:
+    print("❌ DATABASE_URL not found in environment!")
 
 if sys.platform == "darwin":  
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")

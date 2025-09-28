@@ -22,7 +22,7 @@ async def get_current_user_profile(
     current_user: User = Depends(get_current_active_user)
 ):
     """Get current user profile information."""
-    return UserResponse.model_validate(current_user)
+    return UserResponse.from_orm(current_user)
 
 @router.put("/profile", response_model=UserResponse)
 async def update_current_user_profile(
@@ -52,7 +52,7 @@ async def update_current_user_profile(
     db.commit()
     db.refresh(current_user)
     
-    return UserResponse.model_validate(current_user)
+    return UserResponse.from_orm(current_user)
 
 @router.get("/me")
 async def get_current_user_profile_me(
@@ -329,7 +329,7 @@ async def create_user(
         db.commit()
         db.refresh(new_user)
         
-        return UserResponse.model_validate(new_user)
+        return UserResponse.from_orm(new_user)
         
     except Exception as e:
         db.rollback()
@@ -452,7 +452,7 @@ async def list_users(
     users = query.order_by(User.created_at.desc()).offset(skip).limit(limit).all()
     
     return UserListResponse(
-        users=[UserResponse.model_validate(user) for user in users],
+        users=[UserResponse.from_orm(user) for user in users],
         total=total,
         skip=skip,
         limit=limit
@@ -496,7 +496,7 @@ async def get_user(
                 detail="Access denied to this user"
             )
     
-    return UserResponse.model_validate(user)
+    return UserResponse.from_orm(user)
 
 @router.put("/{user_id}", response_model=UserResponse)
 async def update_user(
@@ -558,7 +558,7 @@ async def update_user(
     db.commit()
     db.refresh(user)
     
-    return UserResponse.model_validate(user)
+    return UserResponse.from_orm(user)
 
 @router.put("/{user_id}/role", response_model=UserRoleUpdateResponse)
 async def update_user_role(
