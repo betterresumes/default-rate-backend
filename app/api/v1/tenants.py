@@ -63,7 +63,7 @@ async def create_tenant(
     db.commit()
     db.refresh(new_tenant)
     
-    return TenantResponse.model_validate(new_tenant)
+    return TenantResponse.from_orm(new_tenant)
 
 @router.get("", response_model=ComprehensiveTenantListResponse)
 async def list_tenants(
@@ -390,7 +390,7 @@ async def update_tenant(
     db.commit()
     db.refresh(tenant)
     
-    return TenantResponse.model_validate(tenant)
+    return TenantResponse.from_orm(tenant)
 
 @router.delete("/{tenant_id}")
 async def delete_tenant(

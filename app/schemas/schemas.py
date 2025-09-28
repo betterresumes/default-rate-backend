@@ -90,6 +90,8 @@ class UserResponse(BaseModel):
     
     class Config:
         from_attributes = True
+        orm_mode = True
+        orm_mode = True
 
 class UserListResponse(BaseModel):
     users: List[UserResponse]
@@ -145,6 +147,7 @@ class TenantResponse(BaseModel):
     
     class Config:
         from_attributes = True
+        orm_mode = True
 
 class TenantListResponse(BaseModel):
     tenants: List[TenantResponse]
@@ -162,6 +165,7 @@ class TenantStatsResponse(BaseModel):
     
     class Config:
         from_attributes = True
+        orm_mode = True
 
 class OrganizationBase(BaseModel):
     name: str = Field(..., min_length=2, max_length=100)
@@ -212,6 +216,8 @@ class OrganizationResponse(BaseModel):
     
     class Config:
         from_attributes = True
+        orm_mode = True
+        orm_mode = True
 
 class OrganizationListResponse(BaseModel):
     organizations: List[OrganizationResponse]
@@ -248,6 +254,8 @@ class WhitelistResponse(BaseModel):
     
     class Config:
         from_attributes = True
+        orm_mode = True
+        orm_mode = True
 
 class WhitelistListResponse(BaseModel):
     whitelist: List[WhitelistResponse]
@@ -306,6 +314,7 @@ class CompanyResponse(BaseModel):
     
     class Config:
         from_attributes = True
+        orm_mode = True
 
 class CompanyListResponse(BaseModel):
     companies: List[CompanyResponse]
@@ -413,6 +422,7 @@ class PredictionResponse(BaseModel):
     
     class Config:
         from_attributes = True
+        orm_mode = True
 
 class PredictionListResponse(BaseModel):
     predictions: List[PredictionResponse]
@@ -451,6 +461,7 @@ class OrgAdminInfo(BaseModel):
     
     class Config:
         from_attributes = True
+        orm_mode = True
 
 class OrganizationDetailedResponse(BaseModel):
     """Enhanced organization response with admin information."""
@@ -484,6 +495,7 @@ class OrganizationDetailedResponse(BaseModel):
     
     class Config:
         from_attributes = True
+        orm_mode = True
 
 class TenantAdminInfo(BaseModel):
     """Tenant admin user information"""
@@ -504,6 +516,7 @@ class TenantAdminInfo(BaseModel):
     
     class Config:
         from_attributes = True
+        orm_mode = True
 
 class OrganizationAdminInfo(BaseModel):
     """Organization admin information"""
@@ -523,6 +536,7 @@ class OrganizationAdminInfo(BaseModel):
     
     class Config:
         from_attributes = True
+        orm_mode = True
 
 class OrganizationUserInfo(BaseModel):
     """Organization member information"""
@@ -542,6 +556,7 @@ class OrganizationUserInfo(BaseModel):
     
     class Config:
         from_attributes = True
+        orm_mode = True
 
 class DetailedOrganizationInfo(BaseModel):
     """Detailed organization information with users"""
@@ -570,6 +585,7 @@ class DetailedOrganizationInfo(BaseModel):
     
     class Config:
         from_attributes = True
+        orm_mode = True
 
 class ComprehensiveTenantResponse(BaseModel):
     """Comprehensive tenant information for super admin"""
@@ -602,6 +618,7 @@ class ComprehensiveTenantResponse(BaseModel):
     
     class Config:
         from_attributes = True
+        orm_mode = True
 
 class ComprehensiveTenantListResponse(BaseModel):
     """List response with comprehensive tenant information"""
@@ -700,6 +717,7 @@ class EnhancedOrganizationResponse(BaseModel):
     
     class Config:
         from_attributes = True
+        orm_mode = True
 
 class EnhancedOrganizationListResponse(BaseModel):
     """Enhanced organization list response"""
@@ -710,3 +728,18 @@ class EnhancedOrganizationListResponse(BaseModel):
     total_admins: int = 0
     total_members: int = 0
     total_users: int = 0
+
+class JobResultsRequest(BaseModel):
+    """Request schema for job results with detailed options"""
+    include_predictions: bool = False
+    include_companies: bool = False
+    include_errors: bool = False
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "include_predictions": True,
+                "include_companies": True,
+                "include_errors": True
+            }
+        }

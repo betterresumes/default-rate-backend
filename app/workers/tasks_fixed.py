@@ -108,7 +108,7 @@ def create_or_get_company(db, symbol: str, name: str, market_cap: float, sector:
         company = Company(
             symbol=symbol.upper(),
             name=name,
-            market_cap=safe_float(market_cap) * 1_000_000,  
+            market_cap=safe_float(market_cap),  # Market cap already in millions
             sector=sector,
             organization_id=organization_id,
             access_level=access_level,
@@ -118,7 +118,7 @@ def create_or_get_company(db, symbol: str, name: str, market_cap: float, sector:
         db.flush()  
     else:
         company.name = name
-        company.market_cap = safe_float(market_cap) * 1_000_000
+        company.market_cap = safe_float(market_cap)  # Market cap already in millions
         company.sector = sector
     
     return company

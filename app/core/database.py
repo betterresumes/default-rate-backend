@@ -113,7 +113,7 @@ class Company(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     symbol = Column(String(20), index=True, nullable=False)  
     name = Column(String(255), nullable=False)
-    market_cap = Column(Numeric(precision=20, scale=2), nullable=False)
+    market_cap = Column(Numeric(precision=20, scale=2), nullable=False)  # Market cap in raw dollars
     sector = Column(String(100), nullable=False)
     
     organization_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True, index=True)
@@ -243,9 +243,40 @@ class BulkUploadJob(Base):
     )
 
 def get_database_url():
+    """Get database URL with proper fallback and validation"""
+    import os
     database_url = os.getenv("DATABASE_URL")
+    
     if not database_url:
-        raise ValueError("DATABASE_URL environment variable is not set")
+        # Try loading from .env file if not already loaded
+        try:
+            from dotenv import load_dotenv
+            
+            # Load .env from the project root
+            env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env')
+            if os.path.exists(env_path):
+                load_dotenv(env_path)
+                database_url = os.getenv("DATABASE_URL")
+        except ImportError:
+            pass
+    
+    if not database_url:
+        raise ValueError(
+            "DATABASE_URL environment variable is not set. "
+            "Please check your .env file or set the DATABASE_URL environment variable."
+        )
+    
+    # Clean the URL by removing quotes if present
+    database_url = database_url.strip().strip('"').strip("'")
+    
+    # Validate that it looks like a database URL
+    if not database_url.startswith(('postgresql://', 'postgres://', 'sqlite:///')):
+        raise ValueError(
+            f"Invalid DATABASE_URL format: {database_url[:50]}... "
+            f"Expected a valid database URL starting with postgresql:// or sqlite:/// "
+            f"Got URL starting with: {database_url[:20]}"
+        )
+    
     return database_url
 
 _engine = None

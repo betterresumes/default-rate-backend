@@ -291,10 +291,70 @@ class CeleryBulkUploadService:
                     'processing_rate': '4.0 tasks/min'
                 })
             
-            return response
+            return job_data
             
         except Exception as e:
             logger.error(f"Error getting job status: {str(e)}")
+            return None
+        finally:
+            db.close()
+    
+    async def get_enhanced_job_status(self, job_id: str) -> Optional[Dict]:
+        """Get enhanced job status with Celery task information"""
+        SessionLocal = get_session_local()
+        db = SessionLocal()
+        
+        try:
+            job = db.query(BulkUploadJob).filter(BulkUploadJob.id == job_id).first()
+            if not job:
+                return None
+            
+            celery_status = None
+            celery_meta = None
+            celery_task_id = getattr(job, 'celery_task_id', None)
+            
+            if celery_task_id:
+                try:
+                    from app.workers.celery_app import celery_app
+                    result = celery_app.AsyncResult(celery_task_id)
+                    celery_status = result.status
+                    celery_meta = result.info if result.info else {}
+                except Exception as e:
+                    logger.warning(f"Could not get Celery task status: {str(e)}")
+            
+            progress_percentage = 0
+            if job.total_rows and job.total_rows > 0 and job.processed_rows is not None:
+                try:
+                    progress = (job.processed_rows / job.total_rows) * 100
+                    import math
+                    progress_percentage = round(progress, 2) if not (math.isnan(progress) or math.isinf(progress)) else 0
+                except (ZeroDivisionError, TypeError):
+                    progress_percentage = 0
+            
+            response = {
+                'id': str(job.id),
+                'status': job.status,
+                'job_type': job.job_type,
+                'original_filename': job.original_filename,
+                'total_rows': job.total_rows or 0,
+                'processed_rows': job.processed_rows or 0,
+                'successful_rows': job.successful_rows or 0,
+                'failed_rows': job.failed_rows or 0,
+                'error_message': job.error_message,
+                'error_details': json.loads(job.error_details) if job.error_details else None,
+                'created_at': job.created_at.isoformat() if job.created_at else None,
+                'started_at': job.started_at.isoformat() if job.started_at else None,
+                'completed_at': job.completed_at.isoformat() if job.completed_at else None,
+                'progress_percentage': progress_percentage,
+                'celery_task_id': celery_task_id,
+                'celery_status': celery_status,
+                'celery_meta': celery_meta
+            }
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error getting enhanced job status: {str(e)}")
             return None
         finally:
             db.close()

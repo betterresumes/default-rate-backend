@@ -118,7 +118,7 @@ async def create_organization(
     db.commit()
     db.refresh(new_organization)
     
-    return OrganizationResponse.model_validate(new_organization)
+    return OrganizationResponse.from_orm(new_organization)
 
 @router.get("/", response_model=EnhancedOrganizationListResponse)
 async def list_organizations(
@@ -509,7 +509,7 @@ async def update_organization(
     db.commit()
     db.refresh(organization)
     
-    return OrganizationResponse.model_validate(organization)
+    return OrganizationResponse.from_orm(organization)
 
 @router.delete("/{org_id}")
 async def delete_organization(
@@ -626,7 +626,7 @@ async def get_organization_whitelist(
     whitelist_entries = query.order_by(OrganizationMemberWhitelist.added_at.desc()).offset(skip).limit(limit).all()
     
     return WhitelistListResponse(
-        whitelist=[WhitelistResponse.model_validate(entry) for entry in whitelist_entries],
+        whitelist=[WhitelistResponse.from_orm(entry) for entry in whitelist_entries],
         total=total,
         skip=skip,
         limit=limit
@@ -681,7 +681,7 @@ async def add_to_whitelist(
     db.commit()
     db.refresh(new_entry)
     
-    return WhitelistResponse.model_validate(new_entry)
+    return WhitelistResponse.from_orm(new_entry)
 
 @router.delete("/{org_id}/whitelist/{email}")
 async def remove_from_whitelist(
@@ -759,7 +759,7 @@ async def get_organization_users(
     users = query.order_by(User.created_at.desc()).offset(skip).limit(limit).all()
     
     return UserListResponse(
-        users=[UserResponse.model_validate(user) for user in users],
+        users=[UserResponse.from_orm(user) for user in users],
         total=total,
         skip=skip,
         limit=limit

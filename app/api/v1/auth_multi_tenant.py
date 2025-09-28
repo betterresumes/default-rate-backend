@@ -153,7 +153,7 @@ async def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(new_user)
         
-        return UserResponse.model_validate(new_user)
+        return UserResponse.from_orm(new_user)
         
     except Exception as e:
         db.rollback()
