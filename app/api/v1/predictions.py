@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Backgro
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_, text
 from typing import Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
 import pandas as pd
 import io
@@ -1442,17 +1442,29 @@ async def get_job_results(
         # Get created companies during this job time window
         created_companies = []
         if request.include_companies and job.started_at:
+            # Improved companies query with wider time window
+            time_buffer = timedelta(minutes=5)  # 5-minute buffer for database timing
+            start_time = job.started_at - time_buffer
+            end_time = (job.completed_at + time_buffer) if job.completed_at else (job.started_at + timedelta(hours=2))
+            
             # Companies created around the job time
             companies_query = db.query(Company).join(
                 AnnualPrediction if job.job_type == 'annual' else QuarterlyPrediction,
                 Company.id == (AnnualPrediction.company_id if job.job_type == 'annual' else QuarterlyPrediction.company_id)
             ).filter(
-                (AnnualPrediction.created_at if job.job_type == 'annual' else QuarterlyPrediction.created_at) >= job.started_at,
-                (AnnualPrediction.created_at if job.job_type == 'annual' else QuarterlyPrediction.created_at) <= (job.completed_at or job.started_at)
+                (AnnualPrediction.created_at if job.job_type == 'annual' else QuarterlyPrediction.created_at) >= start_time,
+                (AnnualPrediction.created_at if job.job_type == 'annual' else QuarterlyPrediction.created_at) <= end_time,
+                (AnnualPrediction.created_by if job.job_type == 'annual' else QuarterlyPrediction.created_by) == job.user_id
             )
             
+            # Apply organization filtering
             if organization_id:
                 companies_query = companies_query.filter(Company.organization_id == organization_id)
+            elif job.organization_id:
+                companies_query = companies_query.filter(Company.organization_id == job.organization_id)
+            else:
+                # For personal data, filter by user created companies
+                companies_query = companies_query.filter(Company.organization_id.is_(None))
             
             companies_result = companies_query.distinct().all()
             
@@ -1486,15 +1498,52 @@ async def get_job_results(
         
         if request.include_predictions and job.started_at:
             if job.job_type == 'annual':
+                # Improved query: Use a wider time window and add user/organization filters
+                time_buffer = timedelta(minutes=5)  # 5-minute buffer for database timing
+                start_time = job.started_at - time_buffer
+                end_time = (job.completed_at + time_buffer) if job.completed_at else (job.started_at + timedelta(hours=2))
+                
                 predictions_query = db.query(AnnualPrediction).join(Company).filter(
-                    AnnualPrediction.created_at >= job.started_at,
-                    AnnualPrediction.created_at <= (job.completed_at or job.started_at)
+                    AnnualPrediction.created_at >= start_time,
+                    AnnualPrediction.created_at <= end_time,
+                    AnnualPrediction.created_by == job.user_id  # Match the user who created the job
                 )
                 
+                # Apply organization filtering
                 if organization_id:
                     predictions_query = predictions_query.filter(AnnualPrediction.organization_id == organization_id)
+                elif job.organization_id:
+                    predictions_query = predictions_query.filter(AnnualPrediction.organization_id == job.organization_id)
+                else:
+                    # For personal predictions, filter by user and null organization_id
+                    predictions_query = predictions_query.filter(AnnualPrediction.organization_id.is_(None))
                 
                 predictions = predictions_query.all()
+                
+                # Fallback: if we didn't get all expected predictions, try a broader query
+                if len(predictions) < (job.successful_rows or 0) and job.successful_rows and job.successful_rows > 0:
+                    logger.warning(f"Job {job.id}: Expected {job.successful_rows} predictions but found {len(predictions)} with timestamp filter. Trying fallback query.")
+                    
+                    # Fallback query: get the most recent predictions by this user for this job type
+                    fallback_query = db.query(AnnualPrediction).join(Company).filter(
+                        AnnualPrediction.created_by == job.user_id
+                    ).order_by(AnnualPrediction.created_at.desc())
+                    
+                    # Apply organization filtering
+                    if organization_id:
+                        fallback_query = fallback_query.filter(AnnualPrediction.organization_id == organization_id)
+                    elif job.organization_id:
+                        fallback_query = fallback_query.filter(AnnualPrediction.organization_id == job.organization_id)
+                    else:
+                        fallback_query = fallback_query.filter(AnnualPrediction.organization_id.is_(None))
+                    
+                    # Get the most recent predictions (up to the expected number)
+                    fallback_predictions = fallback_query.limit(job.successful_rows).all()
+                    
+                    # Use fallback if it has more predictions than our timestamp query
+                    if len(fallback_predictions) > len(predictions):
+                        logger.info(f"Job {job.id}: Using fallback query which found {len(fallback_predictions)} predictions")
+                        predictions = fallback_predictions
                 
                 # Process annual predictions
                 probabilities = []
@@ -1569,15 +1618,52 @@ async def get_job_results(
                     del prediction_summary["by_sector"][sector]["probabilities"]  # Remove raw data
                     
             else:  # Quarterly predictions
+                # Improved query: Use a wider time window and add user/organization filters
+                time_buffer = timedelta(minutes=5)  # 5-minute buffer for database timing
+                start_time = job.started_at - time_buffer
+                end_time = (job.completed_at + time_buffer) if job.completed_at else (job.started_at + timedelta(hours=2))
+                
                 predictions_query = db.query(QuarterlyPrediction).join(Company).filter(
-                    QuarterlyPrediction.created_at >= job.started_at,
-                    QuarterlyPrediction.created_at <= (job.completed_at or job.started_at)
+                    QuarterlyPrediction.created_at >= start_time,
+                    QuarterlyPrediction.created_at <= end_time,
+                    QuarterlyPrediction.created_by == job.user_id  # Match the user who created the job
                 )
                 
+                # Apply organization filtering
                 if organization_id:
                     predictions_query = predictions_query.filter(QuarterlyPrediction.organization_id == organization_id)
+                elif job.organization_id:
+                    predictions_query = predictions_query.filter(QuarterlyPrediction.organization_id == job.organization_id)
+                else:
+                    # For personal predictions, filter by user and null organization_id
+                    predictions_query = predictions_query.filter(QuarterlyPrediction.organization_id.is_(None))
                 
                 predictions = predictions_query.all()
+                
+                # Fallback: if we didn't get all expected predictions, try a broader query
+                if len(predictions) < (job.successful_rows or 0) and job.successful_rows and job.successful_rows > 0:
+                    logger.warning(f"Job {job.id}: Expected {job.successful_rows} predictions but found {len(predictions)} with timestamp filter. Trying fallback query.")
+                    
+                    # Fallback query: get the most recent predictions by this user for this job type
+                    fallback_query = db.query(QuarterlyPrediction).join(Company).filter(
+                        QuarterlyPrediction.created_by == job.user_id
+                    ).order_by(QuarterlyPrediction.created_at.desc())
+                    
+                    # Apply organization filtering
+                    if organization_id:
+                        fallback_query = fallback_query.filter(QuarterlyPrediction.organization_id == organization_id)
+                    elif job.organization_id:
+                        fallback_query = fallback_query.filter(QuarterlyPrediction.organization_id == job.organization_id)
+                    else:
+                        fallback_query = fallback_query.filter(QuarterlyPrediction.organization_id.is_(None))
+                    
+                    # Get the most recent predictions (up to the expected number)
+                    fallback_predictions = fallback_query.limit(job.successful_rows).all()
+                    
+                    # Use fallback if it has more predictions than our timestamp query
+                    if len(fallback_predictions) > len(predictions):
+                        logger.info(f"Job {job.id}: Using fallback query which found {len(fallback_predictions)} predictions")
+                        predictions = fallback_predictions
                 
                 # Process quarterly predictions (similar logic but with quarterly fields)
                 probabilities = []
@@ -1654,7 +1740,15 @@ async def get_job_results(
                 "companies_count": len(created_companies),
                 "predictions_count": len(created_predictions),
                 "companies": created_companies if request.include_companies else None,
-                "predictions": created_predictions if request.include_predictions else None
+                "predictions": created_predictions if request.include_predictions else None,
+                # Add debugging info to help track discrepancies
+                "debug_info": {
+                    "expected_successful_rows": job.successful_rows or 0,
+                    "actual_predictions_found": len(created_predictions),
+                    "job_started_at": job.started_at.isoformat() if job.started_at else None,
+                    "job_completed_at": job.completed_at.isoformat() if job.completed_at else None,
+                    "search_time_window": f"{job.started_at - timedelta(minutes=5)} to {(job.completed_at + timedelta(minutes=5)) if job.completed_at else (job.started_at + timedelta(hours=2))}" if job.started_at else "No time window"
+                } if request.include_predictions else None
             },
             "analysis": prediction_summary if (request.include_predictions and created_predictions) else None,
             "timestamps": {
