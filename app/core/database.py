@@ -2,17 +2,7 @@
 
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, Text, Boolean, Index
 from sqlalchemy.types import Numeric
-from sclass QuarterlyPrediction(Base):
-    __tablename__ = "quarterly_predictions"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
-    
-    organization_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True, index=True)
-    access_level = Column(String(20), default="personal", nullable=False, index=True)  # personal, organization, system
-    
-    # Link to bulk upload job for better tracking
-    bulk_upload_job_id = Column(UUID(as_uuid=True), ForeignKey("bulk_upload_jobs.id"), nullable=True, index=True)y.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.sql import func
@@ -192,6 +182,9 @@ class QuarterlyPrediction(Base):
     organization_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True, index=True)
     access_level = Column(String(20), default="personal", nullable=False, index=True)  
     
+    # Link to bulk upload job for better tracking
+    bulk_upload_job_id = Column(UUID(as_uuid=True), ForeignKey("bulk_upload_jobs.id"), nullable=True, index=True)
+    
     reporting_year = Column(String(10), nullable=False)
     reporting_quarter = Column(String(10), nullable=False)  
     
@@ -218,6 +211,7 @@ class QuarterlyPrediction(Base):
         Index('idx_quarterly_company_reporting_year_quarter', 'company_id', 'reporting_year', 'reporting_quarter'),
         Index('idx_quarterly_organization', 'organization_id'),
         Index('idx_quarterly_created_by', 'created_by'),
+        Index('idx_quarterly_bulk_job', 'bulk_upload_job_id'),
         Index('idx_quarterly_bulk_job', 'bulk_upload_job_id'),
     )
 
