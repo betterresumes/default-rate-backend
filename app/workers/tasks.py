@@ -204,17 +204,46 @@ def enhanced_task_logging(task_name: str = None):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            # Extract context for logging
-            job_id = kwargs.get('job_id', args[0] if args else 'unknown')
-            user_id = kwargs.get('user_id', 'unknown')
+            # Robust parameter extraction for bulk upload tasks
+            try:
+                # Debug log the actual parameters received
+                logger.info(f"🔍 ENHANCED LOGGING DEBUG: args={[str(arg)[:50] + '...' if len(str(arg)) > 50 else str(arg) for arg in args]}, kwargs={kwargs}")
+                
+                # For bind=True tasks, args[0] is self, so parameters start at args[1]
+                if len(args) >= 2:
+                    job_id = args[1]  # First parameter after self
+                    if not job_id or job_id in ['', 'null', 'undefined']:
+                        job_id = 'no-job-id'
+                        logger.warning(f"⚠️ Empty job_id detected in args[1]")
+                else:
+                    job_id = kwargs.get('job_id', 'no-job-id')
+                    logger.warning(f"⚠️ job_id not found in args, using kwargs: {job_id}")
+                    
+                if len(args) >= 4:
+                    user_id = args[3]  # Third parameter after self (self, job_id, data, user_id)
+                    if not user_id or user_id in ['', 'null', 'undefined']:
+                        user_id = 'no-user'
+                        logger.warning(f"⚠️ Empty user_id detected in args[3]")
+                else:
+                    user_id = kwargs.get('user_id', 'no-user')
+                    logger.warning(f"⚠️ user_id not found in args, using kwargs: {user_id}")
+                    
+            except Exception as e:
+                job_id = 'extraction-error'
+                user_id = 'extraction-error'
+                logger.error(f"Parameter extraction error in enhanced_task_logging: {e}")
             
             task_logger = TaskLogger(task_name or func.__name__)
             
-            # Log task start
-            task_logger.info(f"🚀 Task started", 
-                           job_id=job_id, 
-                           user_id=user_id,
-                           **kwargs)
+            # Log task start with safe parameter access
+            try:
+                task_logger.info(f"🚀 Task started", 
+                               job_id=job_id, 
+                               user_id=user_id,
+                               args_count=len(args),
+                               kwargs_keys=list(kwargs.keys()) if kwargs else [])
+            except Exception as log_error:
+                logger.error(f"Error in task start logging: {log_error}")
             
             try:
                 # Execute the task
@@ -269,6 +298,21 @@ def process_annual_bulk_upload_task(
     """
     task_id = self.request.id
     start_time = time.time()
+    
+    # CRITICAL: Validate task parameters immediately
+    if not job_id or job_id in ['', 'undefined', 'null']:
+        logger.error(f"❌ CRITICAL: Invalid job_id parameter: {job_id}")
+        raise ValueError(f"Invalid job_id parameter: {job_id}")
+        
+    if not user_id or user_id in ['', 'undefined', 'null']:
+        logger.error(f"❌ CRITICAL: Invalid user_id parameter: {user_id}")
+        raise ValueError(f"Invalid user_id parameter: {user_id}")
+        
+    if not data or not isinstance(data, list):
+        logger.error(f"❌ CRITICAL: Invalid data parameter: {type(data)}, length: {len(data) if hasattr(data, '__len__') else 'N/A'}")
+        raise ValueError(f"Invalid data parameter: {type(data)}")
+        
+    logger.info(f"✅ Task parameter validation passed: job_id={job_id}, user_id={user_id}, data_rows={len(data)}, org_id={organization_id}")
     
     # Initialize enhanced logger
     task_logger = TaskLogger("process_annual_bulk_upload_task")
@@ -651,6 +695,21 @@ def process_quarterly_bulk_upload_task(
     """
     task_id = self.request.id
     start_time = time.time()
+    
+    # CRITICAL: Validate task parameters immediately
+    if not job_id or job_id in ['', 'undefined', 'null']:
+        logger.error(f"❌ CRITICAL: Invalid job_id parameter: {job_id}")
+        raise ValueError(f"Invalid job_id parameter: {job_id}")
+        
+    if not user_id or user_id in ['', 'undefined', 'null']:
+        logger.error(f"❌ CRITICAL: Invalid user_id parameter: {user_id}")
+        raise ValueError(f"Invalid user_id parameter: {user_id}")
+        
+    if not data or not isinstance(data, list):
+        logger.error(f"❌ CRITICAL: Invalid data parameter: {type(data)}, length: {len(data) if hasattr(data, '__len__') else 'N/A'}")
+        raise ValueError(f"Invalid data parameter: {type(data)}")
+        
+    logger.info(f"✅ Task parameter validation passed: job_id={job_id}, user_id={user_id}, data_rows={len(data)}, org_id={organization_id}")
     
     # Initialize enhanced logger
     task_logger = TaskLogger("process_quarterly_bulk_upload_task")
@@ -1283,3 +1342,18 @@ def process_quarterly_bulk_task(file_content_b64: str, original_filename: str, o
     
     finally:
         db.close()
+
+
+# Simple health check task for debugging parameter passing
+@celery_app.task(bind=True, name="app.workers.tasks.health_check")
+def health_check_task(self, test_param: str = "default"):
+    """Simple health check task to verify parameter passing"""
+    task_id = self.request.id
+    logger.info(f"✅ Health check task received: task_id={task_id}, test_param='{test_param}'")
+    
+    return {
+        "status": "healthy",
+        "task_id": task_id,
+        "test_param": test_param,
+        "message": "Worker is healthy and receiving parameters correctly"
+    }

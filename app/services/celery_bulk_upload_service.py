@@ -82,6 +82,20 @@ class CeleryBulkUploadService:
             current_workers = scaling_status.get('scaling_recommendation', {}).get('current_workers', 4)
             queue_metrics = scaling_status.get('queue_metrics', {})
             
+            # PARAMETER VALIDATION before sending to worker
+            if not job_id or job_id in ['', 'null', 'undefined']:
+                raise ValueError(f"Invalid job_id parameter: '{job_id}'")
+                
+            if not user_id or user_id in ['', 'null', 'undefined']:
+                raise ValueError(f"Invalid user_id parameter: '{user_id}'")
+                
+            if not data or not isinstance(data, list):
+                raise ValueError(f"Invalid data parameter: type={type(data)}, length={len(data) if hasattr(data, '__len__') else 'N/A'}")
+            
+            # Log data size for debugging
+            data_size_mb = len(str(data).encode('utf-8')) / (1024 * 1024)
+            logger.info(f"📦 Sending ANNUAL task to worker: job_id='{job_id}', user_id='{user_id}', data_rows={total_rows}, data_size_mb={data_size_mb:.2f}")
+            
             # Apply task with smart routing
             task = process_annual_bulk_upload_task.apply_async(
                 args=[job_id, data, user_id, organization_id],
@@ -148,6 +162,20 @@ class CeleryBulkUploadService:
             scaling_status = await auto_scaling_service.get_scaling_status()
             current_workers = scaling_status.get('scaling_recommendation', {}).get('current_workers', 4)
             queue_metrics = scaling_status.get('queue_metrics', {})
+            
+            # PARAMETER VALIDATION before sending to worker
+            if not job_id or job_id in ['', 'null', 'undefined']:
+                raise ValueError(f"Invalid job_id parameter: '{job_id}'")
+                
+            if not user_id or user_id in ['', 'null', 'undefined']:
+                raise ValueError(f"Invalid user_id parameter: '{user_id}'")
+                
+            if not data or not isinstance(data, list):
+                raise ValueError(f"Invalid data parameter: type={type(data)}, length={len(data) if hasattr(data, '__len__') else 'N/A'}")
+            
+            # Log data size for debugging
+            data_size_mb = len(str(data).encode('utf-8')) / (1024 * 1024)
+            logger.info(f"📦 Sending task to worker: job_id='{job_id}', user_id='{user_id}', data_rows={total_rows}, data_size_mb={data_size_mb:.2f}")
             
             # Apply task with smart routing
             task = process_quarterly_bulk_upload_task.apply_async(

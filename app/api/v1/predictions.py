@@ -1803,6 +1803,474 @@ async def delete_job(
             processing_duration = None
             if job.started_at:
                 processing_duration = (datetime.utcnow() - job.started_at).total_seconds()
+                
+            if processing_duration and processing_duration < 300:  # 5 minutes
+                raise HTTPException(
+                    status_code=400, 
+                    detail="Cannot delete job while processing. Please wait for completion or try canceling first."
+                )
+        
+        db.delete(job)
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": f"Job {job_id} deleted successfully",
+            "deleted_job": {
+                "id": str(job.id),
+                "status": job.status,
+                "job_type": job.job_type,
+                "original_filename": job.original_filename
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error deleting job: {str(e)}")
+
+@router.post("/jobs/{job_id}/cancel")
+async def cancel_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(current_verified_user)
+):
+    """Cancel a running bulk upload job"""
+    try:
+        if not check_user_permissions(current_user, "user"):
+            raise HTTPException(
+                status_code=403,
+                detail="Authentication required to cancel jobs"
+            )
+
+        organization_id = get_organization_context(current_user)
+        
+        query = db.query(BulkUploadJob).filter(BulkUploadJob.id == job_id)
+        
+        if organization_id:
+            query = query.filter(BulkUploadJob.organization_id == organization_id)
+        else:
+            query = query.filter(BulkUploadJob.user_id == current_user.id)
+        
+        job = query.first()
+        
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found or access denied")
+
+        if job.status != "processing":
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Cannot cancel job with status '{job.status}'. Only processing jobs can be canceled."
+            )
+        
+        # Try to cancel the Celery task if possible
+        try:
+            from app.workers.celery_app import celery_app
+            if hasattr(job, 'celery_task_id') and job.celery_task_id:
+                celery_app.control.revoke(job.celery_task_id, terminate=True)
+        except Exception as e:
+            logger.warning(f"Could not cancel Celery task for job {job_id}: {str(e)}")
+        
+        # Update job status
+        job.status = "cancelled"
+        job.completed_at = datetime.utcnow()
+        job.error_message = "Job cancelled by user"
+        
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": f"Job {job_id} cancelled successfully",
+            "job": {
+                "id": str(job.id),
+                "status": job.status,
+                "cancelled_at": job.completed_at.isoformat()
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error cancelling job: {str(e)}")
+
+@router.get("/jobs/{job_id}/debug")
+async def debug_job_predictions(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(current_verified_user)
+):
+    """Debug endpoint to help analyze prediction count discrepancies"""
+    try:
+        if not check_user_permissions(current_user, "user"):
+            raise HTTPException(
+                status_code=403,
+                detail="Authentication required"
+            )
+
+        # Get the job
+        organization_id = get_organization_context(current_user)
+        query = db.query(BulkUploadJob).filter(BulkUploadJob.id == job_id)
+        
+        if organization_id:
+            query = query.filter(BulkUploadJob.organization_id == organization_id)
+        else:
+            query = query.filter(BulkUploadJob.user_id == current_user.id)
+        
+        job = query.first()
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        debug_info = {
+            "job_summary": {
+                "id": str(job.id),
+                "status": job.status,
+                "job_type": job.job_type,
+                "user_id": job.user_id,
+                "organization_id": str(job.organization_id) if job.organization_id else None,
+                "total_rows": job.total_rows,
+                "successful_rows": job.successful_rows,
+                "failed_rows": job.failed_rows,
+                "started_at": job.started_at.isoformat() if job.started_at else None,
+                "completed_at": job.completed_at.isoformat() if job.completed_at else None
+            },
+            "prediction_queries": {}
+        }
+
+        if job.started_at:
+            time_buffer = timedelta(minutes=5)
+            start_time = job.started_at - time_buffer
+            end_time = (job.completed_at + time_buffer) if job.completed_at else (job.started_at + timedelta(hours=2))
+
+            if job.job_type == 'annual':
+                # Query 1: With time window and user filter
+                query1 = db.query(AnnualPrediction).filter(
+                    AnnualPrediction.created_at >= start_time,
+                    AnnualPrediction.created_at <= end_time,
+                    AnnualPrediction.created_by == job.user_id
+                )
+                if organization_id:
+                    query1 = query1.filter(AnnualPrediction.organization_id == organization_id)
+                elif job.organization_id:
+                    query1 = query1.filter(AnnualPrediction.organization_id == job.organization_id)
+                else:
+                    query1 = query1.filter(AnnualPrediction.organization_id.is_(None))
+
+                count1 = query1.count()
+                
+                # Query 2: Just by user, recent first
+                query2 = db.query(AnnualPrediction).filter(
+                    AnnualPrediction.created_by == job.user_id
+                ).order_by(AnnualPrediction.created_at.desc())
+                if organization_id:
+                    query2 = query2.filter(AnnualPrediction.organization_id == organization_id)
+                elif job.organization_id:
+                    query2 = query2.filter(AnnualPrediction.organization_id == job.organization_id)
+                else:
+                    query2 = query2.filter(AnnualPrediction.organization_id.is_(None))
+
+                recent_predictions = query2.limit(20).all()
+                
+                debug_info["prediction_queries"] = {
+                    "time_window_query": {
+                        "count": count1,
+                        "start_time": start_time.isoformat(),
+                        "end_time": end_time.isoformat()
+                    },
+                    "recent_predictions": [
+                        {
+                            "id": str(pred.id),
+                            "created_at": pred.created_at.isoformat(),
+                            "company_symbol": pred.company.symbol,
+                            "reporting_year": pred.reporting_year
+                        }
+                        for pred in recent_predictions
+                    ]
+                }
+
+        return {
+            "success": True,
+            "debug_info": debug_info
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Debug error: {str(e)}")
+
+
+@router.get("/debug/worker-health")
+async def debug_worker_health(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(current_verified_user)
+):
+    """Debug endpoint to test worker health and parameter passing"""
+    try:
+        from app.workers.tasks import health_check_task
+        import time
+        
+        test_param = f"test-{int(time.time())}-user-{current_user.id}"
+        
+        # Submit health check task
+        task = health_check_task.delay(test_param)
+        
+        # Wait for result (with timeout)
+        try:
+            result = task.get(timeout=30)
+            status = "healthy"
+        except Exception as e:
+            result = {"error": str(e)}
+            status = "unhealthy"
+        
+        return {
+            "worker_status": status,
+            "task_id": task.id,
+            "test_parameter_sent": test_param,
+            "worker_response": result,
+            "message": "Worker health check completed"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Worker health check failed: {str(e)}")
+
+
+# Additional endpoints for prediction management
+@router.put("/annual/{prediction_id}")
+async def update_annual_prediction(
+    prediction_id: str,
+    request: AnnualPredictionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(current_verified_user)
+):
+    """Update an existing annual prediction"""
+    try:
+        if not check_user_permissions(current_user, "user"):
+            raise HTTPException(
+                status_code=403,
+                detail="Authentication required to update predictions"
+            )
+
+        # Get existing prediction
+        prediction = db.query(AnnualPrediction).filter(AnnualPrediction.id == prediction_id).first()
+        
+        if not prediction:
+            raise HTTPException(status_code=404, detail="Prediction not found")
+        
+        # Check ownership
+        if not is_prediction_owner(prediction, current_user):
+            raise HTTPException(
+                status_code=403,
+                detail="You can only update your own predictions"
+            )
+        
+        # Update financial data
+        prediction.long_term_debt_to_total_capital = request.long_term_debt_to_total_capital
+        prediction.total_debt_to_ebitda = request.total_debt_to_ebitda
+        prediction.net_income_margin = request.net_income_margin
+        prediction.ebit_to_interest_expense = request.ebit_to_interest_expense
+        prediction.return_on_assets = request.return_on_assets
+        
+        # Recalculate ML prediction
+        financial_data = {
+            'long_term_debt_to_total_capital': request.long_term_debt_to_total_capital,
+            'total_debt_to_ebitda': request.total_debt_to_ebitda,
+            'net_income_margin': request.net_income_margin,
+            'ebit_to_interest_expense': request.ebit_to_interest_expense,
+            'return_on_assets': request.return_on_assets
+        }
+        
+        ml_result = await ml_model.predict_annual(financial_data)
+        
+        # Update ML results
+        prediction.probability = ml_result['probability']
+        prediction.risk_level = ml_result['risk_level']
+        prediction.confidence = ml_result['confidence']
+        prediction.predicted_at = datetime.utcnow()
+        
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": "Annual prediction updated successfully",
+            "prediction": {
+                "id": str(prediction.id),
+                "probability": float(prediction.probability),
+                "risk_level": prediction.risk_level,
+                "confidence": float(prediction.confidence),
+                "updated_at": datetime.utcnow().isoformat()
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error updating prediction: {str(e)}")
+
+
+@router.delete("/annual/{prediction_id}")
+async def delete_annual_prediction(
+    prediction_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(current_verified_user)
+):
+    """Delete an annual prediction"""
+    try:
+        if not check_user_permissions(current_user, "user"):
+            raise HTTPException(
+                status_code=403,
+                detail="Authentication required to delete predictions"
+            )
+
+        prediction = db.query(AnnualPrediction).filter(AnnualPrediction.id == prediction_id).first()
+        
+        if not prediction:
+            raise HTTPException(status_code=404, detail="Prediction not found")
+        
+        if not is_prediction_owner(prediction, current_user):
+            raise HTTPException(
+                status_code=403,
+                detail="You can only delete your own predictions"
+            )
+        
+        db.delete(prediction)
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": "Annual prediction deleted successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error deleting prediction: {str(e)}")
+
+
+@router.get("/stats")
+async def get_prediction_statistics(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(current_verified_user)
+):
+    """Get comprehensive prediction statistics - Available to all authenticated users"""
+    try:
+        if not check_user_permissions(current_user, "user"):
+            raise HTTPException(
+                status_code=403,
+                detail="Authentication required to view statistics"
+            )
+
+        # System-wide statistics (accessible to all users)
+        system_annual_count = db.query(AnnualPrediction).filter(AnnualPrediction.access_level == "system").count()
+        system_quarterly_count = db.query(QuarterlyPrediction).filter(QuarterlyPrediction.access_level == "system").count()
+        
+        # Personal statistics
+        personal_annual_count = db.query(AnnualPrediction).filter(
+            AnnualPrediction.access_level == "personal",
+            AnnualPrediction.created_by == str(current_user.id)
+        ).count()
+        
+        personal_quarterly_count = db.query(QuarterlyPrediction).filter(
+            QuarterlyPrediction.access_level == "personal",
+            QuarterlyPrediction.created_by == str(current_user.id)
+        ).count()
+        
+        # Organization statistics (if applicable)
+        org_annual_count = 0
+        org_quarterly_count = 0
+        if current_user.organization_id:
+            org_annual_count = db.query(AnnualPrediction).filter(
+                AnnualPrediction.access_level == "organization",
+                AnnualPrediction.organization_id == current_user.organization_id
+            ).count()
+            
+            org_quarterly_count = db.query(QuarterlyPrediction).filter(
+                QuarterlyPrediction.access_level == "organization",
+                QuarterlyPrediction.organization_id == current_user.organization_id
+            ).count()
+
+        # Recent job statistics
+        recent_jobs_query = db.query(BulkUploadJob).filter(
+            BulkUploadJob.user_id == current_user.id
+        ).order_by(BulkUploadJob.created_at.desc()).limit(5)
+        
+        recent_jobs = recent_jobs_query.all()
+        
+        stats = {
+            "success": True,
+            "user_context": {
+                "user_id": str(current_user.id),
+                "role": current_user.role,
+                "organization_id": str(current_user.organization_id) if current_user.organization_id else None
+            },
+            "prediction_counts": {
+                "system": {
+                    "annual": system_annual_count,
+                    "quarterly": system_quarterly_count,
+                    "total": system_annual_count + system_quarterly_count
+                },
+                "personal": {
+                    "annual": personal_annual_count,
+                    "quarterly": personal_quarterly_count,
+                    "total": personal_annual_count + personal_quarterly_count
+                },
+                "organization": {
+                    "annual": org_annual_count,
+                    "quarterly": org_quarterly_count,
+                    "total": org_annual_count + org_quarterly_count
+                } if current_user.organization_id else None,
+                "accessible_total": {
+                    "annual": system_annual_count + personal_annual_count + org_annual_count,
+                    "quarterly": system_quarterly_count + personal_quarterly_count + org_quarterly_count,
+                    "total": system_annual_count + personal_annual_count + org_annual_count + system_quarterly_count + personal_quarterly_count + org_quarterly_count
+                }
+            },
+            "recent_jobs": [
+                {
+                    "id": str(job.id),
+                    "status": job.status,
+                    "job_type": job.job_type,
+                    "total_rows": job.total_rows,
+                    "successful_rows": job.successful_rows,
+                    "created_at": job.created_at.isoformat() if job.created_at else None
+                }
+                for job in recent_jobs
+            ]
+        }
+        
+        return stats
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting statistics: {str(e)}")
+    try:
+        if not check_user_permissions(current_user, "user"):
+            raise HTTPException(
+                status_code=403,
+                detail="Authentication required to delete jobs"
+            )
+
+        organization_id = get_organization_context(current_user)
+        
+        query = db.query(BulkUploadJob).filter(BulkUploadJob.id == job_id)
+        
+        if organization_id:
+            query = query.filter(BulkUploadJob.organization_id == organization_id)
+        else:
+            query = query.filter(BulkUploadJob.user_id == current_user.id)
+        
+        job = query.first()
+        
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found or access denied")
+
+        if job.status == "processing":
+            processing_duration = None
+            if job.started_at:
+                processing_duration = (datetime.utcnow() - job.started_at).total_seconds()
             
             if processing_duration and processing_duration > 30:
                 raise HTTPException(
