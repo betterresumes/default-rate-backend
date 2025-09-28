@@ -80,31 +80,47 @@ def update_job_status(
 
 def create_or_get_company(db, symbol: str, name: str, market_cap: float, sector: str, organization_id: Optional[str], user_id: str) -> Company:
     """Create or get company with organization scoping"""
+    print(f"[COMPANY-DEBUG] Starting create_or_get_company for {symbol}")
+    
     if organization_id:
+        print(f"[COMPANY-DEBUG] Using organization scope: {organization_id}")
         access_level = "organization"
+        print(f"[COMPANY-DEBUG] About to query company with organization")
         company = db.query(Company).filter(
             Company.symbol == symbol.upper(),
             Company.organization_id == organization_id,
             Company.access_level == "organization"
         ).first()
+        print(f"[COMPANY-DEBUG] Organization company query completed: {'Found' if company else 'Not found'}")
     else:
+        print(f"[COMPANY-DEBUG] No organization, checking user: {user_id}")
+        print(f"[COMPANY-DEBUG] About to query user")
         user = db.query(User).filter(User.id == user_id).first()
+        print(f"[COMPANY-DEBUG] User query completed: {'Found' if user else 'Not found'}")
+        
         if user and user.role == "super_admin":
+            print(f"[COMPANY-DEBUG] User is super_admin")
             access_level = "system"
+            print(f"[COMPANY-DEBUG] About to query system company")
             company = db.query(Company).filter(
                 Company.symbol == symbol.upper(),
                 Company.access_level == "system"
             ).first()
+            print(f"[COMPANY-DEBUG] System company query completed: {'Found' if company else 'Not found'}")
         else:
+            print(f"[COMPANY-DEBUG] User is regular user or not found")
             access_level = "personal"
+            print(f"[COMPANY-DEBUG] About to query personal company")
             company = db.query(Company).filter(
                 Company.symbol == symbol.upper(),
                 Company.organization_id.is_(None),
                 Company.access_level == "personal",
                 Company.created_by == user_id
             ).first()
+            print(f"[COMPANY-DEBUG] Personal company query completed: {'Found' if company else 'Not found'}")
     
     if not company:
+        print(f"[COMPANY-DEBUG] No existing company found, creating new one")
         company = Company(
             symbol=symbol.upper(),
             name=name,
@@ -114,13 +130,19 @@ def create_or_get_company(db, symbol: str, name: str, market_cap: float, sector:
             access_level=access_level,
             created_by=user_id
         )
+        print(f"[COMPANY-DEBUG] Company object created, about to add to DB")
         db.add(company)
+        print(f"[COMPANY-DEBUG] Company added to DB, about to flush")
         db.flush()  
+        print(f"[COMPANY-DEBUG] DB flush completed")
     else:
+        print(f"[COMPANY-DEBUG] Updating existing company")
         company.name = name
         company.market_cap = safe_float(market_cap)  # Market cap already in millions
         company.sector = sector
+        print(f"[COMPANY-DEBUG] Company update completed")
     
+    print(f"[COMPANY-DEBUG] create_or_get_company completed for {symbol}")
     return company
 
 
@@ -304,6 +326,10 @@ def process_annual_bulk_upload_task(
         # Update job status
         update_job_status(job_id, 'processing')
         
+        # Initialize caches for performance optimization
+        user_cache = {}  # Cache user lookups
+        company_cache = {}  # Cache company lookups
+        
         successful_rows = 0
         failed_rows = 0
         error_details = []
@@ -358,14 +384,16 @@ def process_annual_bulk_upload_task(
                     
                     # Process individual row with error resilience
                     try:
-                        company = create_or_get_company(
+                        company = create_or_get_company_cached(
                             db=db,
                             symbol=row['company_symbol'],
                             name=row['company_name'],
                             market_cap=safe_float(row['market_cap']),
                             sector=row['sector'],
                             organization_id=organization_id,
-                            user_id=user_id
+                            user_id=user_id,
+                            user_cache=user_cache,
+                            company_cache=company_cache
                         )
                     
                         existing_query = db.query(AnnualPrediction).filter(
@@ -628,6 +656,75 @@ def process_annual_bulk_upload_task(
         db.close()
 
 
+# PERFORMANCE OPTIMIZATION: Add caching for database lookups
+def create_or_get_company_cached(db, symbol: str, name: str, market_cap: float, sector: str, 
+                                organization_id: Optional[str], user_id: str, 
+                                user_cache: dict, company_cache: dict) -> Company:
+    """Optimized version with caching to avoid repeated DB queries"""
+    cache_key = f"{symbol}_{organization_id or 'none'}_{user_id}"
+    
+    # Check company cache first
+    if cache_key in company_cache:
+        company = company_cache[cache_key]
+        # Update company data
+        company.name = name
+        company.market_cap = safe_float(market_cap) * 1_000_000
+        company.sector = sector
+        return company
+    
+    # Check user cache
+    if user_id not in user_cache:
+        user = db.query(User).filter(User.id == user_id).first()
+        user_cache[user_id] = user
+    else:
+        user = user_cache[user_id]
+    
+    # Determine access level
+    if organization_id:
+        access_level = "organization"
+        company = db.query(Company).filter(
+            Company.symbol == symbol.upper(),
+            Company.organization_id == organization_id,
+            Company.access_level == "organization"
+        ).first()
+    else:
+        if user and user.role == "super_admin":
+            access_level = "system"
+            company = db.query(Company).filter(
+                Company.symbol == symbol.upper(),
+                Company.access_level == "system"
+            ).first()
+        else:
+            access_level = "personal"
+            company = db.query(Company).filter(
+                Company.symbol == symbol.upper(),
+                Company.organization_id.is_(None),
+                Company.access_level == "personal",
+                Company.created_by == user_id
+            ).first()
+    
+    if not company:
+        company = Company(
+            symbol=symbol.upper(),
+            name=name,
+            market_cap=safe_float(market_cap) * 1_000_000,
+            sector=sector,
+            organization_id=organization_id,
+            access_level=access_level,
+            created_by=user_id
+        )
+        db.add(company)
+        db.flush()
+    else:
+        company.name = name
+        company.market_cap = safe_float(market_cap) * 1_000_000
+        company.sector = sector
+    
+    # Cache the result
+    company_cache[cache_key] = company
+    return company
+
+
 @celery_app.task(bind=True, name="app.workers.tasks.process_quarterly_bulk_upload_task")
 @enhanced_task_logging("process_quarterly_bulk_upload_task")
 def process_quarterly_bulk_upload_task(
@@ -638,6 +735,7 @@ def process_quarterly_bulk_upload_task(
     organization_id: Optional[str]
 ) -> Dict[str, Any]:
     """
+    Enhanced Celery task to process quarterly predictions bulk upload with comprehensive logging
     Enhanced Celery task to process quarterly predictions bulk upload with comprehensive logging
     
     Args:
@@ -902,7 +1000,7 @@ def process_quarterly_bulk_upload_task(
         self.update_state(
             state="FAILURE",
             meta={
-                "status": f"Job failed: {error_msg}",
+                "status": f"Task failed: {error_msg}",
                 "job_id": job_id,
                 "error": error_msg,
                 "exc_type": type(e).__name__,
@@ -915,8 +1013,9 @@ def process_quarterly_bulk_upload_task(
             "job_id": job_id,
             "error": error_msg,
             "total_rows": len(data) if 'data' in locals() else 0,
-            "successful_rows": successful_rows,
-            "failed_rows": failed_rows
+            "successful_rows": 0,
+            "failed_rows": 0,
+            "processing_time_seconds": round(time.time() - start_time, 2)
         }
             
     finally:
@@ -957,6 +1056,7 @@ def process_bulk_excel_task(self, file_content_b64: str, original_filename: str)
     successful_predictions = 0
     failed_predictions = 0
     total_companies = 0
+    error_details = []  # Initialize error_details list
     
     try:
         file_content = base64.b64decode(file_content_b64)

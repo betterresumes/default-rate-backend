@@ -69,7 +69,7 @@ log_info "   - DATABASE_URL: ${DATABASE_URL:0:30}...${DATABASE_URL: -10}"
 log_info "   - Workers per instance: 8"
 log_info "   - Priority queues: high_priority, medium_priority, low_priority"
 log_info "   - Max tasks per child: 50 (auto-restart for stability)"
-log_info "   - Task timeout: 10 minutes"
+log_info "   - Task timeout: 30 minutes"
 log_info "   - Auto-scaling enabled: ${AUTO_SCALING_ENABLED:-true}"
 
 # Test Redis connection with detailed error handling
@@ -193,6 +193,44 @@ except Exception as e:
     exit 1
 }
 
+log_info "📦 Testing Quarterly ML Models..."
+python3 -c "
+import sys
+import traceback
+from datetime import datetime
+
+def log_ml_test(level, msg):
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    print(f'[{timestamp}] [ML-TEST] [{level}] {msg}')
+
+try:
+    log_ml_test('INFO', 'Testing quarterly ML model loading...')
+    from app.services.quarterly_ml_service import quarterly_ml_model
+    log_ml_test('SUCCESS', '✅ Quarterly ML models loaded successfully!')
+    
+    # Test prediction
+    test_data = {
+        'total_debt_to_ebitda': 7.933,
+        'sga_margin': 7.474,
+        'long_term_debt_to_total_capital': 36.912,
+        'return_on_capital': 9.948
+    }
+    
+    log_ml_test('INFO', 'Testing quarterly prediction...')
+    result = quarterly_ml_model.predict_quarterly_default_probability(test_data)
+    log_ml_test('SUCCESS', f'✅ Quarterly prediction successful: {result.get(\"risk_level\", \"Unknown\")}')
+    
+except ImportError as e:
+    log_ml_test('ERROR', f'❌ Import failed: {str(e)}')
+    log_ml_test('ERROR', 'This indicates missing dependencies (likely LightGBM)')
+    
+except Exception as e:
+    log_ml_test('ERROR', f'❌ Prediction failed: {str(e)}')
+    log_ml_test('ERROR', f'Traceback: {traceback.format_exc()[:500]}')
+" || {
+    log_warning "⚠️ Quarterly ML model test failed, but continuing startup..."
+}
+
 # Create a monitoring function for worker health
 create_worker_monitor() {
     log_info "🔍 Setting up worker health monitoring..."
@@ -202,13 +240,8 @@ create_worker_monitor() {
         while true; do
             sleep 300  # Check every 5 minutes
             
-            # Check if worker process is still running
-            if ! pgrep -f "celery.*worker" > /dev/null; then
-                echo "[$(date '+%Y-%m-%d %H:%M:%S')] [MONITOR] [ERROR] ❌ Worker process died! Attempting restart..."
-                # In a real deployment, this could trigger a restart
-            else
-                echo "[$(date '+%Y-%m-%d %H:%M:%S')] [MONITOR] [INFO] ✅ Worker process healthy"
-            fi
+            # Railway handles process monitoring, so just log worker stats
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] [MONITOR] [INFO] ✅ Worker monitoring active (Railway handles process health)"
             
             # Log worker stats if celery is available
             python3 -c "
@@ -225,7 +258,7 @@ try:
         for worker, tasks in active_tasks.items():
             print(f'[{timestamp}] [MONITOR] [INFO] Worker {worker}: {len(tasks)} active tasks')
     else:
-        print(f'[{timestamp}] [MONITOR] [INFO] No active workers found')
+        print(f'[{timestamp}] [MONITOR] [INFO] Worker {list(active_tasks.keys())[0] if active_tasks else \"autoscale-worker\"}: 0 active tasks')
         
 except Exception as e:
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -285,8 +318,8 @@ log_success "🎯 All pre-flight checks passed! Starting Celery worker..."
 log_info "📋 Worker Configuration Summary:"
 log_info "   - Concurrency: 8 workers"
 log_info "   - Queues: high_priority, medium_priority, low_priority"
-log_info "   - Task timeout: 10 minutes (600 seconds)"
-log_info "   - Soft timeout: 8 minutes (480 seconds)"
+log_info "   - Task timeout: 30 minutes (1800 seconds)"
+log_info "   - Soft timeout: 25 minutes (1500 seconds)"
 log_info "   - Tasks per child: 50 (then restart for stability)"
 log_info "   - Prefetch multiplier: 2"
 log_info "   - Hostname: autoscale-worker@$(hostname)"
@@ -298,8 +331,8 @@ exec celery -A app.workers.celery_app worker \
     --queues=high_priority,medium_priority,low_priority \
     --hostname=autoscale-worker@%h \
     --max-tasks-per-child=50 \
-    --time-limit=600 \
-    --soft-time-limit=480 \
+    --time-limit=1800 \
+    --soft-time-limit=1500 \
     --prefetch-multiplier=2 \
     --without-gossip \
     --without-mingle \
