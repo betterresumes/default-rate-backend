@@ -1439,16 +1439,15 @@ async def get_job_results(
         if job.started_at and job.completed_at:
             processing_time_seconds = (job.completed_at - job.started_at).total_seconds()
 
-        # Get created companies during this job time window
+        # Get companies that have predictions from this specific job
         created_companies = []
-        if request.include_companies and job.started_at:
-            # Companies created around the job time
+        if request.include_companies:
+            # Use direct job association to find companies with predictions from this job
             companies_query = db.query(Company).join(
                 AnnualPrediction if job.job_type == 'annual' else QuarterlyPrediction,
                 Company.id == (AnnualPrediction.company_id if job.job_type == 'annual' else QuarterlyPrediction.company_id)
             ).filter(
-                (AnnualPrediction.created_at if job.job_type == 'annual' else QuarterlyPrediction.created_at) >= job.started_at,
-                (AnnualPrediction.created_at if job.job_type == 'annual' else QuarterlyPrediction.created_at) <= (job.completed_at or job.started_at)
+                (AnnualPrediction.bulk_upload_job_id if job.job_type == 'annual' else QuarterlyPrediction.bulk_upload_job_id) == job_id
             )
             
             if organization_id:
@@ -1484,11 +1483,11 @@ async def get_job_results(
             }
         }
         
-        if request.include_predictions and job.started_at:
+        if request.include_predictions:
             if job.job_type == 'annual':
+                # Use direct job association instead of unreliable time-based filtering
                 predictions_query = db.query(AnnualPrediction).join(Company).filter(
-                    AnnualPrediction.created_at >= job.started_at,
-                    AnnualPrediction.created_at <= (job.completed_at or job.started_at)
+                    AnnualPrediction.bulk_upload_job_id == job_id
                 )
                 
                 if organization_id:
@@ -1569,9 +1568,9 @@ async def get_job_results(
                     del prediction_summary["by_sector"][sector]["probabilities"]  # Remove raw data
                     
             else:  # Quarterly predictions
+                # Use direct job association instead of unreliable time-based filtering
                 predictions_query = db.query(QuarterlyPrediction).join(Company).filter(
-                    QuarterlyPrediction.created_at >= job.started_at,
-                    QuarterlyPrediction.created_at <= (job.completed_at or job.started_at)
+                    QuarterlyPrediction.bulk_upload_job_id == job_id
                 )
                 
                 if organization_id:

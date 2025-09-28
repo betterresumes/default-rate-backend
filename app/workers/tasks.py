@@ -426,7 +426,8 @@ def process_annual_bulk_upload_task(
                             risk_level=ml_result['risk_level'],
                             confidence=safe_float(ml_result['confidence']),
                             predicted_at=datetime.utcnow(),
-                            created_by=user_id
+                            created_by=user_id,
+                            bulk_upload_job_id=job_id
                         )
                         
                         db.add(prediction)
@@ -766,7 +767,8 @@ def process_quarterly_bulk_upload_task(
                     risk_level=ml_result['risk_level'],
                     confidence=safe_float(ml_result['confidence']),
                     predicted_at=datetime.utcnow(),
-                    created_by=user_id
+                    created_by=user_id,
+                    bulk_upload_job_id=job_id
                 )
                 
                 db.add(prediction)
