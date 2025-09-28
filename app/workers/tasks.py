@@ -178,6 +178,19 @@ class TaskLogger:
         
     def error(self, message: str, **kwargs):
         self.log('ERROR', message, **kwargs)
+    
+    def log_task_start(self, message: str, **kwargs):
+        """Log task start with full context"""
+        self.info(f"🚀 Task started")
+        self.info(message, **kwargs)
+        
+    def log_progress(self, message: str, **kwargs):
+        """Log progress updates"""
+        self.info(message, **kwargs)
+        
+    def log_completion(self, message: str, **kwargs):
+        """Log task completion"""
+        self.success(message, **kwargs)
         
     def warning(self, message: str, **kwargs):
         self.log('WARN', message, **kwargs)
@@ -580,11 +593,14 @@ def process_annual_bulk_upload_task(
         logger.error(f"Bulk upload job {job_id} failed: {error_msg}")
         logger.error(f"Full traceback: {traceback.format_exc()}")
         
+        # Use empty list if error_details is not defined yet
+        error_list = locals().get('error_details', [])
+        
         update_job_status(
             job_id,
             'failed',
             error_message=error_msg,
-            error_details={'errors': error_details, 'exception': traceback.format_exc()}
+            error_details={'errors': error_list, 'exception': traceback.format_exc()}
         )
         
         self.update_state(
@@ -593,7 +609,9 @@ def process_annual_bulk_upload_task(
                 "status": f"Job failed: {error_msg}",
                 "job_id": job_id,
                 "error": error_msg,
-                "processing_time_seconds": round(processing_time, 2)
+                "processing_time_seconds": round(processing_time, 2),
+                "exc_type": type(e).__name__,
+                "exc_message": error_msg
             }
         )
         
@@ -637,6 +655,11 @@ def process_quarterly_bulk_upload_task(
     # Initialize enhanced logger
     task_logger = TaskLogger("process_quarterly_bulk_upload_task")
     
+    # Initialize error tracking
+    error_details = []
+    successful_rows = 0
+    failed_rows = 0
+    
     # Get job details for logging
     SessionLocal = get_session_local()
     db = SessionLocal()
@@ -672,9 +695,6 @@ def process_quarterly_bulk_upload_task(
         
         update_job_status(job_id, 'processing')
         
-        successful_rows = 0
-        failed_rows = 0
-        error_details = []
         self.update_state(
             state="PROGRESS",
             meta={
@@ -869,11 +889,14 @@ def process_quarterly_bulk_upload_task(
         error_msg = str(e)
         logger.error(f"Bulk upload job {job_id} failed: {error_msg}")
         
+        # Use empty list if error_details is not defined yet
+        error_list = locals().get('error_details', [])
+        
         update_job_status(
             job_id,
             'failed',
             error_message=error_msg,
-            error_details={'errors': error_details}
+            error_details={'errors': error_list}
         )
         
         self.update_state(
@@ -881,7 +904,9 @@ def process_quarterly_bulk_upload_task(
             meta={
                 "status": f"Job failed: {error_msg}",
                 "job_id": job_id,
-                "error": error_msg
+                "error": error_msg,
+                "exc_type": type(e).__name__,
+                "exc_message": error_msg
             }
         )
         
@@ -928,6 +953,7 @@ def process_bulk_excel_task(self, file_content_b64: str, original_filename: str)
     db = session_factory()
     
     results = []
+    error_details = []
     successful_predictions = 0
     failed_predictions = 0
     total_companies = 0

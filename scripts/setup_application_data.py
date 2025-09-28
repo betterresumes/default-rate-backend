@@ -54,7 +54,7 @@ except ImportError as e:
     logger.error(f"❌ Failed to import database components: {e}")
     sys.exit(1)
 
-DATA_CONFIG1 = {
+DATA_CONFIG = {
     "super_admin": {
         "email": "admin@defaultrate.com",
         "username": "super_admin",
@@ -146,7 +146,7 @@ DATA_CONFIG1 = {
     ]
 }
 
-DATA_CONFIG = {
+DATA_CONFIG1 = {
     "super_admin": {
         "email": "admin2@defaultrate.com",
         "username": "RajeshKSharma",
@@ -465,22 +465,7 @@ def print_setup_summary(super_admin, tenant, tenant_admin, organizations_data):
             print(f"         📧 Email: {member.email}")
             print(f"         👤 Username: {member.username}")
             print(f"         🔑 Password: {member_config['password']}")
-    
-    print("\n✅ NEXT STEPS:")
-    print("1. 🚀 Start your FastAPI application server")
-    print("2. 📬 Import the API collection for testing")
-    print("3. 🔐 Use the login credentials above to test authentication")
-    print("4. 🧪 Test the API endpoints with different user roles")
-    print("5. 🏭 Create companies and predictions via the API")
-    
-    print("\n📝 NOTES:")
-    print("- All passwords follow strong security practices")
-    print("- Email addresses use professional domain names")
-    print("- Users are properly assigned to their respective organizations")
-    print("- Whitelist entries created for all organization members")
-    print("- Join tokens generated for organization access")
-    print("- Companies can be created via the API endpoints")
-
+            
 def main():
     """Main function"""
     logger.info("=" * 60)

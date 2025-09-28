@@ -12,7 +12,7 @@ import json
 
 from ...core.database import get_db, User, Company, AnnualPrediction, QuarterlyPrediction, Organization, BulkUploadJob
 from ...schemas.schemas import (
-    AnnualPredictionRequest, QuarterlyPredictionRequest
+    AnnualPredictionRequest, QuarterlyPredictionRequest, JobResultsRequest
 )
 from ...services.ml_service import ml_model
 from ...services.quarterly_ml_service import quarterly_ml_model
@@ -1406,12 +1406,10 @@ async def get_job_details(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting job details: {str(e)}")
 
-@router.get("/jobs/{job_id}/results")
+@router.post("/jobs/{job_id}/results")
 async def get_job_results(
     job_id: str,
-    include_predictions: bool = False,
-    include_companies: bool = False,
-    include_errors: bool = False,
+    request: JobResultsRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
@@ -1443,7 +1441,7 @@ async def get_job_results(
 
         # Get created companies during this job time window
         created_companies = []
-        if include_companies and job.started_at:
+        if request.include_companies and job.started_at:
             # Companies created around the job time
             companies_query = db.query(Company).join(
                 AnnualPrediction if job.job_type == 'annual' else QuarterlyPrediction,
@@ -1486,7 +1484,7 @@ async def get_job_results(
             }
         }
         
-        if include_predictions and job.started_at:
+        if request.include_predictions and job.started_at:
             if job.job_type == 'annual':
                 predictions_query = db.query(AnnualPrediction).join(Company).filter(
                     AnnualPrediction.created_at >= job.started_at,
@@ -1630,7 +1628,7 @@ async def get_job_results(
 
         # Parse error details
         error_details_parsed = None
-        if job.error_details and include_errors:
+        if job.error_details and request.include_errors:
             try:
                 import json
                 error_details_parsed = json.loads(job.error_details)
@@ -1655,10 +1653,10 @@ async def get_job_results(
             "created_data": {
                 "companies_count": len(created_companies),
                 "predictions_count": len(created_predictions),
-                "companies": created_companies if include_companies else None,
-                "predictions": created_predictions if include_predictions else None
+                "companies": created_companies if request.include_companies else None,
+                "predictions": created_predictions if request.include_predictions else None
             },
-            "analysis": prediction_summary if (include_predictions and created_predictions) else None,
+            "analysis": prediction_summary if (request.include_predictions and created_predictions) else None,
             "timestamps": {
                 "created_at": job.created_at.isoformat() if job.created_at else None,
                 "started_at": job.started_at.isoformat() if job.started_at else None,
@@ -1666,10 +1664,10 @@ async def get_job_results(
             },
             "errors": {
                 "has_errors": bool(job.error_message or job.error_details),
-                "error_message": job.error_message if include_errors else None,
-                "error_details": error_details_parsed if include_errors else None,
+                "error_message": job.error_message if request.include_errors else None,
+                "error_details": error_details_parsed if request.include_errors else None,
                 "error_count": len(error_details_parsed.get('errors', [])) if error_details_parsed and isinstance(error_details_parsed, dict) else 0
-            } if include_errors or bool(job.error_message or job.error_details) else None
+            } if request.include_errors or bool(job.error_message or job.error_details) else None
         }
 
         return results
