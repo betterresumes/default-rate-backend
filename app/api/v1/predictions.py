@@ -3045,6 +3045,47 @@ async def get_dashboard_post(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Dashboard error: {str(e)}")
 
+@router.get("/dashboard")
+async def get_dashboard(
+    include_platform_stats: bool = False,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(current_verified_user)
+):
+    """GET version of dashboard API with user and system last updated times"""
+    try:
+        if current_user.role == "super_admin":
+            scope = "system"
+        elif current_user.role in ["tenant_admin", "org_admin", "org_member"] and current_user.organization_id:
+            scope = "organization"
+        else:
+            scope = "personal"
+
+        if scope == "system":
+            user_dashboard = await get_system_dashboard(db, current_user)
+        elif scope == "organization":
+            user_dashboard = await get_organization_dashboard(db, current_user)
+        else:
+            user_dashboard = await get_personal_dashboard(db, current_user)
+
+        response = {
+            "user_dashboard": user_dashboard,
+            "scope": scope,
+            "timestamp": datetime.now().isoformat(),
+            "description": {
+                "user_last_updated": "Most recent prediction update by the current user (includes both annual and quarterly)",
+                "system_last_updated": "Most recent prediction update in the system/organization (includes both annual and quarterly)"
+            }
+        }
+
+        if include_platform_stats:
+            platform_stats = await get_platform_statistics(db)
+            response["platform_statistics"] = platform_stats
+
+        return response
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Dashboard error: {str(e)}")
+
 async def get_system_dashboard(db: Session, current_user: User):
     """Get system-wide dashboard data"""
     total_companies = db.query(Company).count()
@@ -3063,6 +3104,34 @@ async def get_system_dashboard(db: Session, current_user: User):
     
     sectors_covered = db.query(Company.sector).distinct().count()
     
+    # Get most recent update time for user's data (both annual and quarterly)
+    user_annual_last = db.query(func.max(AnnualPrediction.updated_at)).filter(
+        AnnualPrediction.created_by == str(current_user.id)
+    ).scalar()
+    user_quarterly_last = db.query(func.max(QuarterlyPrediction.updated_at)).filter(
+        QuarterlyPrediction.created_by == str(current_user.id)
+    ).scalar()
+    
+    user_last_updated = None
+    if user_annual_last and user_quarterly_last:
+        user_last_updated = max(user_annual_last, user_quarterly_last)
+    elif user_annual_last:
+        user_last_updated = user_annual_last
+    elif user_quarterly_last:
+        user_last_updated = user_quarterly_last
+    
+    # Get most recent update time for system-wide data (both annual and quarterly)
+    system_annual_last = db.query(func.max(AnnualPrediction.updated_at)).scalar()
+    system_quarterly_last = db.query(func.max(QuarterlyPrediction.updated_at)).scalar()
+    
+    system_last_updated = None
+    if system_annual_last and system_quarterly_last:
+        system_last_updated = max(system_annual_last, system_quarterly_last)
+    elif system_annual_last:
+        system_last_updated = system_annual_last
+    elif system_quarterly_last:
+        system_last_updated = system_quarterly_last
+    
     return {
         "scope": "system",
         "user_name": current_user.full_name,
@@ -3074,7 +3143,11 @@ async def get_system_dashboard(db: Session, current_user: User):
         "average_default_rate": round(average_default_rate, 4),
         "high_risk_companies": high_risk_companies,
         "sectors_covered": sectors_covered,
-        "data_scope": "All system data"
+        "data_scope": "All system data",
+        "last_updated_times": {
+            "user_last_updated": user_last_updated.isoformat() if user_last_updated else None,
+            "system_last_updated": system_last_updated.isoformat() if system_last_updated else None
+        }
     }
 
 async def get_organization_dashboard(db: Session, current_user: User):
@@ -3091,6 +3164,12 @@ async def get_organization_dashboard(db: Session, current_user: User):
         annual_predictions = db.query(AnnualPrediction).all()
         quarterly_predictions = db.query(QuarterlyPrediction).all()
         data_scope_note = " (Cross-organization access - all orgs)"
+        
+        # For tenant admin - get org-wide times and user-specific times
+        org_annual_filter = None
+        org_quarterly_filter = None
+        user_annual_filter = AnnualPrediction.created_by == str(current_user.id)
+        user_quarterly_filter = QuarterlyPrediction.created_by == str(current_user.id)
     else:
         companies = db.query(Company).filter(
             Company.organization_id == current_user.organization_id
@@ -3104,6 +3183,18 @@ async def get_organization_dashboard(db: Session, current_user: User):
             QuarterlyPrediction.organization_id == current_user.organization_id
         ).all()
         data_scope_note = " (Organization data only)"
+        
+        # For org members - get org-specific times and user-specific times
+        org_annual_filter = AnnualPrediction.organization_id == current_user.organization_id
+        org_quarterly_filter = QuarterlyPrediction.organization_id == current_user.organization_id
+        user_annual_filter = and_(
+            AnnualPrediction.organization_id == current_user.organization_id,
+            AnnualPrediction.created_by == str(current_user.id)
+        )
+        user_quarterly_filter = and_(
+            QuarterlyPrediction.organization_id == current_user.organization_id,
+            QuarterlyPrediction.created_by == str(current_user.id)
+        )
     
     total_companies = len(companies)
     annual_predictions_count = len(annual_predictions)
@@ -3122,6 +3213,45 @@ async def get_organization_dashboard(db: Session, current_user: User):
     sectors = set([c.sector for c in companies if c.sector])
     sectors_covered = len(sectors)
     
+    # Get most recent update time for user's data
+    user_annual_last = db.query(func.max(AnnualPrediction.updated_at)).filter(
+        user_annual_filter
+    ).scalar()
+    user_quarterly_last = db.query(func.max(QuarterlyPrediction.updated_at)).filter(
+        user_quarterly_filter
+    ).scalar()
+    
+    user_last_updated = None
+    if user_annual_last and user_quarterly_last:
+        user_last_updated = max(user_annual_last, user_quarterly_last)
+    elif user_annual_last:
+        user_last_updated = user_annual_last
+    elif user_quarterly_last:
+        user_last_updated = user_quarterly_last
+    
+    # Get most recent update time for organization/system-wide data
+    if org_annual_filter is not None:
+        org_annual_last = db.query(func.max(AnnualPrediction.updated_at)).filter(
+            org_annual_filter
+        ).scalar()
+    else:
+        org_annual_last = db.query(func.max(AnnualPrediction.updated_at)).scalar()
+        
+    if org_quarterly_filter is not None:
+        org_quarterly_last = db.query(func.max(QuarterlyPrediction.updated_at)).filter(
+            org_quarterly_filter
+        ).scalar()
+    else:
+        org_quarterly_last = db.query(func.max(QuarterlyPrediction.updated_at)).scalar()
+    
+    system_last_updated = None
+    if org_annual_last and org_quarterly_last:
+        system_last_updated = max(org_annual_last, org_quarterly_last)
+    elif org_annual_last:
+        system_last_updated = org_annual_last
+    elif org_quarterly_last:
+        system_last_updated = org_quarterly_last
+    
     return {
         "scope": "organization",
         "user_name": current_user.full_name,
@@ -3133,7 +3263,11 @@ async def get_organization_dashboard(db: Session, current_user: User):
         "average_default_rate": round(average_default_rate, 4),
         "high_risk_companies": high_risk_companies,
         "sectors_covered": sectors_covered,
-        "data_scope": f"Data within {organization.name}" + data_scope_note
+        "data_scope": f"Data within {organization.name}" + data_scope_note,
+        "last_updated_times": {
+            "user_last_updated": user_last_updated.isoformat() if user_last_updated else None,
+            "system_last_updated": system_last_updated.isoformat() if system_last_updated else None
+        }
     }
 
 async def get_personal_dashboard(db: Session, current_user: User):
@@ -3160,6 +3294,34 @@ async def get_personal_dashboard(db: Session, current_user: User):
     sectors = set([c.sector for c in companies if c.sector])
     sectors_covered = len(sectors)
     
+    # Get most recent update time for user's personal data
+    user_annual_last = db.query(func.max(AnnualPrediction.updated_at)).filter(
+        AnnualPrediction.created_by == str(current_user.id)
+    ).scalar()
+    user_quarterly_last = db.query(func.max(QuarterlyPrediction.updated_at)).filter(
+        QuarterlyPrediction.created_by == str(current_user.id)
+    ).scalar()
+    
+    user_last_updated = None
+    if user_annual_last and user_quarterly_last:
+        user_last_updated = max(user_annual_last, user_quarterly_last)
+    elif user_annual_last:
+        user_last_updated = user_annual_last
+    elif user_quarterly_last:
+        user_last_updated = user_quarterly_last
+    
+    # Get most recent update time for all system data (for comparison)
+    system_annual_last = db.query(func.max(AnnualPrediction.updated_at)).scalar()
+    system_quarterly_last = db.query(func.max(QuarterlyPrediction.updated_at)).scalar()
+    
+    system_last_updated = None
+    if system_annual_last and system_quarterly_last:
+        system_last_updated = max(system_annual_last, system_quarterly_last)
+    elif system_annual_last:
+        system_last_updated = system_annual_last
+    elif system_quarterly_last:
+        system_last_updated = system_quarterly_last
+    
     return {
         "scope": "personal",
         "user_name": current_user.full_name,
@@ -3171,7 +3333,11 @@ async def get_personal_dashboard(db: Session, current_user: User):
         "average_default_rate": round(average_default_rate, 4),
         "high_risk_companies": high_risk_companies,
         "sectors_covered": sectors_covered,
-        "data_scope": "Personal data only"
+        "data_scope": "Personal data only",
+        "last_updated_times": {
+            "user_last_updated": user_last_updated.isoformat() if user_last_updated else None,
+            "system_last_updated": system_last_updated.isoformat() if system_last_updated else None
+        }
     }
 
 async def get_platform_statistics(db: Session):
@@ -3203,6 +3369,22 @@ async def get_platform_statistics(db: Session):
     # Sectors covered in system-level companies only
     platform_sectors = db.query(Company.sector).filter(Company.access_level == "system").distinct().count()
     
+    # Get most recent update time for system-level data only
+    system_annual_last = db.query(func.max(AnnualPrediction.updated_at)).filter(
+        AnnualPrediction.access_level == "system"
+    ).scalar()
+    system_quarterly_last = db.query(func.max(QuarterlyPrediction.updated_at)).filter(
+        QuarterlyPrediction.access_level == "system"
+    ).scalar()
+    
+    system_last_updated = None
+    if system_annual_last and system_quarterly_last:
+        system_last_updated = max(system_annual_last, system_quarterly_last)
+    elif system_annual_last:
+        system_last_updated = system_annual_last
+    elif system_quarterly_last:
+        system_last_updated = system_quarterly_last
+    
     return {
         "total_companies": total_companies,
         "total_predictions": total_predictions,
@@ -3210,7 +3392,10 @@ async def get_platform_statistics(db: Session):
         "quarterly_predictions": total_quarterly,
         "average_default_rate": round(platform_avg_default, 4),
         "high_risk_companies": platform_high_risk,
-        "sectors_covered": platform_sectors
+        "sectors_covered": platform_sectors,
+        "last_updated_times": {
+            "system_last_updated": system_last_updated.isoformat() if system_last_updated else None
+        }
     }
 
 @router.get("/debug/prediction/{prediction_id}")
