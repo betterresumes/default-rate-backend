@@ -10,6 +10,11 @@ startCommand = "./deployment/scripts/start-worker.sh"
 restartPolicyType = "always"
 healthcheckTimeout = 300
 
+# Alternative start commands (all now use the same simplified script):
+# startCommand = "./deployment/scripts/start-worker.sh"  # Simplified working script (recommended)
+# startCommand = "./start-railway-worker.sh"             # Duplicate of above (same content)
+# startCommand = "python3 -m celery -A app.workers.celery_app worker --loglevel=info --concurrency=8 --queues=high_priority,medium_priority,low_priority"  # Direct command
+
 # AUTO-SCALING CONFIGURATION
 [environments.production]
 variables = { 

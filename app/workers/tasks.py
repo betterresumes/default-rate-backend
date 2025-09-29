@@ -33,6 +33,30 @@ def safe_float(value):
         return 0
 
 
+def normalize_quarter(quarter_value):
+    """Convert quarter value to standard string format (Q1, Q2, Q3, Q4)"""
+    if isinstance(quarter_value, str):
+        # If already in correct format, return as is
+        if quarter_value.upper() in ['Q1', 'Q2', 'Q3', 'Q4']:
+            return quarter_value.upper()
+        # Handle other string formats
+        quarter_value = quarter_value.strip().upper()
+        if quarter_value in ['1', '2', '3', '4']:
+            return f'Q{quarter_value}'
+    
+    # Handle integer values
+    try:
+        quarter_int = int(quarter_value)
+        if quarter_int in [1, 2, 3, 4]:
+            return f'Q{quarter_int}'
+    except (ValueError, TypeError):
+        pass
+    
+    # Default fallback
+    logger.warning(f"Invalid quarter value: {quarter_value}, defaulting to Q1")
+    return 'Q1'
+
+
 def update_job_status(
     job_id: str,
     status: str,
@@ -776,10 +800,13 @@ def process_quarterly_bulk_upload_task(
                     user_id=user_id
                 )
                 
+                # Normalize quarter format
+                normalized_quarter = normalize_quarter(row['reporting_quarter'])
+                
                 existing_prediction = db.query(QuarterlyPrediction).filter(
                     QuarterlyPrediction.company_id == company.id,
                     QuarterlyPrediction.reporting_year == str(row['reporting_year']),
-                    QuarterlyPrediction.reporting_quarter == row['reporting_quarter']
+                    QuarterlyPrediction.reporting_quarter == normalized_quarter
                 ).first()
                 
                 if existing_prediction:
@@ -853,7 +880,7 @@ def process_quarterly_bulk_upload_task(
                     organization_id=organization_id,
                     access_level=access_level,
                     reporting_year=str(row['reporting_year']),
-                    reporting_quarter=row['reporting_quarter'],
+                    reporting_quarter=normalized_quarter,
                     total_debt_to_ebitda=safe_float(row['total_debt_to_ebitda']),
                     sga_margin=safe_float(row['sga_margin']),
                     long_term_debt_to_total_capital=safe_float(row['long_term_debt_to_total_capital']),

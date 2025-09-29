@@ -135,7 +135,6 @@ class CeleryBulkUploadService:
         except Exception as e:
             logger.error(f"Error starting annual bulk upload task: {str(e)}")
             raise
-            raise
     
     async def process_quarterly_bulk_upload(
         self,
@@ -175,7 +174,7 @@ class CeleryBulkUploadService:
             
             # Log data size for debugging
             data_size_mb = len(str(data).encode('utf-8')) / (1024 * 1024)
-            logger.info(f"📦 Sending task to worker: job_id='{job_id}', user_id='{user_id}', data_rows={total_rows}, data_size_mb={data_size_mb:.2f}")
+            logger.info(f"📦 Sending QUARTERLY task to worker: job_id='{job_id}', user_id='{user_id}', data_rows={total_rows}, data_size_mb={data_size_mb:.2f}")
             
             # Apply task with smart routing
             task = process_quarterly_bulk_upload_task.apply_async(
