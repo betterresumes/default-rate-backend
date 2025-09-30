@@ -110,6 +110,8 @@ def filter_predictions_for_user(predictions, user: User):
             filtered_predictions.append(pred)
     
     return filtered_predictions
+
+def safe_float(value):
     """Convert value to float, handling None and NaN values"""
     if value is None:
         return None
