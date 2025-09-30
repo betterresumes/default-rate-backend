@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Auto-Scaling Service for Railway + Celery
+Auto-Scaling Service for AWS ECS + Celery
 Monitors queue lengths and provides scaling recommendations
 """
 
@@ -40,7 +40,7 @@ class ScalingRecommendation:
 class AutoScalingService:
     """
     Auto-scaling service that monitors Redis queues and provides
-    scaling recommendations for Railway deployment
+    scaling recommendations for AWS ECS deployment
     """
     
     def __init__(self):
@@ -49,8 +49,8 @@ class AutoScalingService:
         
         # SCALING CONFIGURATION
         self.scaling_config = {
-            "min_workers": int(os.getenv("MIN_WORKERS", "2")),  # Always keep 2 instances minimum
-            "max_workers": int(os.getenv("MAX_WORKERS", "12")), # Maximum 12 instances (96 workers total)
+            "min_workers": int(os.getenv("MIN_WORKERS", "2")),  # Always keep 2 ECS tasks minimum
+            "max_workers": int(os.getenv("MAX_WORKERS", "12")), # Maximum 12 ECS tasks (96 workers total)
             "scale_up_threshold": int(os.getenv("SCALE_UP_THRESHOLD", "25")),  # Scale up when >25 pending tasks
             "scale_down_threshold": int(os.getenv("SCALE_DOWN_THRESHOLD", "5")), # Scale down when <5 pending tasks
             "scale_up_cooldown": int(os.getenv("SCALE_UP_COOLDOWN", "120")),   # Wait 2 minutes before scaling up again
@@ -145,7 +145,7 @@ class AutoScalingService:
             if queue_name == "high_priority":
                 high_priority_pending = pending
         
-        # Get current worker estimate (this would integrate with Railway API in production)
+        # Get current worker estimate (this would integrate with AWS ECS API in production)
         current_workers = self._estimate_current_workers()
         
         # SCALING DECISION LOGIC
@@ -160,15 +160,15 @@ class AutoScalingService:
         return recommendation
     
     def _estimate_current_workers(self) -> int:
-        """Estimate current number of Railway service instances"""
-        # In production, this would call Railway API to get actual instance count
+        """Estimate current number of ECS service tasks"""
+        # In production, this would call AWS ECS API to get actual task count
         # For now, we'll estimate based on active tasks and default configuration
         try:
             inspect = self.celery_app.control.inspect()
             stats = inspect.stats() or {}
             active_workers = len(stats)
             
-            # Each Railway instance has 8 workers, so estimate instances
+            # Each ECS task has 8 workers, so estimate tasks
             estimated_instances = max(1, (active_workers + 7) // 8)
             return estimated_instances
             
@@ -274,7 +274,7 @@ class AutoScalingService:
         )
     
     async def execute_scaling_recommendation(self, recommendation: ScalingRecommendation) -> bool:
-        """Execute scaling recommendation (integrates with Railway API)"""
+        """Execute scaling recommendation (integrates with AWS ECS API)"""
         try:
             if recommendation.action == "maintain":
                 logger.info(f"✅ Scaling: {recommendation.reason}")
@@ -293,16 +293,17 @@ class AutoScalingService:
             self.last_scale_time = datetime.now()
             
             if recommendation.action in ["scale_up", "scale_down"]:
-                # In production, this would call Railway API to scale service
+                # In production, this would call AWS ECS API to scale service
                 # For now, we'll log the action and return success
                 
-                # RAILWAY API CALL (PSEUDOCODE):
-                # railway_api.scale_service(
-                #     service_id="worker-service",
-                #     replicas=recommendation.target_workers
+                # AWS ECS API CALL (PSEUDOCODE):
+                # ecs_client.update_service(
+                #     cluster="default-rate-cluster",
+                #     service="worker-service",
+                #     desired_count=recommendation.target_workers
                 # )
                 
-                logger.info(f"🎯 Would execute: Railway scale to {recommendation.target_workers} instances")
+                logger.info(f"🎯 Would execute: ECS scale to {recommendation.target_workers} tasks")
                 
                 # Store scaling event for monitoring
                 await self._record_scaling_event(recommendation)

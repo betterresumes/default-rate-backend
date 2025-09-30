@@ -1,23 +1,23 @@
 #!/bin/bash
 
-# Simplified Railway Celery Worker Startup Script
+# Simplified AWS ECS Celery Worker Startup Script
 # Based on the working local command: python3 -m celery -A app.workers.celery_app worker --loglevel=info --concurrency=4 --queues=high_priority,medium_priority,low_priority
 
 set -e
 
-echo "🚀 Starting Railway Celery Worker..."
+echo "🚀 Starting AWS ECS Celery Worker..."
 echo "📅 Started at: $(date)"
-echo "🏗️ Environment: ${RAILWAY_ENVIRONMENT:-production}"
-echo "🔧 Service: ${RAILWAY_SERVICE_NAME:-workers}"
+echo "🏗️ Environment: ${ENVIRONMENT:-production}"
+echo "🔧 Service: ${ECS_SERVICE_NAME:-workers}"
 
-# Environment variables with Railway-optimized defaults
+# Environment variables with AWS ECS-optimized defaults
 export WORKER_CONCURRENCY="${CELERY_WORKER_CONCURRENCY:-8}"
 export MAX_TASKS_PER_CHILD="${CELERY_MAX_TASKS_PER_CHILD:-50}"
 export TASK_TIMEOUT="${CELERY_TASK_TIMEOUT:-600}"
 export SOFT_TIMEOUT="${CELERY_SOFT_TIMEOUT:-480}"
 
-# Railway-specific optimizations
-export CELERY_OPTIMIZATION="railway"
+# AWS ECS-specific optimizations
+export CELERY_OPTIMIZATION="aws_ecs"
 export PYTHONPATH="${PYTHONPATH}:."
 
 echo "📊 Worker Configuration:"

@@ -1,15 +1,11 @@
 #!/bin/bash
 
-# Docker build script with authentication and retry logic
-# Usage: ./build-docker.sh [tag_name]
-
 set -e  # Exit on any error
 
 TAG_NAME=${1:-"default-rate-backend"}
 
 echo "🔧 Building Docker image: $TAG_NAME"
 
-# Function to build with retry logic
 build_with_retry() {
     local dockerfile=$1
     local max_retries=3
@@ -36,24 +32,20 @@ build_with_retry() {
     return 1
 }
 
-# Try to pull base image first (optional - helps with caching)
 echo "🔄 Attempting to pull base image..."
 docker pull python:3.11-slim || echo "⚠️  Could not pull base image, proceeding with build..."
 
-# Check if Docker is logged in
 if ! docker info &>/dev/null; then
     echo "❌ Docker daemon is not running or accessible"
     exit 1
 fi
 
-# Build with primary Dockerfile
 echo "🏗️  Building with primary Dockerfile..."
 if build_with_retry "Dockerfile"; then
     echo "🎉 Build completed successfully with primary Dockerfile!"
     exit 0
 fi
 
-# If primary fails, try alternative Dockerfile
 if [ -f "Dockerfile.alt" ]; then
     echo "🔄 Primary build failed, trying alternative Dockerfile..."
     if build_with_retry "Dockerfile.alt"; then

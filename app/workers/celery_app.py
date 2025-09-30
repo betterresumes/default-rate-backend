@@ -48,9 +48,9 @@ if not REDIS_URL:
     else:
         REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
 
-if REDIS_URL and 'railway.internal' in REDIS_URL:
-    os.environ['CELERY_BROKER_URL'] = REDIS_URL
-    os.environ['CELERY_RESULT_BACKEND'] = REDIS_URL
+# Set Celery URLs (AWS compatible)
+os.environ['CELERY_BROKER_URL'] = REDIS_URL
+os.environ['CELERY_RESULT_BACKEND'] = REDIS_URL
 
 print(f"🔄 Celery using Redis URL: {REDIS_URL[:20]}...{REDIS_URL[-10:] if len(REDIS_URL) > 30 else REDIS_URL}")
 
