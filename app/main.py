@@ -35,8 +35,9 @@ async def lifespan(app: FastAPI):
     """Initialize database tables and services on startup"""
     environment = os.getenv("ENVIRONMENT", "development")
     
-    logger.info("🚀 Starting Default Rate Backend API...")
+    logger.info("🚀 Starting AccuNode API...")
     logger.info(f"🌍 Environment: {environment}")
+    logger.info(f"🏗️ AWS Region: {os.getenv('AWS_REGION', 'local')}")
     logger.info(f"📅 Started at: {datetime.utcnow().isoformat()}")
     
     logger.info("📊 Initializing database connection...")

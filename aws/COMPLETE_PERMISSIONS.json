@@ -1,0 +1,152 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "AccuNodeEC2Permissions",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:*"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "AccuNodeRDSPermissions", 
+            "Effect": "Allow",
+            "Action": [
+                "rds:*"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "AccuNodeElastiCachePermissions",
+            "Effect": "Allow",
+            "Action": [
+                "elasticache:*"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "AccuNodeVPCPermissions",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:*Vpc*",
+                "ec2:*Subnet*", 
+                "ec2:*Gateway*",
+                "ec2:*Route*",
+                "ec2:*SecurityGroup*",
+                "ec2:*NetworkAcl*"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "AccuNodeIAMPermissions",
+            "Effect": "Allow", 
+            "Action": [
+                "iam:CreateRole",
+                "iam:DeleteRole",
+                "iam:AttachRolePolicy",
+                "iam:DetachRolePolicy",
+                "iam:CreateInstanceProfile",
+                "iam:DeleteInstanceProfile",
+                "iam:AddRoleToInstanceProfile",
+                "iam:RemoveRoleFromInstanceProfile",
+                "iam:PassRole",
+                "iam:GetRole",
+                "iam:ListRoles",
+                "iam:ListInstanceProfiles"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "AccuNodeUserSelfManagement",
+            "Effect": "Allow",
+            "Action": [
+                "iam:GetUser",
+                "iam:CreateAccessKey",
+                "iam:DeleteAccessKey",
+                "iam:ListAccessKeys",
+                "iam:UpdateAccessKey",
+                "iam:GetAccessKeyLastUsed",
+                "iam:ChangePassword",
+                "iam:UpdateLoginProfile",
+                "iam:GetLoginProfile"
+            ],
+            "Resource": [
+                "arn:aws:iam::461962182774:user/pranit",
+                "arn:aws:iam::*:user/${aws:username}"
+            ]
+        },
+        {
+            "Sid": "AccuNodeParameterStorePermissions",
+            "Effect": "Allow",
+            "Action": [
+                "ssm:GetParameter",
+                "ssm:GetParameters", 
+                "ssm:PutParameter",
+                "ssm:DeleteParameter",
+                "ssm:GetParametersByPath",
+                "ssm:DescribeParameters"
+            ],
+            "Resource": "arn:aws:ssm:*:*:parameter/accunode/*"
+        },
+        {
+            "Sid": "AccuNodeCloudWatchPermissions",
+            "Effect": "Allow",
+            "Action": [
+                "cloudwatch:*",
+                "logs:*"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "AccuNodeLoadBalancerPermissions",
+            "Effect": "Allow",
+            "Action": [
+                "elasticloadbalancing:*"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "AccuNodeAutoScalingPermissions",
+            "Effect": "Allow",
+            "Action": [
+                "autoscaling:*"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "AccuNodeECRPermissions",
+            "Effect": "Allow",
+            "Action": [
+                "ecr:*"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "AccuNodeCertificatePermissions",
+            "Effect": "Allow",
+            "Action": [
+                "acm:*"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "AccuNodeRoute53Permissions",
+            "Effect": "Allow",
+            "Action": [
+                "route53:*"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "AccuNodeCostPermissions",
+            "Effect": "Allow",
+            "Action": [
+                "ce:GetCostAndUsage",
+                "ce:GetUsageReport", 
+                "budgets:ViewBudget"
+            ],
+            "Resource": "*"
+        }
+    ]
+}

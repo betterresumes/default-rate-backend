@@ -6,13 +6,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    DEBIAN_FRONTEND=noninteractive
+    DEBIAN_FRONTEND=noninteractive \
+    AWS_DEFAULT_REGION=us-east-1
 
+# Install system dependencies including AWS CLI requirements
 RUN apt-get update && apt-get install -y \
     gcc \
     curl \
     wget \
     build-essential \
+    ca-certificates \
+    gnupg \
+    lsb-release \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
