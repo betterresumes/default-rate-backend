@@ -181,7 +181,11 @@ def create_app() -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[os.getenv("CORS_ORIGIN", "http://localhost:3000")],
+        allow_origins=[
+            os.getenv("CORS_ORIGIN", "http://localhost:3000"),
+            "https://accunode.ai",
+            "https://client-eta-sepia.vercel.app"
+        ],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -244,7 +248,8 @@ def create_app() -> FastAPI:
         
         try:
             from app.core.database import get_session_local
-            db = get_session_local()
+            SessionLocal = get_session_local()
+            db = SessionLocal()
             result = db.execute(text("SELECT 1"))
             health_status["services"]["database"] = {
                 "status": "healthy",
@@ -255,7 +260,7 @@ def create_app() -> FastAPI:
             health_status["services"]["database"] = {
                 "status": "error",
                 "connected": False,
-                "error": "Connection failed"
+                "error": str(e)
             }
             overall_healthy = False
         

@@ -1,0 +1,10 @@
+{
+  "ImageId": "ami-0c02fb55956c7d316",
+  "InstanceType": "t3.small",
+  "KeyName": "AccuNode-Production-Key",
+  "SecurityGroupIds": ["sg-0d5f3a62b7c8e4321"],
+  "IamInstanceProfile": {
+    "Name": "AccuNode-EC2-Role"
+  },
+  "UserData": ""
+}
