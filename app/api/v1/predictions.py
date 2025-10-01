@@ -1124,6 +1124,60 @@ async def bulk_upload_quarterly_async(
         if total_rows > 10000:
             raise HTTPException(status_code=400, detail="File contains too many rows (max 10,000)")
         
+        # ADDITIONAL DATA VALIDATION - Fail early if data is invalid
+        try:
+            # Test the first row to ensure all required fields are accessible
+            if len(data) > 0:
+                test_row = data[0]
+                
+                # Validate required fields exist and are not None/empty
+                required_test_fields = {
+                    'company_symbol': test_row.get('company_symbol'),
+                    'company_name': test_row.get('company_name'),
+                    'reporting_year': test_row.get('reporting_year'),
+                    'reporting_quarter': test_row.get('reporting_quarter'),
+                    'total_debt_to_ebitda': test_row.get('total_debt_to_ebitda'),
+                    'sga_margin': test_row.get('sga_margin'),
+                    'long_term_debt_to_total_capital': test_row.get('long_term_debt_to_total_capital'),
+                    'return_on_capital': test_row.get('return_on_capital')
+                }
+                
+                # Check for missing or invalid field values
+                invalid_fields = []
+                for field_name, field_value in required_test_fields.items():
+                    if field_value is None or str(field_value).strip() == '' or str(field_value).lower() in ['nan', 'null']:
+                        invalid_fields.append(field_name)
+                
+                if invalid_fields:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"First row has invalid/missing values for required fields: {', '.join(invalid_fields)}. Please check your data format."
+                    )
+                
+                # Test data iteration (same as worker task does)
+                test_iteration_count = 0
+                for i, row in enumerate(data[:3]):  # Test first 3 rows
+                    if not row or not isinstance(row, dict):
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Row {i+1} is invalid or not a dictionary. Data format error."
+                        )
+                    test_iteration_count += 1
+                
+                if test_iteration_count == 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Data iteration test failed - unable to access rows. File format may be corrupted."
+                    )
+                    
+        except HTTPException:
+            raise  # Re-raise HTTP exceptions
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Data validation failed: {str(e)}. Please check your file format and ensure all required columns have valid data."
+            )
+        
         from app.services.celery_bulk_upload_service import celery_bulk_upload_service
         
         job_id = await celery_bulk_upload_service.create_bulk_upload_job(
@@ -1193,6 +1247,413 @@ async def get_bulk_upload_job_status(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting job status: {str(e)}")
+
+
+@router.get("/jobs/{job_id}/results")
+async def get_bulk_upload_job_results(
+    job_id: str,
+    page: int = 1,
+    page_size: int = 100,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(current_verified_user)
+):
+    """Get the complete results of a bulk upload job including all processed companies and predictions"""
+    try:
+        if not check_user_permissions(current_user, "user"):
+            raise HTTPException(
+                status_code=403,
+                detail="Authentication required to view job results"
+            )
+
+        # Validate pagination
+        if page < 1:
+            page = 1
+        if page_size < 1 or page_size > 1000:
+            page_size = 100
+
+        # First get the job info
+        job = db.query(BulkUploadJob).filter(BulkUploadJob.id == job_id).first()
+        
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        # Check if job is accessible by user (same organization or super admin)
+        if not check_user_permissions(current_user, "super_admin"):
+            if job.organization_id != current_user.organization_id:
+                raise HTTPException(
+                    status_code=403, 
+                    detail="Access denied to this job"
+                )
+        
+        # Build job summary
+        job_summary = {
+            "job_id": str(job.id),
+            "status": job.status,
+            "job_type": job.job_type,
+            "original_filename": job.original_filename,
+            "total_rows": job.total_rows or 0,
+            "processed_rows": job.processed_rows or 0,
+            "successful_rows": job.successful_rows or 0,
+            "failed_rows": job.failed_rows or 0,
+            "processing_time_seconds": None,
+            "rows_per_second": None,
+            "success_rate_percent": 0.0,
+            "created_at": job.created_at.isoformat() if job.created_at else None,
+            "started_at": job.started_at.isoformat() if job.started_at else None,
+            "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+            "error_message": job.error_message,
+            "error_details": json.loads(job.error_details) if job.error_details else []
+        }
+        
+        # Calculate processing metrics if available
+        if job.started_at and job.completed_at:
+            processing_time = (job.completed_at - job.started_at).total_seconds()
+            job_summary["processing_time_seconds"] = round(processing_time, 2)
+            
+            if processing_time > 0 and job.successful_rows:
+                job_summary["rows_per_second"] = round(job.successful_rows / processing_time, 2)
+        
+        if job.total_rows and job.total_rows > 0:
+            job_summary["success_rate_percent"] = round((job.successful_rows or 0) / job.total_rows * 100, 2)
+        
+        # Now get the actual prediction results based on job type
+        prediction_results = []
+        
+        if job.job_type == "annual_prediction":
+            # Get annual predictions created during this job timeframe
+            query = db.query(AnnualPrediction, Company).join(
+                Company, AnnualPrediction.company_id == Company.id
+            )
+            
+            # Filter by organization if not super admin
+            if not check_user_permissions(current_user, "super_admin"):
+                if current_user.organization_id:
+                    query = query.filter(Company.organization_id == current_user.organization_id)
+                else:
+                    query = query.filter(Company.organization_id.is_(None))
+            
+            # Filter by time range around job processing with tighter window
+            if job.started_at:
+                # Use a tighter time window - predictions should be created during job execution
+                from datetime import timedelta
+                # Use minimal buffer - job execution should be tightly controlled
+                start_time = job.started_at - timedelta(seconds=30)  # 30 second buffer before
+                end_time = job.completed_at if job.completed_at else (job.started_at + timedelta(hours=2))
+                end_time = end_time + timedelta(seconds=30)  # 30 second buffer after
+                
+                query = query.filter(
+                    AnnualPrediction.created_at >= start_time,
+                    AnnualPrediction.created_at <= end_time
+                )
+                
+                # Additional filtering by created_by user if available
+                if job.user_id:
+                    query = query.filter(AnnualPrediction.created_by == str(job.user_id))
+            
+            predictions = query.order_by(AnnualPrediction.created_at.desc()).limit(
+                min(job.total_rows or 1000, 2000)  # Limit to job size or 2000 max
+            ).all()
+            
+            # Apply pagination  
+            total_predictions = len(predictions)
+            start_idx = (page - 1) * page_size
+            end_idx = start_idx + page_size
+            paginated_predictions = predictions[start_idx:end_idx]
+            
+            for prediction, company in paginated_predictions:
+                prediction_results.append({
+                    "company_symbol": company.symbol,
+                    "company_name": company.company_name,
+                    "company_sector": company.sector,
+                    "prediction_id": str(prediction.id),
+                    "default_probability": round(prediction.default_probability, 4),
+                    "risk_category": prediction.risk_category,
+                    "financial_metrics": {
+                        "total_debt_to_ebitda": prediction.total_debt_to_ebitda,
+                        "sga_margin": prediction.sga_margin,
+                        "long_term_debt_to_total_capital": prediction.long_term_debt_to_total_capital,
+                        "return_on_capital": prediction.return_on_capital,
+                        "current_ratio": prediction.current_ratio,
+                        "debt_to_equity": prediction.debt_to_equity,
+                        "net_income_margin": prediction.net_income_margin,
+                        "asset_turnover": prediction.asset_turnover,
+                        "ebitda_margin": prediction.ebitda_margin,
+                        "revenue_growth": prediction.revenue_growth,
+                        "total_debt_to_total_assets": prediction.total_debt_to_total_assets,
+                        "operating_margin": prediction.operating_margin,
+                        "roa": prediction.roa,
+                        "roe": prediction.roe
+                    },
+                    "created_at": prediction.created_at.isoformat() if prediction.created_at else None
+                })
+            
+        elif job.job_type == "quarterly_prediction":
+            # Get quarterly predictions created during this job timeframe
+            query = db.query(QuarterlyPrediction, Company).join(
+                Company, QuarterlyPrediction.company_id == Company.id
+            )
+            
+            # Filter by organization if not super admin
+            if not check_user_permissions(current_user, "super_admin"):
+                if current_user.organization_id:
+                    query = query.filter(Company.organization_id == current_user.organization_id)
+                else:
+                    query = query.filter(Company.organization_id.is_(None))
+            
+            # Filter by time range around job processing with tighter window
+            if job.started_at:
+                # Use a tighter time window - predictions should be created during job execution
+                from datetime import timedelta
+                # Use minimal buffer - job execution should be tightly controlled
+                start_time = job.started_at - timedelta(seconds=30)  # 30 second buffer before
+                end_time = job.completed_at if job.completed_at else (job.started_at + timedelta(hours=2))
+                end_time = end_time + timedelta(seconds=30)  # 30 second buffer after
+                
+                query = query.filter(
+                    QuarterlyPrediction.created_at >= start_time,
+                    QuarterlyPrediction.created_at <= end_time
+                )
+                
+                # Additional filtering by created_by user if available  
+                if job.user_id:
+                    query = query.filter(QuarterlyPrediction.created_by == str(job.user_id))
+            
+            predictions = query.order_by(QuarterlyPrediction.created_at.desc()).limit(
+                min(job.total_rows or 1000, 2000)  # Limit to job size or 2000 max
+            ).all()
+            
+            # Apply pagination
+            total_predictions = len(predictions) 
+            start_idx = (page - 1) * page_size
+            end_idx = start_idx + page_size
+            paginated_predictions = predictions[start_idx:end_idx]
+            
+            for prediction, company in paginated_predictions:
+                prediction_results.append({
+                    "company_symbol": company.symbol,
+                    "company_name": company.company_name,
+                    "company_sector": company.sector,
+                    "prediction_id": str(prediction.id),
+                    "default_probability": round(prediction.default_probability, 4),
+                    "risk_category": prediction.risk_category,
+                    "financial_metrics": {
+                        "total_debt_to_ebitda": prediction.total_debt_to_ebitda,
+                        "sga_margin": prediction.sga_margin,
+                        "long_term_debt_to_total_capital": prediction.long_term_debt_to_total_capital,
+                        "return_on_capital": prediction.return_on_capital
+                    },
+                    "quarter": prediction.quarter,
+                    "year": prediction.year,
+                    "created_at": prediction.created_at.isoformat() if prediction.created_at else None
+                })
+        
+        return {
+            "success": True,
+            "job_summary": job_summary,
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total_results": total_predictions if 'total_predictions' in locals() else 0,
+                "total_pages": math.ceil((total_predictions if 'total_predictions' in locals() else 0) / page_size),
+                "has_next": page * page_size < (total_predictions if 'total_predictions' in locals() else 0),
+                "has_previous": page > 1
+            },
+            "results": prediction_results
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting job results: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error getting job results: {str(e)}")
+
+
+@router.get("/jobs/{job_id}/download")
+async def download_bulk_upload_job_results(
+    job_id: str,
+    format: str = "csv",  # csv or excel
+    db: Session = Depends(get_db),
+    current_user: User = Depends(current_verified_user)
+):
+    """Download the complete results of a bulk upload job as CSV or Excel file"""
+    from fastapi.responses import StreamingResponse
+    
+    try:
+        if not check_user_permissions(current_user, "user"):
+            raise HTTPException(
+                status_code=403,
+                detail="Authentication required to download job results"
+            )
+
+        if format not in ["csv", "excel"]:
+            raise HTTPException(status_code=400, detail="Format must be 'csv' or 'excel'")
+
+        # Get job results using the existing endpoint logic (without pagination)
+        job = db.query(BulkUploadJob).filter(BulkUploadJob.id == job_id).first()
+        
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        # Check access permissions
+        if not check_user_permissions(current_user, "super_admin"):
+            if job.organization_id != current_user.organization_id:
+                raise HTTPException(
+                    status_code=403, 
+                    detail="Access denied to this job"
+                )
+
+        # Get all predictions (no pagination for download)
+        prediction_data = []
+        
+        if job.job_type == "annual_prediction":
+            query = db.query(AnnualPrediction, Company).join(
+                Company, AnnualPrediction.company_id == Company.id
+            )
+            
+            # Apply same filters as results endpoint
+            if not check_user_permissions(current_user, "super_admin"):
+                if current_user.organization_id:
+                    query = query.filter(Company.organization_id == current_user.organization_id)
+                else:
+                    query = query.filter(Company.organization_id.is_(None))
+            
+            if job.started_at:
+                from datetime import timedelta
+                start_time = job.started_at - timedelta(seconds=30)
+                end_time = job.completed_at if job.completed_at else (job.started_at + timedelta(hours=2))
+                end_time = end_time + timedelta(seconds=30)
+                
+                query = query.filter(
+                    AnnualPrediction.created_at >= start_time,
+                    AnnualPrediction.created_at <= end_time
+                )
+                
+                if job.user_id:
+                    query = query.filter(AnnualPrediction.created_by == str(job.user_id))
+            
+            predictions = query.order_by(AnnualPrediction.created_at.desc()).limit(
+                min(job.total_rows or 1000, 5000)  # Higher limit for download
+            ).all()
+            
+            for prediction, company in predictions:
+                prediction_data.append({
+                    "Company Symbol": company.symbol,
+                    "Company Name": company.company_name,
+                    "Sector": company.sector,
+                    "Default Probability": round(prediction.default_probability, 4),
+                    "Risk Category": prediction.risk_category,
+                    "Reporting Year": prediction.reporting_year,
+                    "Total Debt to EBITDA": prediction.total_debt_to_ebitda,
+                    "SGA Margin": prediction.sga_margin,
+                    "Long Term Debt to Total Capital": prediction.long_term_debt_to_total_capital,
+                    "Return on Capital": prediction.return_on_capital,
+                    "Current Ratio": prediction.current_ratio,
+                    "Debt to Equity": prediction.debt_to_equity,
+                    "Net Income Margin": prediction.net_income_margin,
+                    "Asset Turnover": prediction.asset_turnover,
+                    "EBITDA Margin": prediction.ebitda_margin,
+                    "Revenue Growth": prediction.revenue_growth,
+                    "Total Debt to Total Assets": prediction.total_debt_to_total_assets,
+                    "Operating Margin": prediction.operating_margin,
+                    "ROA": prediction.roa,
+                    "ROE": prediction.roe,
+                    "Created At": prediction.created_at.isoformat() if prediction.created_at else None
+                })
+                
+        elif job.job_type == "quarterly_prediction":
+            query = db.query(QuarterlyPrediction, Company).join(
+                Company, QuarterlyPrediction.company_id == Company.id
+            )
+            
+            # Apply same filters as results endpoint
+            if not check_user_permissions(current_user, "super_admin"):
+                if current_user.organization_id:
+                    query = query.filter(Company.organization_id == current_user.organization_id)
+                else:
+                    query = query.filter(Company.organization_id.is_(None))
+            
+            if job.started_at:
+                from datetime import timedelta
+                start_time = job.started_at - timedelta(seconds=30)
+                end_time = job.completed_at if job.completed_at else (job.started_at + timedelta(hours=2))
+                end_time = end_time + timedelta(seconds=30)
+                
+                query = query.filter(
+                    QuarterlyPrediction.created_at >= start_time,
+                    QuarterlyPrediction.created_at <= end_time
+                )
+                
+                if job.user_id:
+                    query = query.filter(QuarterlyPrediction.created_by == str(job.user_id))
+            
+            predictions = query.order_by(QuarterlyPrediction.created_at.desc()).limit(
+                min(job.total_rows or 1000, 5000)  # Higher limit for download
+            ).all()
+            
+            for prediction, company in predictions:
+                prediction_data.append({
+                    "Company Symbol": company.symbol,
+                    "Company Name": company.company_name,
+                    "Sector": company.sector,
+                    "Quarter": prediction.quarter,
+                    "Year": prediction.year,
+                    "Default Probability": round(prediction.default_probability, 4),
+                    "Risk Category": prediction.risk_category,
+                    "Total Debt to EBITDA": prediction.total_debt_to_ebitda,
+                    "SGA Margin": prediction.sga_margin,
+                    "Long Term Debt to Total Capital": prediction.long_term_debt_to_total_capital,
+                    "Return on Capital": prediction.return_on_capital,
+                    "Created At": prediction.created_at.isoformat() if prediction.created_at else None
+                })
+
+        if not prediction_data:
+            raise HTTPException(status_code=404, detail="No prediction results found for this job")
+
+        # Create DataFrame and export
+        import pandas as pd
+        df = pd.DataFrame(prediction_data)
+        
+        # Generate filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"predictions_{job.job_type}_{job.original_filename}_{timestamp}"
+        
+        if format == "csv":
+            # Create CSV
+            output = io.StringIO()
+            df.to_csv(output, index=False)
+            output.seek(0)
+            
+            def iter_csv():
+                yield output.getvalue().encode('utf-8')
+            
+            return StreamingResponse(
+                iter_csv(),
+                media_type="text/csv",
+                headers={"Content-Disposition": f"attachment; filename={filename}.csv"}
+            )
+            
+        elif format == "excel":
+            # Create Excel
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name='Predictions')
+            output.seek(0)
+            
+            def iter_excel():
+                yield output.getvalue()
+            
+            return StreamingResponse(
+                iter_excel(),
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={"Content-Disposition": f"attachment; filename={filename}.xlsx"}
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading job results: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error downloading job results: {str(e)}")
+
 
 @router.get("/jobs")
 async def list_bulk_upload_jobs(
@@ -1503,6 +1964,7 @@ async def get_job_results(
                 start_time = job.started_at - time_buffer
                 end_time = (job.completed_at + time_buffer) if job.completed_at else (job.started_at + timedelta(hours=2))
                 
+                # Filter by created_by user_id for more accurate linking to job
                 predictions_query = db.query(AnnualPrediction).join(Company).filter(
                     AnnualPrediction.created_at >= start_time,
                     AnnualPrediction.created_at <= end_time,
