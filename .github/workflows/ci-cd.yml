@@ -51,7 +51,7 @@ jobs:
         run: safety check -r requirements.prod.txt --json --output safety-report.json || true
 
       - name: Upload security reports
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: security-reports
           path: |
@@ -65,6 +65,7 @@ jobs:
     outputs:
       image-tag: ${{ steps.meta.outputs.tags }}
       image-digest: ${{ steps.build.outputs.digest }}
+      image-uri: ${{ steps.image-output.outputs.image-uri }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -126,12 +127,20 @@ jobs:
 
       - name: Test Docker image
         run: |
+          echo "🔍 Testing Docker image: prod-${{ github.sha }}"
           docker run --rm \
             -e DATABASE_URL="sqlite:///test.db" \
             -e REDIS_URL="redis://localhost:6379" \
             --name test-container \
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }} \
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:prod-${{ github.sha }} \
             python -c "from app.main import app; print('✅ Container works correctly')" || echo "⚠️ Container test skipped - requires external dependencies"
+
+      - name: Output image details
+        id: image-output
+        run: |
+          IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:prod-${{ github.sha }}"
+          echo "Built image: $IMAGE_URI"
+          echo "image-uri=$IMAGE_URI" >> $GITHUB_OUTPUT
 
   # Production Deployment
   deploy-production:
@@ -157,6 +166,25 @@ jobs:
         with:
           mask-password: 'true'
 
+      - name: Verify image exists in ECR
+        run: |
+          echo "🔍 Verifying image exists in ECR..."
+          NEW_IMAGE="${{ needs.build-and-test.outputs.image-uri }}"
+          echo "Using built image: $NEW_IMAGE"
+          
+          # Extract tag from image URI for verification
+          IMAGE_TAG=$(echo "$NEW_IMAGE" | cut -d':' -f2)
+          
+          # Check if image exists
+          if aws ecr describe-images --repository-name ${{ env.ECR_REPOSITORY }} --image-ids imageTag=$IMAGE_TAG >/dev/null 2>&1; then
+            echo "✅ Image found: $NEW_IMAGE"
+          else
+            echo "❌ Image not found: $NEW_IMAGE"
+            echo "📋 Available images:"
+            aws ecr describe-images --repository-name ${{ env.ECR_REPOSITORY }} --query 'imageDetails[*].imageTags[*]' --output table
+            exit 1
+          fi
+
       - name: Create new task definitions with latest image
         run: |
           # Get current task definitions
@@ -166,49 +194,88 @@ jobs:
           aws ecs describe-task-definition --task-definition ${{ env.WORKER_TASK_DEFINITION }} \
             --query 'taskDefinition' > worker-task-def.json
 
-          # Update image URI in task definitions
-          NEW_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}"
+          # Update image URI in task definitions  
+          NEW_IMAGE="${{ needs.build-and-test.outputs.image-uri }}"
+          echo "🚀 Using image: $NEW_IMAGE"
           
           # Update API task definition
+          echo "📝 Updating API task definition with image: $NEW_IMAGE"
           jq --arg IMAGE "$NEW_IMAGE" '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)' \
             api-task-def.json > api-task-def-new.json
           
+          if [ ! -s api-task-def-new.json ]; then
+            echo "❌ Failed to update API task definition"
+            exit 1
+          fi
+          
           # Update Worker task definition  
+          echo "📝 Updating Worker task definition with image: $NEW_IMAGE"
           jq --arg IMAGE "$NEW_IMAGE" '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)' \
             worker-task-def.json > worker-task-def-new.json
+          
+          if [ ! -s worker-task-def-new.json ]; then
+            echo "❌ Failed to update Worker task definition"
+            exit 1
+          fi
 
       - name: Register new task definitions
         id: register-tasks
         run: |
           # Register API task definition
+          echo "📝 Registering API task definition..."
           API_TD_ARN=$(aws ecs register-task-definition \
             --cli-input-json file://api-task-def-new.json \
             --query 'taskDefinition.taskDefinitionArn' --output text)
+          
+          if [ -z "$API_TD_ARN" ] || [ "$API_TD_ARN" = "None" ]; then
+            echo "❌ Failed to register API task definition"
+            exit 1
+          fi
+          
+          echo "✅ API task definition registered: $API_TD_ARN"
           echo "api-task-arn=$API_TD_ARN" >> $GITHUB_OUTPUT
           
           # Register Worker task definition
+          echo "📝 Registering Worker task definition..."
           WORKER_TD_ARN=$(aws ecs register-task-definition \
             --cli-input-json file://worker-task-def-new.json \
             --query 'taskDefinition.taskDefinitionArn' --output text)
+          
+          if [ -z "$WORKER_TD_ARN" ] || [ "$WORKER_TD_ARN" = "None" ]; then
+            echo "❌ Failed to register Worker task definition"
+            exit 1
+          fi
+          
+          echo "✅ Worker task definition registered: $WORKER_TD_ARN"
           echo "worker-task-arn=$WORKER_TD_ARN" >> $GITHUB_OUTPUT
 
       - name: Deploy API Service
         run: |
-          echo "🚀 Deploying API service with new image..."
-          aws ecs update-service \
+          echo "🚀 Deploying API service with task definition: ${{ steps.register-tasks.outputs.api-task-arn }}"
+          if aws ecs update-service \
             --cluster ${{ env.ECS_CLUSTER }} \
             --service ${{ env.ECS_API_SERVICE }} \
             --task-definition ${{ steps.register-tasks.outputs.api-task-arn }} \
-            --force-new-deployment
+            --force-new-deployment >/dev/null; then
+            echo "✅ API service deployment initiated successfully"
+          else
+            echo "❌ Failed to deploy API service"
+            exit 1
+          fi
 
       - name: Deploy Worker Service  
         run: |
-          echo "🚀 Deploying Worker service with new image..."
-          aws ecs update-service \
+          echo "🚀 Deploying Worker service with task definition: ${{ steps.register-tasks.outputs.worker-task-arn }}"
+          if aws ecs update-service \
             --cluster ${{ env.ECS_CLUSTER }} \
             --service ${{ env.ECS_WORKER_SERVICE }} \
             --task-definition ${{ steps.register-tasks.outputs.worker-task-arn }} \
-            --force-new-deployment
+            --force-new-deployment >/dev/null; then
+            echo "✅ Worker service deployment initiated successfully"
+          else
+            echo "❌ Failed to deploy Worker service"
+            exit 1
+          fi
 
       - name: Wait for deployment completion
         run: |
@@ -313,10 +380,17 @@ jobs:
         run: |
           echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Image:** ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image:** ${{ needs.build-and-test.outputs.image-uri }}" >> $GITHUB_STEP_SUMMARY
           echo "- **API Task Definition:** ${{ steps.register-tasks.outputs.api-task-arn }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Worker Task Definition:** ${{ steps.register-tasks.outputs.worker-task-arn }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Status:** ✅ Deployment Successful" >> $GITHUB_STEP_SUMMARY
+
+      - name: Cleanup temporary files
+        if: always()
+        run: |
+          echo "🧹 Cleaning up temporary files..."
+          rm -f api-task-def.json worker-task-def.json api-task-def-new.json worker-task-def-new.json
+          echo "✅ Cleanup completed"
 
   # Rollback capability
   rollback:
