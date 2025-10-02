@@ -4,7 +4,8 @@
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "1024",
   "memory": "2048",
-  "executionRoleArn": "arn:aws:iam::461962182774:role/ecsTaskExecutionRole",
+  "executionRoleArn": "arn:aws:iam::461962182774:role/AccuNodeECSTaskRole",
+  "taskRoleArn": "arn:aws:iam::461962182774:role/AccuNodeECSTaskRole",
   "containerDefinitions": [
     {
       "name": "accunode-worker",
@@ -19,15 +20,21 @@
           "awslogs-stream-prefix": "ecs"
         }
       },
-      "environment": [
+      "secrets": [
         {
           "name": "DATABASE_URL",
-          "value": "postgresql://accunode_admin:AccuNode2024!SecurePass@accunode-postgres.ck36iu4u6mpj.us-east-1.rds.amazonaws.com:5432/postgres"
+          "valueFrom": "/accunode/database/url"
         },
         {
-          "name": "REDIS_URL",
-          "value": "redis://accunode-redis.d9avr2.0001.use1.cache.amazonaws.com:6379"
+          "name": "REDIS_URL", 
+          "valueFrom": "/accunode/redis-url"
         },
+        {
+          "name": "SECRET_KEY",
+          "valueFrom": "/accunode/secret-key"
+        }
+      ],
+      "environment": [
         {
           "name": "REDIS_HOST",
           "value": "accunode-redis.d9avr2.0001.use1.cache.amazonaws.com"
@@ -52,10 +59,7 @@
           "name": "DEBUG",
           "value": "false"
         },
-        {
-          "name": "SECRET_KEY",
-          "value": "accunode-production-secret-key-2024-secure"
-        },
+
         {
           "name": "ACCESS_TOKEN_EXPIRE_MINUTES",
           "value": "60"

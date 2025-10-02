@@ -242,21 +242,32 @@ jobs:
 
       - name: Create new task definitions with latest image
         run: |
-          # Get current task definitions
-          aws ecs describe-task-definition --task-definition ${{ env.API_TASK_DEFINITION }} \
-            --query 'taskDefinition' > api-task-def.json
+          # Use local task definition files (which contain Parameter Store secrets)
+          # instead of fetching from ECS to preserve secrets configuration
+          echo "📝 Using local task definition files with Parameter Store secrets..."
           
-          aws ecs describe-task-definition --task-definition ${{ env.WORKER_TASK_DEFINITION }} \
-            --query 'taskDefinition' > worker-task-def.json
-
+          if [ ! -f "deployment/ecs-api-task-definition.json" ]; then
+            echo "❌ API task definition file not found: deployment/ecs-api-task-definition.json"
+            exit 1
+          fi
+          
+          if [ ! -f "deployment/ecs-worker-task-definition.json" ]; then
+            echo "❌ Worker task definition file not found: deployment/ecs-worker-task-definition.json"
+            exit 1
+          fi
+          
+          # Copy local files to working directory
+          cp deployment/ecs-api-task-definition.json api-task-def.json
+          cp deployment/ecs-worker-task-definition.json worker-task-def.json
+          
           # Use the verified image from previous step
           NEW_IMAGE="${{ env.NEW_IMAGE }}"
           echo "🚀 Using verified image: $NEW_IMAGE"
           
-          # Update API task definition with image and optional environment variables
+          # Update API task definition with new image and deployment metadata
           echo "📝 Updating API task definition with image: $NEW_IMAGE"
           
-          # Add deployment timestamp as environment variable (example)
+          # Add deployment timestamp as environment variable
           DEPLOY_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           
           jq --arg IMAGE "$NEW_IMAGE" \
@@ -266,8 +277,7 @@ jobs:
               .containerDefinitions[0].environment += [
                 {"name": "DEPLOY_TIME", "value": $DEPLOY_TIME},
                 {"name": "COMMIT_SHA", "value": $COMMIT_SHA}
-              ] |
-              del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)' \
+              ]' \
             api-task-def.json > api-task-def-new.json
           
           if [ ! -s api-task-def-new.json ]; then
@@ -275,7 +285,7 @@ jobs:
             exit 1
           fi
           
-          # Update Worker task definition with image and optional environment variables
+          # Update Worker task definition with new image and deployment metadata
           echo "📝 Updating Worker task definition with image: $NEW_IMAGE"
           
           jq --arg IMAGE "$NEW_IMAGE" \
@@ -285,14 +295,15 @@ jobs:
               .containerDefinitions[0].environment += [
                 {"name": "DEPLOY_TIME", "value": $DEPLOY_TIME},
                 {"name": "COMMIT_SHA", "value": $COMMIT_SHA}
-              ] |
-              del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)' \
+              ]' \
             worker-task-def.json > worker-task-def-new.json
           
           if [ ! -s worker-task-def-new.json ]; then
             echo "❌ Failed to update Worker task definition"
             exit 1
           fi
+          
+          echo "✅ Task definitions updated successfully with Parameter Store secrets preserved"
 
       - name: Register new task definitions
         id: register-tasks
