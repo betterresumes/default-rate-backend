@@ -102,10 +102,9 @@ jobs:
         with:
           images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
           tags: |
-            type=ref,event=branch
-            type=ref,event=pr
             type=sha,prefix=prod-,format=short
             type=raw,value=latest
+            type=raw,value=prod
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -139,6 +138,27 @@ jobs:
           echo "Built image: $IMAGE_URI"
           echo "image-uri=$IMAGE_URI" >> $GITHUB_OUTPUT
           echo "🎯 Image will be available for deployment: $IMAGE_URI"
+
+      - name: Clean up untagged images
+        run: |
+          echo "🧹 Cleaning up untagged images in ECR..."
+          
+          # List and delete untagged images (those with "-" or null tags)
+          UNTAGGED_IMAGES=$(aws ecr list-images \
+            --repository-name ${{ env.ECR_REPOSITORY }} \
+            --filter tagStatus=UNTAGGED \
+            --query 'imageIds[*]' \
+            --output json)
+          
+          if [ "$UNTAGGED_IMAGES" != "[]" ]; then
+            echo "🗑️ Found untagged images, deleting..."
+            aws ecr batch-delete-image \
+              --repository-name ${{ env.ECR_REPOSITORY }} \
+              --image-ids "$UNTAGGED_IMAGES" || echo "No untagged images to delete"
+            echo "✅ Cleaned up untagged images"
+          else
+            echo "✅ No untagged images found"
+          fi
 
   # Production Deployment
   deploy-production:
