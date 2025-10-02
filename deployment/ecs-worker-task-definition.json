@@ -8,7 +8,7 @@
   "containerDefinitions": [
     {
       "name": "accunode-worker",
-      "image": "461962182774.dkr.ecr.us-east-1.amazonaws.com/accunode:quarterly-safe",
+      "image": "461962182774.dkr.ecr.us-east-1.amazonaws.com/accunode:latest",
       "command": ["celery", "-A", "app.workers.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--queues=high_priority,medium_priority,low_priority"],
       "essential": true,
       "logConfiguration": {

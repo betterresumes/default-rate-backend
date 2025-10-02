@@ -76,4 +76,7 @@ certificates/
 **/ssl/**
 **/certificates/**
 
+.github/workflows/*.tmp
+deployment/*.tmp
+
 .env.aws.template

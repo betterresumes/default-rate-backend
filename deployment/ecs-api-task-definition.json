@@ -8,7 +8,7 @@
   "containerDefinitions": [
     {
       "name": "accunode-api",
-      "image": "461962182774.dkr.ecr.us-east-1.amazonaws.com/accunode:quarterly-safe",
+      "image": "461962182774.dkr.ecr.us-east-1.amazonaws.com/accunode:latest",
       "portMappings": [
         {
           "containerPort": 8000,
