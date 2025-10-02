@@ -1,4 +1,4 @@
-FROM python:3.11-slim as base
+FROM python:3.11-slim AS base
 
 WORKDIR /app
 
@@ -32,7 +32,7 @@ RUN pip install --no-cache-dir \
 
 COPY . .
 
-RUN chmod +x start.sh deployment/scripts/start-worker.sh
+RUN chmod +x start.sh
 
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 USER appuser

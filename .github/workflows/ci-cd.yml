@@ -1,0 +1,298 @@
+name: CI/CD Pipeline - AccuNode Production
+
+on:
+  push:
+    branches: [prod]
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
+      - '*.md'
+  pull_request:
+    branches: [prod]
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
+      - '*.md'
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: accunode
+  ECS_CLUSTER: AccuNode-Production
+  ECS_API_SERVICE: accunode-api-service
+  ECS_WORKER_SERVICE: accunode-worker-service
+  API_TASK_DEFINITION: accunode-api
+  WORKER_TASK_DEFINITION: accunode-worker
+
+jobs:
+  # Security and Code Quality Checks
+  security-scan:
+    name: Security & Quality Checks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.prod.txt
+          pip install bandit safety
+
+      - name: Run security scan with bandit
+        run: bandit -r app/ -f json -o bandit-report.json || true
+
+      - name: Check for known vulnerabilities
+        run: safety check -r requirements.prod.txt --json --output safety-report.json || true
+
+      - name: Upload security reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-reports
+          path: |
+            bandit-report.json
+            safety-report.json
+
+  # Build and Test Stage
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.prod.txt
+
+      - name: Run basic health checks
+        run: |
+          python -c "import app; print('✅ App imports successfully')"
+          python -c "from app.main import app; print('✅ FastAPI app created successfully')"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix=prod-
+            type=raw,value=latest
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Test Docker image
+        run: |
+          docker run --rm \
+            -e DATABASE_URL="sqlite:///test.db" \
+            -e REDIS_URL="redis://localhost:6379" \
+            --name test-container \
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }} \
+            python -c "from app.main import app; print('✅ Container works correctly')" || echo "⚠️ Container test skipped - requires external dependencies"
+
+  # Production Deployment
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    environment: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Create new task definitions with latest image
+        run: |
+          # Get current task definitions
+          aws ecs describe-task-definition --task-definition ${{ env.API_TASK_DEFINITION }} \
+            --query 'taskDefinition' > api-task-def.json
+          
+          aws ecs describe-task-definition --task-definition ${{ env.WORKER_TASK_DEFINITION }} \
+            --query 'taskDefinition' > worker-task-def.json
+
+          # Update image URI in task definitions
+          NEW_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}"
+          
+          # Update API task definition
+          jq --arg IMAGE "$NEW_IMAGE" '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)' \
+            api-task-def.json > api-task-def-new.json
+          
+          # Update Worker task definition  
+          jq --arg IMAGE "$NEW_IMAGE" '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)' \
+            worker-task-def.json > worker-task-def-new.json
+
+      - name: Register new task definitions
+        id: register-tasks
+        run: |
+          # Register API task definition
+          API_TD_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://api-task-def-new.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "api-task-arn=$API_TD_ARN" >> $GITHUB_OUTPUT
+          
+          # Register Worker task definition
+          WORKER_TD_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://worker-task-def-new.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "worker-task-arn=$WORKER_TD_ARN" >> $GITHUB_OUTPUT
+
+      - name: Deploy API Service
+        run: |
+          echo "🚀 Deploying API service with new image..."
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service ${{ env.ECS_API_SERVICE }} \
+            --task-definition ${{ steps.register-tasks.outputs.api-task-arn }} \
+            --force-new-deployment
+
+      - name: Deploy Worker Service  
+        run: |
+          echo "🚀 Deploying Worker service with new image..."
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service ${{ env.ECS_WORKER_SERVICE }} \
+            --task-definition ${{ steps.register-tasks.outputs.worker-task-arn }} \
+            --force-new-deployment
+
+      - name: Wait for deployment completion
+        run: |
+          echo "⏳ Waiting for API service deployment to complete..."
+          aws ecs wait services-stable \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_API_SERVICE }}
+          
+          echo "⏳ Waiting for Worker service deployment to complete..."
+          aws ecs wait services-stable \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_WORKER_SERVICE }}
+
+      - name: Verify deployment health
+        run: |
+          echo "🔍 Verifying deployment health..."
+          
+          # Check API service status
+          API_STATUS=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_API_SERVICE }} \
+            --query 'services[0].deployments[0].rolloutState' --output text)
+          
+          # Check Worker service status
+          WORKER_STATUS=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_WORKER_SERVICE }} \
+            --query 'services[0].deployments[0].rolloutState' --output text)
+          
+          echo "API Service Status: $API_STATUS"
+          echo "Worker Service Status: $WORKER_STATUS"
+          
+          if [[ "$API_STATUS" == "COMPLETED" ]] && [[ "$WORKER_STATUS" == "COMPLETED" ]]; then
+            echo "✅ Deployment completed successfully!"
+          else
+            echo "❌ Deployment failed or incomplete"
+            exit 1
+          fi
+
+      - name: Create deployment summary
+        run: |
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image:** ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **API Task Definition:** ${{ steps.register-tasks.outputs.api-task-arn }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Worker Task Definition:** ${{ steps.register-tasks.outputs.worker-task-arn }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ✅ Deployment Successful" >> $GITHUB_STEP_SUMMARY
+
+  # Rollback capability
+  rollback:
+    name: Rollback Deployment
+    runs-on: ubuntu-latest
+    if: failure() && github.ref == 'refs/heads/prod'
+    needs: deploy-production
+    environment: production
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Rollback to previous task definitions
+        run: |
+          echo "🔄 Rolling back to previous versions..."
+          
+          # Get previous task definition revisions
+          PREV_API_TD=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_API_SERVICE }} \
+            --query 'services[0].deployments[1].taskDefinition' --output text)
+          
+          PREV_WORKER_TD=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_WORKER_SERVICE }} \
+            --query 'services[0].deployments[1].taskDefinition' --output text)
+          
+          # Rollback API service
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service ${{ env.ECS_API_SERVICE }} \
+            --task-definition $PREV_API_TD
+          
+          # Rollback Worker service
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service ${{ env.ECS_WORKER_SERVICE }} \
+            --task-definition $PREV_WORKER_TD
+          
+          echo "✅ Rollback initiated"

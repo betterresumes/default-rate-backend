@@ -1,0 +1,102 @@
+{
+  "family": "accunode-worker-testing",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::461962182774:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "accunode-worker-testing",
+      "image": "461962182774.dkr.ecr.us-east-1.amazonaws.com/accunode:testing-image",
+      "command": ["celery", "-A", "app.workers.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--queues=high_priority,medium_priority,low_priority"],
+      "essential": true,
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/accunode-worker",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "environment": [
+        {
+          "name": "DATABASE_URL",
+          "value": "postgresql://accunode_admin:AccuNode2024!SecurePass@accunode-postgres.ck36iu4u6mpj.us-east-1.rds.amazonaws.com:5432/postgres"
+        },
+        {
+          "name": "REDIS_URL",
+          "value": "redis://accunode-redis.d9avr2.0001.use1.cache.amazonaws.com:6379"
+        },
+        {
+          "name": "REDIS_HOST",
+          "value": "accunode-redis.d9avr2.0001.use1.cache.amazonaws.com"
+        },
+        {
+          "name": "REDIS_PORT",
+          "value": "6379"
+        },
+        {
+          "name": "REDIS_PASSWORD",
+          "value": ""
+        },
+        {
+          "name": "REDIS_DB",
+          "value": "0"
+        },
+        {
+          "name": "REDISUSER",
+          "value": ""
+        },
+        {
+          "name": "DEBUG",
+          "value": "false"
+        },
+        {
+          "name": "SECRET_KEY",
+          "value": "accunode-production-secret-key-2024-secure"
+        },
+        {
+          "name": "ACCESS_TOKEN_EXPIRE_MINUTES",
+          "value": "60"
+        },
+        {
+          "name": "CORS_ORIGIN",
+          "value": "https://accunode.ai,https://client-eta-sepia.vercel.app"
+        },
+        {
+          "name": "PYTHONUNBUFFERED",
+          "value": "1"
+        },
+        {
+          "name": "PYTHONPATH",
+          "value": "/app"
+        },
+        {
+          "name": "MODEL_PATH",
+          "value": "./models/"
+        },
+        {
+          "name": "ENABLE_ML_CACHE",
+          "value": "true"
+        },
+        {
+          "name": "PORT",
+          "value": "8000"
+        },
+        {
+          "name": "ENVIRONMENT",
+          "value": "production"
+        },
+        {
+          "name": "AWS_REGION",
+          "value": "us-east-1"
+        },
+        {
+          "name": "LOG_LEVEL",
+          "value": "INFO"
+        }
+      ]
+    }
+  ]
+}
