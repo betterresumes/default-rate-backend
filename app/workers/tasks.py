@@ -832,31 +832,21 @@ def process_quarterly_bulk_upload_task(
                         logger.warning(f"⚠️ DEBUG: Invalid value for {key}: {value} in row {i+1}")
                 
                 try:
-                    import signal
+                    logger.info(f"🔍 DEBUG: Starting ML prediction for {row['company_symbol']}...")
                     
-                    def timeout_handler(signum, frame):
-                        raise TimeoutError("ML prediction timed out")
+                    # Add validation to prevent hanging on invalid data
+                    if not all(isinstance(v, (int, float)) and not (math.isnan(v) if isinstance(v, float) else False) and not (math.isinf(v) if isinstance(v, float) else False) for v in financial_data.values() if v is not None):
+                        logger.warning(f"⚠️ DEBUG: Invalid financial data detected for {row['company_symbol']}, using defaults")
+                        # Set defaults for invalid values
+                        for key, value in financial_data.items():
+                            if value is None or (isinstance(value, float) and (math.isnan(value) or math.isinf(value))):
+                                financial_data[key] = 0.0
                     
-                    # Set a 30-second timeout for ML prediction
-                    signal.signal(signal.SIGALRM, timeout_handler)
-                    signal.alarm(30)  # 30 seconds timeout
-                    
-                    try:
-                        ml_result = quarterly_ml_model.predict_quarterly_default_probability(financial_data)
-                        signal.alarm(0)  # Cancel the alarm
-                        logger.info(f"✅ DEBUG: ML prediction successful for {row['company_symbol']}: {ml_result.get('logistic_probability', 'N/A')}")
-                    except TimeoutError:
-                        signal.alarm(0)  # Cancel the alarm
-                        logger.error(f"⏰ DEBUG: ML prediction timed out for {row['company_symbol']} after 30 seconds")
-                        failed_rows += 1
-                        error_details.append({
-                            'row': i + 1,
-                            'error': f"ML prediction timed out after 30 seconds"
-                        })
-                        continue
+                    # Simple direct ML prediction
+                    ml_result = quarterly_ml_model.predict_quarterly_default_probability(financial_data)
+                    logger.info(f"✅ DEBUG: ML prediction completed for {row['company_symbol']}: {ml_result.get('logistic_probability', 'N/A')}")
                         
                 except Exception as ml_error:
-                    signal.alarm(0)  # Cancel the alarm if set
                     logger.error(f"❌ DEBUG: ML prediction failed for {row['company_symbol']}: {str(ml_error)}")
                     failed_rows += 1
                     error_details.append({

@@ -38,7 +38,7 @@ echo "Starting AccuNode Celery Worker..."
 docker run -d \
   --name accunode-worker \
   --restart unless-stopped \
-  -e DATABASE_URL='postgresql://accunode:AccuNode2024!@accunode-postgres.ck36iu4u6mpj.us-east-1.rds.amazonaws.com:5432/accunode_db' \
+  -e DATABASE_URL='postgresql://accunode_admin:AccuNode2024!SecurePass@accunode-postgres.ck36iu4u6mpj.us-east-1.rds.amazonaws.com:5432/postgres' \
   -e REDIS_URL='redis://accunode-redis.d9avr2.0001.use1.cache.amazonaws.com:6379' \
   -e REDIS_HOST='accunode-redis.d9avr2.0001.use1.cache.amazonaws.com' \
   -e REDIS_PORT='6379' \

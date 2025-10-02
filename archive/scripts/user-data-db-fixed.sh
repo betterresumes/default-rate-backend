@@ -31,11 +31,11 @@ amazon-linux-extras install nginx1 -y
 
 # Login to ECR
 echo "Logging into ECR..."
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 222631329480.dkr.ecr.us-east-1.amazonaws.com
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 461962182774.dkr.ecr.us-east-1.amazonaws.com
 
 # Pull the latest Docker image
 echo "Pulling AccuNode Docker image..."
-docker pull 222631329480.dkr.ecr.us-east-1.amazonaws.com/accunode-backend:accunode
+docker pull 461962182774.dkr.ecr.us-east-1.amazonaws.com/accunode:latest
 
 # Run the container with corrected database credentials
 echo "Starting AccuNode container with correct database URL..."
@@ -67,7 +67,7 @@ docker run -d \
   -e ENVIRONMENT='production' \
   -e AWS_REGION='us-east-1' \
   -e LOG_LEVEL='INFO' \
-  222631329480.dkr.ecr.us-east-1.amazonaws.com/accunode-backend:accunode
+  461962182774.dkr.ecr.us-east-1.amazonaws.com/accunode:latest
 
 # Wait for container to start
 echo "Waiting for AccuNode container to be ready..."

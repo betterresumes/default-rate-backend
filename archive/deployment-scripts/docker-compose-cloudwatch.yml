@@ -1,0 +1,63 @@
+# Docker Compose with CloudWatch Logging
+# This configuration enables automatic log forwarding to CloudWatch
+
+version: '3.8'
+
+services:
+  api:
+    image: 461962182774.dkr.ecr.us-east-1.amazonaws.com/accunode:latest
+    container_name: accunode-api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - ENVIRONMENT=production
+    logging:
+      driver: awslogs
+      options:
+        awslogs-group: "/accunode/api"
+        awslogs-region: "us-east-1"
+        awslogs-stream-prefix: "api"
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  worker:
+    image: 461962182774.dkr.ecr.us-east-1.amazonaws.com/accunode:latest
+    container_name: accunode-worker
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2 --queues=medium_priority
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - ENVIRONMENT=production
+    logging:
+      driver: awslogs
+      options:
+        awslogs-group: "/accunode/worker"
+        awslogs-region: "us-east-1"
+        awslogs-stream-prefix: "worker"
+    restart: unless-stopped
+    depends_on:
+      - api
+
+  nginx:
+    image: nginx:alpine
+    container_name: accunode-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    logging:
+      driver: awslogs
+      options:
+        awslogs-group: "/accunode/nginx"
+        awslogs-region: "us-east-1"
+        awslogs-stream-prefix: "nginx"
+    restart: unless-stopped
+    depends_on:
+      - api

@@ -1,0 +1,44 @@
+# Multi-stage Dockerfile - Optimized for fast rebuilds
+FROM python:3.11-slim as base
+
+# Install system dependencies (rarely changes)
+RUN apt-get update && apt-get install -y \
+    curl \
+    gcc \
+    g++ \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create app directory
+WORKDIR /app
+
+# Dependencies stage (changes when requirements.txt changes)
+FROM base as dependencies
+
+# Copy requirements files
+COPY requirements.prod.txt requirements.txt ./
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.prod.txt \
+    && pip install gunicorn uvicorn[standard]
+
+# Application stage (changes frequently)
+FROM dependencies as application
+
+# Copy application code (this layer changes most frequently)
+COPY app/ ./app/
+COPY main.py ./
+COPY start.sh ./
+
+# Make start script executable
+RUN chmod +x start.sh
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Expose port
+EXPOSE 8000
+
+# Start the application
+CMD ["./start.sh"]

@@ -69,7 +69,6 @@ if [ "$ENVIRONMENT" = "production" ]; then
         --workers $WORKERS \
         --worker-class uvicorn.workers.UvicornWorker \
         --timeout 120 \
-        --keepalive 5 \
         --max-requests 1000 \
         --max-requests-jitter 100 \
         --access-logfile - \

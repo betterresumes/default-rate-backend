@@ -64,3 +64,16 @@ logs/
 
 # Docker
 .dockerignore
+
+# SSL Certificates and Keys (SECURITY - NEVER COMMIT)
+*.pem
+*.crt
+*.key
+*.p12
+*.pfx
+ssl/
+certificates/
+**/ssl/**
+**/certificates/**
+
+.env.aws.template
