@@ -96,31 +96,41 @@ jobs:
         with:
           mask-password: 'true'
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
-          tags: |
-            type=sha,prefix=prod-,format=short
-            type=raw,value=latest
-            type=raw,value=prod
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push Docker image
+      - name: Build and push Docker image (single image, multiple tags)
         id: build
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        run: |
+          echo "🏗️ Building single Docker image with multiple tags..."
+          
+          # Get image details
+          REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          
+          # Build image with primary tag first
+          PRIMARY_IMAGE="${REGISTRY}/${{ env.ECR_REPOSITORY }}:prod-${SHORT_SHA}"
+          
+          echo "🏗️ Building primary image: $PRIMARY_IMAGE"
+          docker build --platform linux/amd64 -t "$PRIMARY_IMAGE" -f ./Dockerfile .
+          
+          echo "🚀 Pushing primary image..."
+          docker push "$PRIMARY_IMAGE"
+          
+          # Tag the same image with additional tags (this doesn't create new images)
+          echo "🏷️ Adding additional tags to same image..."
+          docker tag "$PRIMARY_IMAGE" "${REGISTRY}/${{ env.ECR_REPOSITORY }}:latest"
+          docker tag "$PRIMARY_IMAGE" "${REGISTRY}/${{ env.ECR_REPOSITORY }}:prod"
+          
+          echo "🚀 Pushing additional tags..."
+          docker push "${REGISTRY}/${{ env.ECR_REPOSITORY }}:latest"
+          docker push "${REGISTRY}/${{ env.ECR_REPOSITORY }}:prod"
+          
+          echo "✅ Successfully pushed 1 image with 3 tags:"
+          echo "  ✅ prod-${SHORT_SHA} (primary)"
+          echo "  ✅ latest (alias)"
+          echo "  ✅ prod (alias)"
+          
+          # Get digest for output
+          DIGEST=$(docker inspect "$PRIMARY_IMAGE" --format='{{index .RepoDigests 0}}' | cut -d'@' -f2 2>/dev/null || echo "unknown")
+          echo "digest=$DIGEST" >> $GITHUB_OUTPUT
 
       - name: Verify Docker build success
         run: |
@@ -139,26 +149,38 @@ jobs:
           echo "image-uri=$IMAGE_URI" >> $GITHUB_OUTPUT
           echo "🎯 Image will be available for deployment: $IMAGE_URI"
 
-      - name: Clean up untagged images
+      - name: Clean up problematic images
         run: |
-          echo "🧹 Cleaning up untagged images in ECR..."
+          echo "🧹 Cleaning up problematic images in ECR..."
           
-          # List and delete untagged images (those with "-" or null tags)
+          # Delete untagged images
+          echo "🗑️ Removing untagged images..."
           UNTAGGED_IMAGES=$(aws ecr list-images \
             --repository-name ${{ env.ECR_REPOSITORY }} \
             --filter tagStatus=UNTAGGED \
             --query 'imageIds[*]' \
-            --output json)
+            --output json 2>/dev/null || echo "[]")
           
-          if [ "$UNTAGGED_IMAGES" != "[]" ]; then
-            echo "🗑️ Found untagged images, deleting..."
+          if [ "$UNTAGGED_IMAGES" != "[]" ] && [ "$UNTAGGED_IMAGES" != "" ]; then
             aws ecr batch-delete-image \
               --repository-name ${{ env.ECR_REPOSITORY }} \
-              --image-ids "$UNTAGGED_IMAGES" || echo "No untagged images to delete"
-            echo "✅ Cleaned up untagged images"
-          else
-            echo "✅ No untagged images found"
+              --image-ids "$UNTAGGED_IMAGES" 2>/dev/null || echo "No untagged images to delete"
           fi
+          
+          # Delete images with dash-only tags
+          echo "🗑️ Removing dash-tagged images..."
+          DASH_IMAGES=$(aws ecr list-images \
+            --repository-name ${{ env.ECR_REPOSITORY }} \
+            --query 'imageIds[?imageTag == `-`]' \
+            --output json 2>/dev/null || echo "[]")
+          
+          if [ "$DASH_IMAGES" != "[]" ] && [ "$DASH_IMAGES" != "" ]; then
+            aws ecr batch-delete-image \
+              --repository-name ${{ env.ECR_REPOSITORY }} \
+              --image-ids "$DASH_IMAGES" 2>/dev/null || echo "No dash-tagged images to delete"
+          fi
+          
+          echo "✅ Cleanup completed"
 
   # Production Deployment
   deploy-production:
