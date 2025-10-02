@@ -104,7 +104,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=ref,event=pr
-            type=sha,prefix=prod-
+            type=sha,prefix=prod-,format=short
             type=raw,value=latest
 
       - name: Set up Docker Buildx
@@ -126,14 +126,16 @@ jobs:
       - name: Verify Docker build success
         run: |
           echo "🔍 Verifying Docker build completed successfully..."
-          IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:prod-${{ github.sha }}"
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:prod-${SHORT_SHA}"
           echo "✅ Built and pushed image: $IMAGE_URI"
           echo "📋 Image digest: ${{ steps.build.outputs.digest }}"
 
       - name: Output image details
         id: image-output
         run: |
-          IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:prod-${{ github.sha }}"
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:prod-${SHORT_SHA}"
           echo "Built image: $IMAGE_URI"
           echo "image-uri=$IMAGE_URI" >> $GITHUB_OUTPUT
           echo "🎯 Image will be available for deployment: $IMAGE_URI"
@@ -169,7 +171,10 @@ jobs:
           # Get ECR registry URI dynamically  
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
-          IMAGE_TAG="prod-${{ github.sha }}"
+          
+          # Use short commit SHA (first 7 characters) to match ECR tags
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          IMAGE_TAG="prod-${SHORT_SHA}"
           NEW_IMAGE="${REGISTRY}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}"
           
           echo "🔧 Debug Info:"
@@ -177,7 +182,8 @@ jobs:
           echo "  AWS Region: ${{ env.AWS_REGION }}"
           echo "  ECR Repository: ${{ env.ECR_REPOSITORY }}"
           echo "  Registry: $REGISTRY"
-          echo "  Commit SHA: ${{ github.sha }}"
+          echo "  Full Commit SHA: ${{ github.sha }}"
+          echo "  Short Commit SHA: $SHORT_SHA"
           echo "  Image tag: $IMAGE_TAG" 
           echo "  Full image URI: $NEW_IMAGE"
           
