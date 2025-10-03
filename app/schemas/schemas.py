@@ -755,7 +755,7 @@ class JobResultsRequest(BaseModel):
     include_errors: bool = False
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "include_predictions": True,
                 "include_companies": True,

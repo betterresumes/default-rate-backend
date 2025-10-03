@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from datetime import datetime
@@ -91,6 +91,7 @@ class AssignUserToOrgResponse(BaseModel):
 @router.post("/create-tenant-with-admin", response_model=TenantWithAdminResponse)
 @rate_limit_tenant_create
 async def create_tenant_with_admin(
+    request: Request,
     tenant_data: TenantWithAdminCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_super_admin)
@@ -243,6 +244,7 @@ async def create_tenant_with_admin(
 @router.post("/assign-existing-user", response_model=ExistingUserTenantResponse)
 @rate_limit_user_update
 async def assign_existing_user_as_tenant_admin(
+    request: Request,
     assignment_data: ExistingUserTenantAssignment,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_super_admin)
@@ -308,6 +310,7 @@ async def assign_existing_user_as_tenant_admin(
 @router.get("/tenant/{tenant_id}/admin-info")
 @rate_limit_tenant_read
 async def get_tenant_admin_info(
+    request: Request,
     tenant_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_super_admin)
@@ -361,6 +364,7 @@ async def get_tenant_admin_info(
 @router.delete("/remove-tenant-admin/{user_id}")
 @rate_limit_user_delete
 async def remove_tenant_admin_role(
+    request: Request,
     user_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_super_admin)
@@ -409,6 +413,7 @@ async def remove_tenant_admin_role(
 @router.post("/assign-user-to-organization", response_model=AssignUserToOrgResponse)
 @rate_limit_user_update
 async def assign_user_to_organization(
+    request: Request,
     assignment: AssignUserToOrgRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_super_admin)
