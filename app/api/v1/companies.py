@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depe, Requestnds, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from ...core.database import get_db, User, Company as CompanyModel
@@ -128,7 +128,7 @@ def safe_float(value):
 @router.get("/", response_model=PaginatedResponse)
 @rate_limit_data_read
 async def get_companies(
-    page: int = Query(1, ge=1),
+    request: Request, request: Request, page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=100),
     sector: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
@@ -233,7 +233,7 @@ async def get_companies(
 @router.get("/{company_id}", response_model=dict)
 @rate_limit_data_read
 async def get_company_by_id(
-    company_id: str, 
+    request: Request, request: Request, company_id: str, 
     current_user: User = Depends(current_verified_user),
     db: Session = Depends(get_db)
 ):
@@ -321,7 +321,7 @@ async def get_company_by_id(
 @router.post("/", response_model=dict)
 @rate_limit_user_create
 async def create_company(
-    company: CompanyCreate,
+    request: Request, request: Request, company: CompanyCreate,
     current_user: User = Depends(current_verified_user),
     db: Session = Depends(get_db)
 ):
@@ -406,7 +406,7 @@ async def create_company(
 @router.get("/search/{symbol}", response_model=dict)
 @rate_limit_data_read
 async def get_company_by_symbol(
-    symbol: str,
+    request: Request, request: Request, symbol: str,
     current_user: User = Depends(current_verified_user),
     db: Session = Depends(get_db)
 ):

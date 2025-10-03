@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depe, Requestnds, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from typing import List, Optional
@@ -38,7 +38,7 @@ router = APIRouter(tags=["Organization Management"])
 @router.post("", response_model=OrganizationResponse)
 @rate_limit_org_create
 async def create_organization(
-    org_data: OrganizationCreate,
+    request: Request, request: Request, org_data: OrganizationCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -128,7 +128,7 @@ async def create_organization(
 @router.get("/", response_model=EnhancedOrganizationListResponse)
 @rate_limit_org_read
 async def list_organizations(
-    page: int = Query(1, ge=1, description="Page number"),
+    request: Request, request: Request, page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(10, ge=1, le=100, description="Items per page"),
     search: Optional[str] = Query(None, description="Search in name, domain, or description"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
@@ -320,7 +320,7 @@ async def list_organizations(
 @router.get("/{org_id}", response_model=EnhancedOrganizationResponse)
 @rate_limit_org_read
 async def get_organization(
-    org_id: str,
+    request: Request, request: Request, org_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -463,7 +463,7 @@ async def get_organization(
 @router.put("/{org_id}", response_model=OrganizationResponse)
 @rate_limit_org_update
 async def update_organization(
-    org_id: str,
+    request: Request, request: Request, org_id: str,
     org_update: OrganizationUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -522,7 +522,7 @@ async def update_organization(
 @router.delete("/{org_id}")
 @rate_limit_org_delete
 async def delete_organization(
-    org_id: str,
+    request: Request, request: Request, org_id: str,
     force: bool = Query(False, description="Force delete even if organization has users"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -570,7 +570,7 @@ async def delete_organization(
 @router.post("/{org_id}/regenerate-token")
 @rate_limit_org_token
 async def regenerate_join_token(
-    org_id: str,
+    request: Request, request: Request, org_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_org_admin_or_above)
 ):
@@ -607,7 +607,7 @@ async def regenerate_join_token(
 @router.get("/{org_id}/whitelist", response_model=WhitelistListResponse)
 @rate_limit_org_read
 async def get_organization_whitelist(
-    org_id: str,
+    request: Request, request: Request, org_id: str,
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -646,7 +646,7 @@ async def get_organization_whitelist(
 @router.post("/{org_id}/whitelist", response_model=WhitelistResponse)
 @rate_limit_org_update
 async def add_to_whitelist(
-    org_id: str,
+    request: Request, request: Request, org_id: str,
     whitelist_data: WhitelistCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_org_admin_or_above)
@@ -698,7 +698,7 @@ async def add_to_whitelist(
 @router.delete("/{org_id}/whitelist/{email}")
 @rate_limit_org_update
 async def remove_from_whitelist(
-    org_id: str,
+    request: Request, request: Request, org_id: str,
     email: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_org_admin_or_above)
@@ -741,7 +741,7 @@ async def remove_from_whitelist(
 @router.get("/{org_id}/users", response_model=UserListResponse)
 @rate_limit_org_read
 async def get_organization_users(
-    org_id: str,
+    request: Request, request: Request, org_id: str,
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     role: Optional[str] = Query(None),
@@ -782,7 +782,7 @@ async def get_organization_users(
 @router.get("/{org_id}/details", response_model=OrganizationDetailedResponse)
 @rate_limit_org_read
 async def get_organization_details(
-    org_id: str,
+    request: Request, request: Request, org_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -885,7 +885,7 @@ async def get_organization_details(
 @router.get("/{org_id}/admins", response_model=List[OrgAdminInfo])
 @rate_limit_org_read
 async def get_organization_admins(
-    org_id: str,
+    request: Request, request: Request, org_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -955,7 +955,7 @@ async def get_organization_admins(
 @router.patch("/{org_id}/global-data-access")
 @rate_limit_org_update
 async def update_global_data_access(
-    org_id: str,
+    request: Request, request: Request, org_id: str,
     allow_access: bool,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -1033,7 +1033,7 @@ async def update_global_data_access(
 @router.get("/{org_id}/global-data-access")
 @rate_limit_org_read
 async def get_global_data_access_status(
-    org_id: str,
+    request: Request, request: Request, org_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):

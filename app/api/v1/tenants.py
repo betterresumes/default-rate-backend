@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from typing import List, Optional
@@ -25,6 +25,7 @@ router = APIRouter(tags=["Tenant Management"])
 @router.post("", response_model=TenantResponse)
 @rate_limit_tenant_create
 async def create_tenant(
+    request: Request,
     tenant_data: TenantCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_super_admin)
@@ -73,6 +74,7 @@ async def create_tenant(
 @router.get("", response_model=ComprehensiveTenantListResponse)
 @rate_limit_tenant_read
 async def list_tenants(
+    request: Request,
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     search: Optional[str] = Query(None),
@@ -230,6 +232,7 @@ async def list_tenants(
 @router.get("/{tenant_id}", response_model=ComprehensiveTenantResponse)
 @rate_limit_tenant_read
 async def get_tenant(
+    request: Request,
     tenant_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_tenant_admin_or_above)
@@ -351,6 +354,7 @@ async def get_tenant(
 @router.put("/{tenant_id}", response_model=TenantResponse)
 @rate_limit_tenant_update
 async def update_tenant(
+    request: Request,
     tenant_id: str,
     tenant_update: TenantUpdate,
     db: Session = Depends(get_db),
@@ -403,6 +407,7 @@ async def update_tenant(
 @router.delete("/{tenant_id}")
 @rate_limit_tenant_delete
 async def delete_tenant(
+    request: Request,
     tenant_id: str,
     force: bool = Query(False, description="Force delete even if tenant has organizations"),
     db: Session = Depends(get_db),
@@ -438,6 +443,7 @@ async def delete_tenant(
 @router.get("/{tenant_id}/stats", response_model=TenantStatsResponse)
 @rate_limit_analytics
 async def get_tenant_stats(
+    request: Request,
     tenant_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_tenant_admin_or_above)

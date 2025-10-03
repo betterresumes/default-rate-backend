@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depe, Requestnds, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from typing import List, Optional
@@ -24,7 +24,7 @@ router = APIRouter(tags=["User Management"])
 @router.get("/profile", response_model=UserResponse)
 @rate_limit_user_read
 async def get_current_user_profile(
-    current_user: User = Depends(get_current_active_user)
+    request: Request, request: Request, current_user: User = Depends(get_current_active_user)
 ):
     """Get current user profile information."""
     return UserResponse.from_orm(current_user)
@@ -32,7 +32,7 @@ async def get_current_user_profile(
 @router.put("/profile", response_model=UserResponse)
 @rate_limit_user_update
 async def update_current_user_profile(
-    user_update: UserUpdate,
+    request: Request, request: Request, user_update: UserUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -63,7 +63,7 @@ async def update_current_user_profile(
 @router.get("/me")
 @rate_limit_user_read
 async def get_current_user_profile_me(
-    db: Session = Depends(get_db),
+    request: Request, request: Request, db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """Get comprehensive current user profile information based on role and access level."""
@@ -243,7 +243,7 @@ async def get_current_user_profile_me(
 @router.post("", response_model=UserResponse)
 @rate_limit_user_create
 async def create_user(
-    user_data: UserCreate,
+    request: Request, request: Request, user_data: UserCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -392,7 +392,7 @@ async def create_user(
 @router.get("", response_model=UserListResponse)
 @rate_limit_user_read
 async def list_users(
-    skip: int = Query(0, ge=0),
+    request: Request, request: Request, skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     search: Optional[str] = Query(None),
     organization_id: Optional[str] = Query(None),
@@ -470,7 +470,7 @@ async def list_users(
 @router.get("/{user_id}", response_model=UserResponse)
 @rate_limit_user_read
 async def get_user(
-    user_id: str,
+    request: Request, request: Request, user_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -511,7 +511,7 @@ async def get_user(
 @router.put("/{user_id}", response_model=UserResponse)
 @rate_limit_user_update
 async def update_user(
-    user_id: str,
+    request: Request, request: Request, user_id: str,
     user_update: UserUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -574,7 +574,7 @@ async def update_user(
 @router.put("/{user_id}/role", response_model=UserRoleUpdateResponse)
 @rate_limit_user_update
 async def update_user_role(
-    user_id: str,
+    request: Request, request: Request, user_id: str,
     role_update: UserRoleUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -653,7 +653,7 @@ async def update_user_role(
 @router.delete("/{user_id}")
 @rate_limit_user_delete
 async def remove_user(
-    user_id: str,
+    request: Request, request: Request, user_id: str,
     remove_from_org_only: bool = Query(False, description="Remove from organization only, don't delete account"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -720,7 +720,7 @@ async def remove_user(
 @router.post("/{user_id}/activate")
 @rate_limit_user_update
 async def activate_user(
-    user_id: str,
+    request: Request, request: Request, user_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -762,7 +762,7 @@ async def activate_user(
 @router.post("/{user_id}/deactivate")
 @rate_limit_user_update
 async def deactivate_user(
-    user_id: str,
+    request: Request, request: Request, user_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
