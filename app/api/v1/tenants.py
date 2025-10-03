@@ -14,11 +14,16 @@ from ...schemas.schemas import (
 )
 from .auth_multi_tenant import get_current_active_user
 from .auth_admin import require_super_admin, require_tenant_admin_or_above
+from ...middleware.rate_limiting import (
+    rate_limit_tenant_create, rate_limit_tenant_read, rate_limit_tenant_update, 
+    rate_limit_tenant_delete, rate_limit_analytics
+)
 from ...utils.tenant_utils import create_tenant_slug, validate_tenant_domain
 
 router = APIRouter(tags=["Tenant Management"])
 
 @router.post("", response_model=TenantResponse)
+@rate_limit_tenant_create
 async def create_tenant(
     tenant_data: TenantCreate,
     db: Session = Depends(get_db),
@@ -66,6 +71,7 @@ async def create_tenant(
     return TenantResponse.from_orm(new_tenant)
 
 @router.get("", response_model=ComprehensiveTenantListResponse)
+@rate_limit_tenant_read
 async def list_tenants(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
@@ -222,6 +228,7 @@ async def list_tenants(
     )
 
 @router.get("/{tenant_id}", response_model=ComprehensiveTenantResponse)
+@rate_limit_tenant_read
 async def get_tenant(
     tenant_id: str,
     db: Session = Depends(get_db),
@@ -342,6 +349,7 @@ async def get_tenant(
     )
 
 @router.put("/{tenant_id}", response_model=TenantResponse)
+@rate_limit_tenant_update
 async def update_tenant(
     tenant_id: str,
     tenant_update: TenantUpdate,
@@ -393,6 +401,7 @@ async def update_tenant(
     return TenantResponse.from_orm(tenant)
 
 @router.delete("/{tenant_id}")
+@rate_limit_tenant_delete
 async def delete_tenant(
     tenant_id: str,
     force: bool = Query(False, description="Force delete even if tenant has organizations"),
@@ -427,6 +436,7 @@ async def delete_tenant(
     return {"message": f"Tenant '{tenant.name}' deleted successfully"}
 
 @router.get("/{tenant_id}/stats", response_model=TenantStatsResponse)
+@rate_limit_analytics
 async def get_tenant_stats(
     tenant_id: str,
     db: Session = Depends(get_db),

@@ -4,13 +4,18 @@ Auto-Scaling API Routes
 Provides endpoints for monitoring and controlling auto-scaling
 """
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+fro@router.post("/execute")
+@rate_limit_job_control
+async def execute_auto_scaling(background_tasks: BackgroundTasks):fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import Dict, List, Optional
 import logging
 from datetime import datetime
 
 from app.services.auto_scaling_service import auto_scaling_service
+from ...middleware.rate_limiting import (
+    rate_limit_analytics, rate_limit_job_control, rate_limit_user_update, rate_limit_user_delete
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +34,7 @@ class ManualScalingRequest(BaseModel):
     reason: str = "Manual scaling request"
 
 @router.get("/status")
+@rate_limit_analytics
 async def get_scaling_status():
     """
     Get current auto-scaling status and queue metrics
@@ -50,7 +56,8 @@ async def get_scaling_status():
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/metrics")
-async def get_queue_metrics():
+@rate_limit_analytics
+async def get_scaling_metrics():
     """
     Get detailed queue metrics for monitoring dashboard
     
@@ -83,7 +90,8 @@ async def get_queue_metrics():
         logger.error(f"Error getting queue metrics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/recommendation") 
+@router.get("/recommendation")
+@rate_limit_analytics
 async def get_scaling_recommendation():
     """
     Get current scaling recommendation without executing
@@ -154,6 +162,7 @@ async def execute_scaling(background_tasks: BackgroundTasks):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/manual")
+@rate_limit_job_control
 async def manual_scaling(request: ManualScalingRequest):
     """
     Trigger manual scaling to specific worker count
@@ -215,6 +224,7 @@ async def manual_scaling(request: ManualScalingRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/config")
+@rate_limit_analytics
 async def get_scaling_config():
     """Get current auto-scaling configuration"""
     return {
@@ -223,6 +233,7 @@ async def get_scaling_config():
     }
 
 @router.put("/config")
+@rate_limit_user_update
 async def update_scaling_config(config: ScalingConfigUpdate):
     """
     Update auto-scaling configuration
@@ -269,7 +280,8 @@ async def update_scaling_config(config: ScalingConfigUpdate):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/history")
-async def get_scaling_history():
+@rate_limit_analytics
+async def get_scaling_history(limit: int = 50):
     """
     Get recent scaling events history
     
@@ -299,6 +311,7 @@ async def get_scaling_history():
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/history")
+@rate_limit_user_delete
 async def clear_scaling_history():
     """Clear scaling events history"""
     try:

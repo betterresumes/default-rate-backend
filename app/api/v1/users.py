@@ -14,10 +14,15 @@ from .auth_multi_tenant import get_current_active_user
 from .auth_admin import (
     require_super_admin, require_tenant_admin_or_above, require_org_admin_or_above
 )
+from ...middleware.rate_limiting import (
+    rate_limit_user_read, rate_limit_user_update, rate_limit_user_delete,
+    rate_limit_user_create, rate_limit_api
+)
 
 router = APIRouter(tags=["User Management"])
 
 @router.get("/profile", response_model=UserResponse)
+@rate_limit_user_read
 async def get_current_user_profile(
     current_user: User = Depends(get_current_active_user)
 ):
@@ -25,6 +30,7 @@ async def get_current_user_profile(
     return UserResponse.from_orm(current_user)
 
 @router.put("/profile", response_model=UserResponse)
+@rate_limit_user_update
 async def update_current_user_profile(
     user_update: UserUpdate,
     db: Session = Depends(get_db),
@@ -55,6 +61,7 @@ async def update_current_user_profile(
     return UserResponse.from_orm(current_user)
 
 @router.get("/me")
+@rate_limit_user_read
 async def get_current_user_profile_me(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -234,6 +241,7 @@ async def get_current_user_profile_me(
     return user_info
 
 @router.post("", response_model=UserResponse)
+@rate_limit_user_create
 async def create_user(
     user_data: UserCreate,
     db: Session = Depends(get_db),
@@ -382,6 +390,7 @@ async def create_user(
             )
 
 @router.get("", response_model=UserListResponse)
+@rate_limit_user_read
 async def list_users(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
@@ -459,6 +468,7 @@ async def list_users(
     )
 
 @router.get("/{user_id}", response_model=UserResponse)
+@rate_limit_user_read
 async def get_user(
     user_id: str,
     db: Session = Depends(get_db),
@@ -499,6 +509,7 @@ async def get_user(
     return UserResponse.from_orm(user)
 
 @router.put("/{user_id}", response_model=UserResponse)
+@rate_limit_user_update
 async def update_user(
     user_id: str,
     user_update: UserUpdate,
@@ -561,6 +572,7 @@ async def update_user(
     return UserResponse.from_orm(user)
 
 @router.put("/{user_id}/role", response_model=UserRoleUpdateResponse)
+@rate_limit_user_update
 async def update_user_role(
     user_id: str,
     role_update: UserRoleUpdate,
@@ -639,6 +651,7 @@ async def update_user_role(
     )
 
 @router.delete("/{user_id}")
+@rate_limit_user_delete
 async def remove_user(
     user_id: str,
     remove_from_org_only: bool = Query(False, description="Remove from organization only, don't delete account"),
@@ -705,6 +718,7 @@ async def remove_user(
         }
 
 @router.post("/{user_id}/activate")
+@rate_limit_user_update
 async def activate_user(
     user_id: str,
     db: Session = Depends(get_db),
@@ -746,6 +760,7 @@ async def activate_user(
     return {"message": f"User {user.email} activated successfully"}
 
 @router.post("/{user_id}/deactivate")
+@rate_limit_user_update
 async def deactivate_user(
     user_id: str,
     db: Session = Depends(get_db),

@@ -22,6 +22,10 @@ from .auth_multi_tenant import get_current_active_user
 from .auth_admin import (
     require_super_admin, require_tenant_admin_or_above, require_org_admin_or_above
 )
+from ...middleware.rate_limiting import (
+    rate_limit_org_create, rate_limit_org_read, rate_limit_org_update, 
+    rate_limit_org_delete, rate_limit_org_token, rate_limit_api
+)
 from ...utils.tenant_utils import (
     create_organization_slug, generate_join_token, 
     validate_organization_domain, is_email_whitelisted
@@ -32,6 +36,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Organization Management"])
 
 @router.post("", response_model=OrganizationResponse)
+@rate_limit_org_create
 async def create_organization(
     org_data: OrganizationCreate,
     db: Session = Depends(get_db),
@@ -121,6 +126,7 @@ async def create_organization(
     return OrganizationResponse.from_orm(new_organization)
 
 @router.get("/", response_model=EnhancedOrganizationListResponse)
+@rate_limit_org_read
 async def list_organizations(
     page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(10, ge=1, le=100, description="Items per page"),
@@ -312,6 +318,7 @@ async def list_organizations(
         )
 
 @router.get("/{org_id}", response_model=EnhancedOrganizationResponse)
+@rate_limit_org_read
 async def get_organization(
     org_id: str,
     db: Session = Depends(get_db),
@@ -454,6 +461,7 @@ async def get_organization(
         )
 
 @router.put("/{org_id}", response_model=OrganizationResponse)
+@rate_limit_org_update
 async def update_organization(
     org_id: str,
     org_update: OrganizationUpdate,
@@ -512,6 +520,7 @@ async def update_organization(
     return OrganizationResponse.from_orm(organization)
 
 @router.delete("/{org_id}")
+@rate_limit_org_delete
 async def delete_organization(
     org_id: str,
     force: bool = Query(False, description="Force delete even if organization has users"),
@@ -559,6 +568,7 @@ async def delete_organization(
     return {"message": f"Organization '{organization.name}' deleted successfully"}
 
 @router.post("/{org_id}/regenerate-token")
+@rate_limit_org_token
 async def regenerate_join_token(
     org_id: str,
     db: Session = Depends(get_db),
@@ -595,6 +605,7 @@ async def regenerate_join_token(
 
 
 @router.get("/{org_id}/whitelist", response_model=WhitelistListResponse)
+@rate_limit_org_read
 async def get_organization_whitelist(
     org_id: str,
     skip: int = Query(0, ge=0),
@@ -633,6 +644,7 @@ async def get_organization_whitelist(
     )
 
 @router.post("/{org_id}/whitelist", response_model=WhitelistResponse)
+@rate_limit_org_update
 async def add_to_whitelist(
     org_id: str,
     whitelist_data: WhitelistCreate,
@@ -684,6 +696,7 @@ async def add_to_whitelist(
     return WhitelistResponse.from_orm(new_entry)
 
 @router.delete("/{org_id}/whitelist/{email}")
+@rate_limit_org_update
 async def remove_from_whitelist(
     org_id: str,
     email: str,
@@ -726,6 +739,7 @@ async def remove_from_whitelist(
 
 
 @router.get("/{org_id}/users", response_model=UserListResponse)
+@rate_limit_org_read
 async def get_organization_users(
     org_id: str,
     skip: int = Query(0, ge=0),
@@ -766,6 +780,7 @@ async def get_organization_users(
     )
 
 @router.get("/{org_id}/details", response_model=OrganizationDetailedResponse)
+@rate_limit_org_read
 async def get_organization_details(
     org_id: str,
     db: Session = Depends(get_db),
@@ -868,6 +883,7 @@ async def get_organization_details(
         )
 
 @router.get("/{org_id}/admins", response_model=List[OrgAdminInfo])
+@rate_limit_org_read
 async def get_organization_admins(
     org_id: str,
     db: Session = Depends(get_db),
@@ -937,6 +953,7 @@ async def get_organization_admins(
 
 
 @router.patch("/{org_id}/global-data-access")
+@rate_limit_org_update
 async def update_global_data_access(
     org_id: str,
     allow_access: bool,
@@ -1014,6 +1031,7 @@ async def update_global_data_access(
         )
 
 @router.get("/{org_id}/global-data-access")
+@rate_limit_org_read
 async def get_global_data_access_status(
     org_id: str,
     db: Session = Depends(get_db),

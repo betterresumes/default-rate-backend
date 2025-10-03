@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from app.core.database import create_tables
+from app.middleware.rate_limiting import setup_rate_limiting, rate_limit_health, rate_limit_api
 from app.api.v1.auth_multi_tenant import router as auth_router
 from app.api.v1.auth_admin import router as auth_admin_router
 from app.api.v1.tenant_admin_management import router as tenant_admin_router
@@ -191,6 +192,9 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Setup comprehensive rate limiting
+    setup_rate_limiting(app)
+
     app.include_router(auth_router, prefix="/api/v1/auth", tags=["Authentication"])
     app.include_router(auth_admin_router, prefix="/api/v1/auth", tags=["Admin Authentication"])
     app.include_router(tenant_admin_router, prefix="/api/v1", tags=["Tenant Admin Management"])
@@ -202,6 +206,7 @@ def create_app() -> FastAPI:
     app.include_router(scaling_router, tags=["Auto-Scaling"])
 
     @app.get("/")
+    @rate_limit_api
     async def root():
         """API root endpoint with service information."""
         return {
@@ -220,6 +225,7 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/health")
+    @rate_limit_health
     async def health_check():
         """Comprehensive health check endpoint for monitoring."""
         import redis

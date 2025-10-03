@@ -16,6 +16,7 @@ from ...schemas.schemas import (
 )
 from ...utils.tenant_utils import is_email_whitelisted, get_organization_by_token
 from .auth_multi_tenant import AuthManager, get_current_active_user
+from ...middleware.rate_limiting import rate_limit_user_create
 
 router = APIRouter(prefix="/admin", tags=["Admin Authentication"])
 
@@ -66,6 +67,7 @@ def require_any_admin(current_user: User = Depends(get_current_active_user)) -> 
 
 
 @router.post("/create-user", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@rate_limit_user_create
 async def admin_create_user(
     user_data: UserCreate, 
     db: Session = Depends(get_db),

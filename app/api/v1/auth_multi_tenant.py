@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
@@ -16,6 +16,7 @@ from ...schemas.schemas import (
     ChangePasswordRequest, ChangePasswordResponse
 )
 from ...utils.tenant_utils import is_email_whitelisted, get_organization_by_token
+from ...middleware.rate_limiting import rate_limit_auth, rate_limit_auth_strict, rate_limit_api
 
 router = APIRouter(tags=["User Authentication"])
 
@@ -91,7 +92,8 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
+@rate_limit_auth
+async def register_user(request: Request, user_data: UserCreate, db: Session = Depends(get_db)):
     """Register a new user (creates personal account but no organization access)."""
     
     existing_user = db.query(User).filter(User.email == user_data.email).first()
@@ -186,7 +188,8 @@ async def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
             )
 
 @router.post("/login", response_model=Token)
-async def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
+@rate_limit_auth
+async def login(request: Request, user_credentials: UserLogin, db: Session = Depends(get_db)):
     """Authenticate user and return access token."""
     
     user = db.query(User).filter(User.email == user_credentials.email).first()
@@ -219,7 +222,9 @@ async def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
     }
 
 @router.post("/join", response_model=JoinOrganizationResponse)
+@rate_limit_auth
 async def join_organization(
+    request: Request,
     join_request: JoinOrganizationRequest, 
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -287,6 +292,7 @@ async def join_organization(
     )
 
 @router.post("/refresh", response_model=Token)
+@rate_limit_api
 async def refresh_token(current_user: User = Depends(get_current_active_user)):
     """Refresh the access token."""
     
@@ -302,12 +308,15 @@ async def refresh_token(current_user: User = Depends(get_current_active_user)):
     }
 
 @router.post("/logout")
+@rate_limit_api
 async def logout():
     """Logout user (client should discard token)."""
     return {"message": "Successfully logged out"}
 
 @router.post("/change-password", response_model=ChangePasswordResponse)
+@rate_limit_auth_strict
 async def change_password(
+    http_request: Request,
     request: ChangePasswordRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)

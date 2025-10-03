@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, status, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_, text
 from typing import Dict, List, Optional
@@ -18,6 +18,7 @@ from ...services.ml_service import ml_model
 from ...services.quarterly_ml_service import quarterly_ml_model
 from .auth_multi_tenant import get_current_active_user as current_verified_user
 from app.workers.celery_app import celery_app
+from ...middleware.rate_limiting import rate_limit_ml, rate_limit_upload, rate_limit_data_read, rate_limit_analytics, rate_limit_job_control
 
 router = APIRouter()
 
@@ -146,7 +147,9 @@ def is_prediction_owner(prediction, current_user):
 
 
 @router.post("/annual", response_model=Dict)
+@rate_limit_ml
 async def create_annual_prediction(
+    http_request: Request,
     request: AnnualPredictionRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
@@ -276,7 +279,9 @@ async def create_annual_prediction(
         raise HTTPException(status_code=500, detail=f"Error creating annual prediction: {str(e)}")
 
 @router.post("/quarterly", response_model=Dict)
+@rate_limit_ml  
 async def create_quarterly_prediction(
+    http_request: Request,
     request: QuarterlyPredictionRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
@@ -403,6 +408,7 @@ async def create_quarterly_prediction(
 
 
 @router.get("/annual", response_model=Dict)
+@rate_limit_data_read
 async def get_annual_predictions(
     page: int = 1,
     size: int = 10,
@@ -493,6 +499,7 @@ async def get_annual_predictions(
         raise HTTPException(status_code=500, detail=f"Error fetching annual predictions: {str(e)}")
 
 @router.get("/quarterly", response_model=Dict)
+@rate_limit_data_read
 async def get_quarterly_predictions(
     page: int = 1,
     size: int = 10,
@@ -587,6 +594,7 @@ async def get_quarterly_predictions(
 
 
 @router.get("/annual/system", response_model=Dict)
+@rate_limit_data_read
 async def get_system_annual_predictions(
     page: int = 1,
     size: int = 10,
@@ -686,6 +694,7 @@ async def get_system_annual_predictions(
         raise HTTPException(status_code=500, detail=f"Error fetching system annual predictions: {str(e)}")
 
 @router.get("/quarterly/system", response_model=Dict)
+@rate_limit_data_read
 async def get_system_quarterly_predictions(
     page: int = 1,
     size: int = 10,
@@ -791,7 +800,9 @@ async def get_system_quarterly_predictions(
 
 
 @router.post("/bulk-upload", response_model=Dict)
+@rate_limit_upload
 async def bulk_upload_predictions(
+    request: Request,
     file: UploadFile = File(...),
     prediction_type: str = "annual",  # annual or quarterly
     db: Session = Depends(get_db),
@@ -962,6 +973,7 @@ async def bulk_upload_predictions(
 
 
 @router.post("/annual/bulk-upload-async")
+@rate_limit_upload
 async def bulk_upload_annual_async(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
@@ -1063,6 +1075,7 @@ async def bulk_upload_annual_async(
         raise HTTPException(status_code=500, detail=f"Error starting bulk upload: {str(e)}")
 
 @router.post("/quarterly/bulk-upload-async")
+@rate_limit_upload
 async def bulk_upload_quarterly_async(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
@@ -1164,6 +1177,7 @@ async def bulk_upload_quarterly_async(
         raise HTTPException(status_code=500, detail=f"Error starting bulk upload: {str(e)}")
 
 @router.get("/jobs/{job_id}/status")
+@rate_limit_data_read
 async def get_bulk_upload_job_status(
     job_id: str,
     db: Session = Depends(get_db),
@@ -1195,6 +1209,7 @@ async def get_bulk_upload_job_status(
         raise HTTPException(status_code=500, detail=f"Error getting job status: {str(e)}")
 
 @router.get("/jobs")
+@rate_limit_data_read
 async def list_bulk_upload_jobs(
     status: Optional[str] = None,
     limit: int = 50,
@@ -1270,6 +1285,7 @@ async def list_bulk_upload_jobs(
         raise HTTPException(status_code=500, detail=f"Error listing jobs: {str(e)}")
 
 @router.get("/jobs/{job_id}")
+@rate_limit_data_read
 async def get_job_details(
     job_id: str,
     include_errors: bool = False,
@@ -1772,6 +1788,7 @@ async def get_job_results(
         raise HTTPException(status_code=500, detail=f"Error getting job results: {str(e)}")
 
 @router.delete("/jobs/{job_id}")
+@rate_limit_job_control
 async def delete_job(
     job_id: str,
     db: Session = Depends(get_db),
@@ -1831,6 +1848,7 @@ async def delete_job(
         raise HTTPException(status_code=500, detail=f"Error deleting job: {str(e)}")
 
 @router.post("/jobs/{job_id}/cancel")
+@rate_limit_job_control
 async def cancel_job(
     job_id: str,
     db: Session = Depends(get_db),
@@ -1948,8 +1966,7 @@ async def debug_job_predictions(
                 query1 = db.query(AnnualPrediction).filter(
                     AnnualPrediction.created_at >= start_time,
                     AnnualPrediction.created_at <= end_time,
-                    AnnualPrediction.created_by == job.user_id
-                )
+                    AnnualPrediction.created_by ==
                 if organization_id:
                     query1 = query1.filter(AnnualPrediction.organization_id == organization_id)
                 elif job.organization_id:
@@ -2037,6 +2054,7 @@ async def debug_worker_health(
 
 # Additional endpoints for prediction management
 @router.put("/annual/{prediction_id}")
+@rate_limit_ml
 async def update_annual_prediction(
     prediction_id: str,
     request: AnnualPredictionRequest,
@@ -2110,6 +2128,7 @@ async def update_annual_prediction(
 
 
 @router.delete("/annual/{prediction_id}")
+@rate_limit_ml
 async def delete_annual_prediction(
     prediction_id: str,
     db: Session = Depends(get_db),
@@ -2150,6 +2169,7 @@ async def delete_annual_prediction(
 
 
 @router.get("/stats")
+@rate_limit_analytics
 async def get_prediction_statistics(
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
@@ -3010,6 +3030,7 @@ class DashboardRequest(BaseModel):
     custom_scope: Optional[str] = None
 
 @router.post("/dashboard")
+@rate_limit_analytics
 async def get_dashboard_post(
     request: DashboardRequest,
     db: Session = Depends(get_db),
@@ -3046,6 +3067,7 @@ async def get_dashboard_post(
         raise HTTPException(status_code=500, detail=f"Dashboard error: {str(e)}")
 
 @router.get("/dashboard")
+@rate_limit_analytics
 async def get_dashboard(
     include_platform_stats: bool = False,
     db: Session = Depends(get_db),

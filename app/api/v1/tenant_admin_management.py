@@ -9,6 +9,10 @@ from ...core.database import get_db, User, Tenant, Organization
 from ...schemas.schemas import UserCreate, UserResponse
 from .auth_multi_tenant import get_current_active_user, AuthManager
 from .auth_admin import require_super_admin
+from ...middleware.rate_limiting import (
+    rate_limit_tenant_create, rate_limit_user_create, rate_limit_tenant_read,
+    rate_limit_user_delete, rate_limit_user_update
+)
 from pydantic import BaseModel, EmailStr
 
 router = APIRouter(prefix="/tenant-admin", tags=["Tenant Admin Management"])
@@ -85,6 +89,7 @@ class AssignUserToOrgResponse(BaseModel):
 
 
 @router.post("/create-tenant-with-admin", response_model=TenantWithAdminResponse)
+@rate_limit_tenant_create
 async def create_tenant_with_admin(
     tenant_data: TenantWithAdminCreate,
     db: Session = Depends(get_db),
@@ -236,6 +241,7 @@ async def create_tenant_with_admin(
         )
 
 @router.post("/assign-existing-user", response_model=ExistingUserTenantResponse)
+@rate_limit_user_update
 async def assign_existing_user_as_tenant_admin(
     assignment_data: ExistingUserTenantAssignment,
     db: Session = Depends(get_db),
@@ -300,6 +306,7 @@ async def assign_existing_user_as_tenant_admin(
         )
 
 @router.get("/tenant/{tenant_id}/admin-info")
+@rate_limit_tenant_read
 async def get_tenant_admin_info(
     tenant_id: str,
     db: Session = Depends(get_db),
@@ -352,6 +359,7 @@ async def get_tenant_admin_info(
     }
 
 @router.delete("/remove-tenant-admin/{user_id}")
+@rate_limit_user_delete
 async def remove_tenant_admin_role(
     user_id: str,
     db: Session = Depends(get_db),
@@ -399,6 +407,7 @@ async def remove_tenant_admin_role(
         )
 
 @router.post("/assign-user-to-organization", response_model=AssignUserToOrgResponse)
+@rate_limit_user_update
 async def assign_user_to_organization(
     assignment: AssignUserToOrgRequest,
     db: Session = Depends(get_db),

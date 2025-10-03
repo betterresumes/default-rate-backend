@@ -6,6 +6,7 @@ from ...schemas.schemas import (
     CompanyResponse, CompanyCreate, CompanyUpdate, CompanyListResponse, PaginatedResponse
 )
 from .auth_multi_tenant import get_current_active_user
+from ...middleware.rate_limiting import rate_limit_data_read, rate_limit_user_create
 from ...services.services import CompanyService
 from typing import Optional
 from datetime import datetime
@@ -125,6 +126,7 @@ def safe_float(value):
 
 
 @router.get("/", response_model=PaginatedResponse)
+@rate_limit_data_read
 async def get_companies(
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=100),
@@ -229,6 +231,7 @@ async def get_companies(
 
 
 @router.get("/{company_id}", response_model=dict)
+@rate_limit_data_read
 async def get_company_by_id(
     company_id: str, 
     current_user: User = Depends(current_verified_user),
@@ -316,6 +319,7 @@ async def get_company_by_id(
 
 
 @router.post("/", response_model=dict)
+@rate_limit_user_create
 async def create_company(
     company: CompanyCreate,
     current_user: User = Depends(current_verified_user),
@@ -400,6 +404,7 @@ async def create_company(
 
 
 @router.get("/search/{symbol}", response_model=dict)
+@rate_limit_data_read
 async def get_company_by_symbol(
     symbol: str,
     current_user: User = Depends(current_verified_user),
