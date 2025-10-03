@@ -77,7 +77,8 @@ async def add_security_headers(request: Request, call_next):
     response.headers["Permissions-Policy"] = permissions_policy
     
     # Remove server information for security
-    response.headers.pop("Server", None)
+    if "Server" in response.headers:
+        del response.headers["Server"]
     
     # Add custom security header for identification
     response.headers["X-Security-Headers"] = "enabled"

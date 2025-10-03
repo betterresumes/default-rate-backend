@@ -23,7 +23,7 @@
       "secrets": [
         {
           "name": "DATABASE_URL",
-          "valueFrom": "/accunode/database/url"
+          "valueFrom": "/accunode/database-url"
         },
         {
           "name": "REDIS_URL", 
