@@ -1425,9 +1425,9 @@ async def get_job_details(
 @router.post("/jobs/{job_id}/results")
 @rate_limit_data_read
 async def get_job_results(
-    http_request: Request,
+    request: Request,
     job_id: str,
-    request: JobResultsRequest,
+    job_request: JobResultsRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
@@ -1459,7 +1459,7 @@ async def get_job_results(
 
         # Get created companies during this job time window
         created_companies = []
-        if request.include_companies and job.started_at:
+        if job_request.include_companies and job.started_at:
             # Improved companies query with wider time window
             time_buffer = timedelta(minutes=5)  # 5-minute buffer for database timing
             start_time = job.started_at - time_buffer
@@ -1514,7 +1514,7 @@ async def get_job_results(
             }
         }
         
-        if request.include_predictions and job.started_at:
+        if job_request.include_predictions and job.started_at:
             if job.job_type == 'annual':
                 # Improved query: Use a wider time window and add user/organization filters
                 time_buffer = timedelta(minutes=5)  # 5-minute buffer for database timing
@@ -1732,7 +1732,7 @@ async def get_job_results(
 
         # Parse error details
         error_details_parsed = None
-        if job.error_details and request.include_errors:
+        if job.error_details and job_request.include_errors:
             try:
                 import json
                 error_details_parsed = json.loads(job.error_details)
@@ -1757,8 +1757,8 @@ async def get_job_results(
             "created_data": {
                 "companies_count": len(created_companies),
                 "predictions_count": len(created_predictions),
-                "companies": created_companies if request.include_companies else None,
-                "predictions": created_predictions if request.include_predictions else None,
+                "companies": created_companies if job_request.include_companies else None,
+                "predictions": created_predictions if job_request.include_predictions else None,
                 # Add debugging info to help track discrepancies
                 "debug_info": {
                     "expected_successful_rows": job.successful_rows or 0,
@@ -1766,9 +1766,9 @@ async def get_job_results(
                     "job_started_at": job.started_at.isoformat() if job.started_at else None,
                     "job_completed_at": job.completed_at.isoformat() if job.completed_at else None,
                     "search_time_window": f"{job.started_at - timedelta(minutes=5)} to {(job.completed_at + timedelta(minutes=5)) if job.completed_at else (job.started_at + timedelta(hours=2))}" if job.started_at else "No time window"
-                } if request.include_predictions else None
+                } if job_request.include_predictions else None
             },
-            "analysis": prediction_summary if (request.include_predictions and created_predictions) else None,
+            "analysis": prediction_summary if (job_request.include_predictions and created_predictions) else None,
             "timestamps": {
                 "created_at": job.created_at.isoformat() if job.created_at else None,
                 "started_at": job.started_at.isoformat() if job.started_at else None,
@@ -1776,10 +1776,10 @@ async def get_job_results(
             },
             "errors": {
                 "has_errors": bool(job.error_message or job.error_details),
-                "error_message": job.error_message if request.include_errors else None,
-                "error_details": error_details_parsed if request.include_errors else None,
+                "error_message": job.error_message if job_request.include_errors else None,
+                "error_details": error_details_parsed if job_request.include_errors else None,
                 "error_count": len(error_details_parsed.get('errors', [])) if error_details_parsed and isinstance(error_details_parsed, dict) else 0
-            } if request.include_errors or bool(job.error_message or job.error_details) else None
+            } if job_request.include_errors or bool(job.error_message or job.error_details) else None
         }
 
         return results
@@ -1970,7 +1970,7 @@ async def debug_job_predictions(
                 query1 = db.query(AnnualPrediction).filter(
                     AnnualPrediction.created_at >= start_time,
                     AnnualPrediction.created_at <= end_time,
-                    AnnualPrediction.created_by == user_id
+                    AnnualPrediction.created_by == job.user_id
                 )
                 if organization_id:
                     query1 = query1.filter(AnnualPrediction.organization_id == organization_id)
