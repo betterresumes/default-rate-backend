@@ -18,6 +18,7 @@ load_dotenv()
 
 from app.core.database import create_tables
 from app.middleware.rate_limiting import setup_rate_limiting, rate_limit_health, rate_limit_api
+from app.middleware.security_headers import setup_security_headers
 from app.api.v1.auth_multi_tenant import router as auth_router
 from app.api.v1.auth_admin import router as auth_admin_router
 from app.api.v1.tenant_admin_management import router as tenant_admin_router
@@ -194,6 +195,9 @@ def create_app() -> FastAPI:
 
     # Setup comprehensive rate limiting
     setup_rate_limiting(app)
+    
+    # Setup security headers middleware
+    setup_security_headers(app)
 
     app.include_router(auth_router, prefix="/api/v1/auth", tags=["Authentication"])
     app.include_router(auth_admin_router, prefix="/api/v1/auth", tags=["Admin Authentication"])

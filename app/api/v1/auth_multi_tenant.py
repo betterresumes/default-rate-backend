@@ -11,7 +11,7 @@ import uuid
 
 from ...core.database import get_db, User, Organization, Tenant, OrganizationMemberWhitelist
 from ...schemas.schemas import (
-    UserCreate, UserLogin, UserResponse, Token, 
+    UserCreate, UserCreatePublic, UserLogin, UserResponse, Token, 
     JoinOrganizationRequest, JoinOrganizationResponse,
     ChangePasswordRequest, ChangePasswordResponse
 )
@@ -93,8 +93,8 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 @rate_limit_auth
-async def register_user(request: Request, user_data: UserCreate, db: Session = Depends(get_db)):
-    """Register a new user (creates personal account but no organization access)."""
+async def register_user(request: Request, user_data: UserCreatePublic, db: Session = Depends(get_db)):
+    """Register a new user (creates personal account with 'user' role only - no privilege escalation allowed)."""
     
     existing_user = db.query(User).filter(User.email == user_data.email).first()
     if existing_user:
@@ -146,7 +146,7 @@ async def register_user(request: Request, user_data: UserCreate, db: Session = D
             username=username,  
             full_name=full_name,
             hashed_password=hashed_password,
-            role=user_data.role if hasattr(user_data, 'role') and user_data.role else "user",  
+            role="user",  # ⚠️ SECURITY FIX: Force all public registrations to 'user' role
             is_active=True,
             created_at=datetime.utcnow()
         )

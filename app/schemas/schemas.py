@@ -28,7 +28,31 @@ class UserBase(BaseModel):
     username: Optional[str] = None
     full_name: Optional[str] = None
 
+class UserCreatePublic(BaseModel):
+    """Schema for public user registration - NO ROLE FIELD (security)"""
+    email: EmailStr
+    username: Optional[str] = None
+    full_name: Optional[str] = None
+    password: str = Field(..., min_length=8)
+    first_name: Optional[str] = None  
+    last_name: Optional[str] = None
+    
+    class Config:
+        # Explicitly exclude role field
+        extra = "forbid"  # This will reject any extra fields including 'role'
+    
+    @validator('password')
+    def validate_password(cls, v):
+        if len(v) < 8:
+            raise ValueError('Password must be at least 8 characters long')
+        if not any(c.isalpha() for c in v):
+            raise ValueError('Password must contain at least one letter')
+        if not any(c.isdigit() for c in v):
+            raise ValueError('Password must contain at least one number')
+        return v
+
 class UserCreate(UserBase):
+    """Schema for admin user creation - includes role field for admin use"""
     password: str = Field(..., min_length=8)
     role: Optional[str] = "user"  
     first_name: Optional[str] = None  
