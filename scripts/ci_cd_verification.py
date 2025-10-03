@@ -80,7 +80,7 @@ def test_security_schemas():
             print("❌ Security FAILED: UserCreatePublic accepts role field")
             return False
         except Exception as e:
-            if "extra fields not permitted" in str(e):
+            if "extra fields not permitted" in str(e) or "Extra inputs are not permitted" in str(e):
                 print("✅ Security PASSED: UserCreatePublic rejects role field")
             else:
                 print(f"❌ Unexpected error: {e}")

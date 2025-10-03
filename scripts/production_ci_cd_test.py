@@ -63,7 +63,7 @@ try:
         print("SECURITY_BREACH")
         sys.exit(1)
     except Exception as e:
-        if "extra fields not permitted" in str(e):
+        if "extra fields not permitted" in str(e) or "Extra inputs are not permitted" in str(e):
             print("SECURITY_OK")
         else:
             print(f"SECURITY_ERROR: {e}")

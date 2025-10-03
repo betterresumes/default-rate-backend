@@ -30,7 +30,8 @@ def test_schema_security():
             print("❌ SECURITY FAILURE: Public schema accepted 'role' field!")
             return False
         except Exception as e:
-            if "extra fields not permitted" in str(e):
+            # Check for both Pydantic v1 and v2 error messages
+            if "extra fields not permitted" in str(e) or "Extra inputs are not permitted" in str(e):
                 print("✅ Public schema correctly rejects 'role' field")
             else:
                 print(f"⚠️  Unexpected error: {e}")

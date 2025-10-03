@@ -62,7 +62,7 @@ try:
     print('SECURITY FAILURE: Role accepted')
     exit(1)
 except Exception as e:
-    if 'extra fields not permitted' in str(e):
+    if 'extra fields not permitted' in str(e) or 'Extra inputs are not permitted' in str(e):
         print('Security verified: Role field rejected')
         exit(0)
     else:

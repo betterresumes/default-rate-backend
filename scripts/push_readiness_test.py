@@ -25,7 +25,8 @@ try:
     print("SECURITY_BREACH_DETECTED")
     sys.exit(1)
 except Exception as e:
-    if "extra fields not permitted" in str(e):
+    # Check for both Pydantic v1 and v2 error messages
+    if "extra fields not permitted" in str(e) or "Extra inputs are not permitted" in str(e):
         print("SECURITY_PROTECTED")
     else:
         print(f"UNEXPECTED_ERROR: {e}")
