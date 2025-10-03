@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
@@ -69,6 +69,7 @@ def require_any_admin(current_user: User = Depends(get_current_active_user)) -> 
 @router.post("/create-user", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 @rate_limit_user_create
 async def admin_create_user(
+    request: Request,
     user_data: UserCreate, 
     db: Session = Depends(get_db),
     current_user: User = Depends(require_any_admin)
