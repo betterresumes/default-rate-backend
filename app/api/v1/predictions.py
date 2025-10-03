@@ -1425,6 +1425,7 @@ async def get_job_details(
 @router.post("/jobs/{job_id}/results")
 @rate_limit_data_read
 async def get_job_results(
+    http_request: Request,
     job_id: str,
     request: JobResultsRequest,
     db: Session = Depends(get_db),
@@ -1917,6 +1918,7 @@ async def cancel_job(
 @router.get("/jobs/{job_id}/debug")
 @rate_limit_analytics
 async def debug_job_predictions(
+    request: Request,
     job_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
@@ -2023,6 +2025,7 @@ async def debug_job_predictions(
 @router.get("/debug/worker-health")
 @rate_limit_analytics
 async def debug_worker_health(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
@@ -3162,6 +3165,7 @@ async def get_platform_statistics(db: Session):
 @router.get("/debug/prediction/{prediction_id}")
 @rate_limit_analytics
 async def debug_prediction_ownership(
+    request: Request,
     prediction_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
@@ -3227,7 +3231,7 @@ async def debug_prediction_ownership(
            summary="Redis Connection Health Check",
            description="Check if Redis connection is working for Celery tasks")
 @rate_limit_health
-async def redis_health_check():
+async def redis_health_check(request: Request):
     """Check Redis connection health"""
     try:
         with celery_app.connection() as conn:

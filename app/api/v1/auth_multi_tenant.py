@@ -316,26 +316,26 @@ async def logout(request: Request):
 @router.post("/change-password", response_model=ChangePasswordResponse)
 @rate_limit_auth_strict
 async def change_password(
-    http_request: Request,
-    request: ChangePasswordRequest,
+    request: Request,
+    change_request: ChangePasswordRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """Change user password - any authenticated user can update their password"""
     try:
-        if not AuthManager.verify_password(request.current_password, current_user.hashed_password):
+        if not AuthManager.verify_password(change_request.current_password, current_user.hashed_password):
             raise HTTPException(
                 status_code=400,
                 detail="Current password is incorrect"
             )
         
-        if AuthManager.verify_password(request.new_password, current_user.hashed_password):
+        if AuthManager.verify_password(change_request.new_password, current_user.hashed_password):
             raise HTTPException(
                 status_code=400,
                 detail="New password must be different from current password"
             )
         
-        new_hashed_password = AuthManager.get_password_hash(request.new_password)
+        new_hashed_password = AuthManager.get_password_hash(change_request.new_password)
         current_user.hashed_password = new_hashed_password
         current_user.updated_at = datetime.utcnow()
         
