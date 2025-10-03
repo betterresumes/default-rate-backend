@@ -293,7 +293,7 @@ async def join_organization(
 
 @router.post("/refresh", response_model=Token)
 @rate_limit_api
-async def refresh_token(current_user: User = Depends(get_current_active_user)):
+async def refresh_token(request: Request, current_user: User = Depends(get_current_active_user)):
     """Refresh the access token."""
     
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -309,7 +309,7 @@ async def refresh_token(current_user: User = Depends(get_current_active_user)):
 
 @router.post("/logout")
 @rate_limit_api
-async def logout():
+async def logout(request: Request):
     """Logout user (client should discard token)."""
     return {"message": "Successfully logged out"}
 
