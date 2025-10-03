@@ -18,7 +18,7 @@ from ...services.ml_service import ml_model
 from ...services.quarterly_ml_service import quarterly_ml_model
 from .auth_multi_tenant import get_current_active_user as current_verified_user
 from app.workers.celery_app import celery_app
-from ...middleware.rate_limiting import rate_limit_ml, rate_limit_upload, rate_limit_data_read, rate_limit_analytics, rate_limit_job_control
+from ...middleware.rate_limiting import rate_limit_ml, rate_limit_upload, rate_limit_data_read, rate_limit_analytics, rate_limit_job_control, rate_limit_health
 
 router = APIRouter()
 
@@ -149,8 +149,8 @@ def is_prediction_owner(prediction, current_user):
 @router.post("/annual", response_model=Dict)
 @rate_limit_ml
 async def create_annual_prediction(
-    http_request: Request,
-    request: AnnualPredictionRequest,
+    request: Request,
+    prediction_request: AnnualPredictionRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
@@ -167,16 +167,16 @@ async def create_annual_prediction(
         
         company = create_or_get_company(
             db=db,
-            company_symbol=request.company_symbol,
-            company_name=request.company_name,
-            market_cap=request.market_cap,
-            sector=request.sector,
+            company_symbol=prediction_request.company_symbol,
+            company_name=prediction_request.company_name,
+            market_cap=prediction_request.market_cap,
+            sector=prediction_request.sector,
             user=current_user
         )
         
         existing_query = db.query(AnnualPrediction).filter(
             AnnualPrediction.company_id == company.id,
-            AnnualPrediction.reporting_year == request.reporting_year,
+            AnnualPrediction.reporting_year == prediction_request.reporting_year,
             AnnualPrediction.access_level == access_level
         )
         
@@ -185,26 +185,26 @@ async def create_annual_prediction(
         elif access_level == "personal":
             existing_query = existing_query.filter(AnnualPrediction.created_by == str(current_user.id))
         
-        if request.reporting_quarter:
-            existing_query = existing_query.filter(AnnualPrediction.reporting_quarter == request.reporting_quarter)
+        if prediction_request.reporting_quarter:
+            existing_query = existing_query.filter(AnnualPrediction.reporting_quarter == prediction_request.reporting_quarter)
         else:
             existing_query = existing_query.filter(AnnualPrediction.reporting_quarter.is_(None))
         
         existing_prediction = existing_query.first()
         
         if existing_prediction:
-            quarter_text = f" {request.reporting_quarter}" if request.reporting_quarter else ""
+            quarter_text = f" {prediction_request.reporting_quarter}" if prediction_request.reporting_quarter else ""
             raise HTTPException(
                 status_code=400,
-                detail=f"Annual prediction for {request.company_symbol} in {request.reporting_year}{quarter_text} already exists in your {access_level} scope"
+                detail=f"Annual prediction for {prediction_request.company_symbol} in {prediction_request.reporting_year}{quarter_text} already exists in your {access_level} scope"
             )
         
         financial_data = {
-            'long_term_debt_to_total_capital': request.long_term_debt_to_total_capital,
-            'total_debt_to_ebitda': request.total_debt_to_ebitda,
-            'net_income_margin': request.net_income_margin,
-            'ebit_to_interest_expense': request.ebit_to_interest_expense,
-            'return_on_assets': request.return_on_assets
+            'long_term_debt_to_total_capital': prediction_request.long_term_debt_to_total_capital,
+            'total_debt_to_ebitda': prediction_request.total_debt_to_ebitda,
+            'net_income_margin': prediction_request.net_income_margin,
+            'ebit_to_interest_expense': prediction_request.ebit_to_interest_expense,
+            'return_on_assets': prediction_request.return_on_assets
         }
         
         ml_result = await ml_model.predict_annual(financial_data)
@@ -214,14 +214,14 @@ async def create_annual_prediction(
             company_id=company.id,
             organization_id=organization_id,
             access_level=access_level,
-            reporting_year=request.reporting_year,
-            reporting_quarter=request.reporting_quarter,
+            reporting_year=prediction_request.reporting_year,
+            reporting_quarter=prediction_request.reporting_quarter,
             
-            long_term_debt_to_total_capital=request.long_term_debt_to_total_capital,
-            total_debt_to_ebitda=request.total_debt_to_ebitda,
-            net_income_margin=request.net_income_margin,
-            ebit_to_interest_expense=request.ebit_to_interest_expense,
-            return_on_assets=request.return_on_assets,
+            long_term_debt_to_total_capital=prediction_request.long_term_debt_to_total_capital,
+            total_debt_to_ebitda=prediction_request.total_debt_to_ebitda,
+            net_income_margin=prediction_request.net_income_margin,
+            ebit_to_interest_expense=prediction_request.ebit_to_interest_expense,
+            return_on_assets=prediction_request.return_on_assets,
             
             probability=ml_result['probability'],
             risk_level=ml_result['risk_level'],
@@ -242,22 +242,22 @@ async def create_annual_prediction(
         
         return {
             "success": True,
-            "message": f"Annual prediction created for {request.company_symbol}",
+            "message": f"Annual prediction created for {prediction_request.company_symbol}",
             "prediction": {
                 "id": str(prediction.id),
                 "company_id": str(company.id),
-                "company_symbol": request.company_symbol,
-                "company_name": request.company_name,
-                "sector": request.sector,
-                "market_cap": float(request.market_cap),
-                "reporting_year": request.reporting_year,
-                "reporting_quarter": request.reporting_quarter,
+                "company_symbol": prediction_request.company_symbol,
+                "company_name": prediction_request.company_name,
+                "sector": prediction_request.sector,
+                "market_cap": float(prediction_request.market_cap),
+                "reporting_year": prediction_request.reporting_year,
+                "reporting_quarter": prediction_request.reporting_quarter,
                 
-                "long_term_debt_to_total_capital": float(request.long_term_debt_to_total_capital),
-                "total_debt_to_ebitda": float(request.total_debt_to_ebitda),
-                "net_income_margin": float(request.net_income_margin),
-                "ebit_to_interest_expense": float(request.ebit_to_interest_expense),
-                "return_on_assets": float(request.return_on_assets),
+                "long_term_debt_to_total_capital": float(prediction_request.long_term_debt_to_total_capital),
+                "total_debt_to_ebitda": float(prediction_request.total_debt_to_ebitda),
+                "net_income_margin": float(prediction_request.net_income_margin),
+                "ebit_to_interest_expense": float(prediction_request.ebit_to_interest_expense),
+                "return_on_assets": float(prediction_request.return_on_assets),
                 
                 "probability": float(ml_result['probability']),
                 "risk_level": ml_result['risk_level'],
@@ -281,8 +281,8 @@ async def create_annual_prediction(
 @router.post("/quarterly", response_model=Dict)
 @rate_limit_ml  
 async def create_quarterly_prediction(
-    http_request: Request,
-    request: QuarterlyPredictionRequest,
+    request: Request,
+    prediction_request: QuarterlyPredictionRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
@@ -299,17 +299,17 @@ async def create_quarterly_prediction(
         
         company = create_or_get_company(
             db=db,
-            company_symbol=request.company_symbol,
-            company_name=request.company_name,
-            market_cap=request.market_cap,
-            sector=request.sector,
+            company_symbol=prediction_request.company_symbol,
+            company_name=prediction_request.company_name,
+            market_cap=prediction_request.market_cap,
+            sector=prediction_request.sector,
             user=current_user
         )
         
         existing_query = db.query(QuarterlyPrediction).filter(
             QuarterlyPrediction.company_id == company.id,
-            QuarterlyPrediction.reporting_year == request.reporting_year,
-            QuarterlyPrediction.reporting_quarter == request.reporting_quarter,
+            QuarterlyPrediction.reporting_year == prediction_request.reporting_year,
+            QuarterlyPrediction.reporting_quarter == prediction_request.reporting_quarter,
             QuarterlyPrediction.access_level == access_level
         )
         
@@ -323,14 +323,14 @@ async def create_quarterly_prediction(
         if existing_prediction:
             raise HTTPException(
                 status_code=400,
-                detail=f"Quarterly prediction for {request.company_symbol} in {request.reporting_year} {request.reporting_quarter} already exists in your {access_level} scope"
+                detail=f"Quarterly prediction for {prediction_request.company_symbol} in {prediction_request.reporting_year} {prediction_request.reporting_quarter} already exists in your {access_level} scope"
             )
         
         financial_data = {
-            'total_debt_to_ebitda': request.total_debt_to_ebitda,
-            'sga_margin': request.sga_margin,
-            'long_term_debt_to_total_capital': request.long_term_debt_to_total_capital,
-            'return_on_capital': request.return_on_capital
+            'total_debt_to_ebitda': prediction_request.total_debt_to_ebitda,
+            'sga_margin': prediction_request.sga_margin,
+            'long_term_debt_to_total_capital': prediction_request.long_term_debt_to_total_capital,
+            'return_on_capital': prediction_request.return_on_capital
         }
         
         ml_result = await quarterly_ml_model.predict_quarterly(financial_data)
@@ -340,13 +340,13 @@ async def create_quarterly_prediction(
             company_id=company.id,
             organization_id=organization_id,
             access_level=access_level,
-            reporting_year=request.reporting_year,
-            reporting_quarter=request.reporting_quarter,
+            reporting_year=prediction_request.reporting_year,
+            reporting_quarter=prediction_request.reporting_quarter,
             
-            total_debt_to_ebitda=request.total_debt_to_ebitda,
-            sga_margin=request.sga_margin,
-            long_term_debt_to_total_capital=request.long_term_debt_to_total_capital,
-            return_on_capital=request.return_on_capital,
+            total_debt_to_ebitda=prediction_request.total_debt_to_ebitda,
+            sga_margin=prediction_request.sga_margin,
+            long_term_debt_to_total_capital=prediction_request.long_term_debt_to_total_capital,
+            return_on_capital=prediction_request.return_on_capital,
             
             logistic_probability=ml_result.get('logistic_probability'),
             gbm_probability=ml_result.get('gbm_probability'),
@@ -369,21 +369,21 @@ async def create_quarterly_prediction(
         
         return {
             "success": True,
-            "message": f"Quarterly prediction created for {request.company_symbol}",
+            "message": f"Quarterly prediction created for {prediction_request.company_symbol}",
             "prediction": {
                 "id": str(prediction.id),
                 "company_id": str(company.id),
-                "company_symbol": request.company_symbol,
-                "company_name": request.company_name,
-                "sector": request.sector,
-                "market_cap": float(request.market_cap),
-                "reporting_year": request.reporting_year,
-                "reporting_quarter": request.reporting_quarter,
+                "company_symbol": prediction_request.company_symbol,
+                "company_name": prediction_request.company_name,
+                "sector": prediction_request.sector,
+                "market_cap": float(prediction_request.market_cap),
+                "reporting_year": prediction_request.reporting_year,
+                "reporting_quarter": prediction_request.reporting_quarter,
                 
-                "total_debt_to_ebitda": float(request.total_debt_to_ebitda),
-                "sga_margin": float(request.sga_margin),
-                "long_term_debt_to_total_capital": float(request.long_term_debt_to_total_capital),
-                "return_on_capital": float(request.return_on_capital),
+                "total_debt_to_ebitda": float(prediction_request.total_debt_to_ebitda),
+                "sga_margin": float(prediction_request.sga_margin),
+                "long_term_debt_to_total_capital": float(prediction_request.long_term_debt_to_total_capital),
+                "return_on_capital": float(prediction_request.return_on_capital),
                 
                 "logistic_probability": float(ml_result.get('logistic_probability', 0)),
                 "gbm_probability": float(ml_result.get('gbm_probability', 0)),
@@ -1423,6 +1423,7 @@ async def get_job_details(
         raise HTTPException(status_code=500, detail=f"Error getting job details: {str(e)}")
 
 @router.post("/jobs/{job_id}/results")
+@rate_limit_data_read
 async def get_job_results(
     job_id: str,
     request: JobResultsRequest,
@@ -1914,6 +1915,7 @@ async def cancel_job(
         raise HTTPException(status_code=500, detail=f"Error cancelling job: {str(e)}")
 
 @router.get("/jobs/{job_id}/debug")
+@rate_limit_analytics
 async def debug_job_predictions(
     job_id: str,
     db: Session = Depends(get_db),
@@ -2019,6 +2021,7 @@ async def debug_job_predictions(
 
 
 @router.get("/debug/worker-health")
+@rate_limit_analytics
 async def debug_worker_health(
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
@@ -2057,9 +2060,9 @@ async def debug_worker_health(
 @router.put("/annual/{prediction_id}")
 @rate_limit_ml
 async def update_annual_prediction(
-    http_request: Request,
+    request: Request,
     prediction_id: str,
-    request: AnnualPredictionRequest,
+    prediction_request: AnnualPredictionRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
@@ -2085,19 +2088,19 @@ async def update_annual_prediction(
             )
         
         # Update financial data
-        prediction.long_term_debt_to_total_capital = request.long_term_debt_to_total_capital
-        prediction.total_debt_to_ebitda = request.total_debt_to_ebitda
-        prediction.net_income_margin = request.net_income_margin
-        prediction.ebit_to_interest_expense = request.ebit_to_interest_expense
-        prediction.return_on_assets = request.return_on_assets
+        prediction.long_term_debt_to_total_capital = prediction_request.long_term_debt_to_total_capital
+        prediction.total_debt_to_ebitda = prediction_request.total_debt_to_ebitda
+        prediction.net_income_margin = prediction_request.net_income_margin
+        prediction.ebit_to_interest_expense = prediction_request.ebit_to_interest_expense
+        prediction.return_on_assets = prediction_request.return_on_assets
         
         # Recalculate ML prediction
         financial_data = {
-            'long_term_debt_to_total_capital': request.long_term_debt_to_total_capital,
-            'total_debt_to_ebitda': request.total_debt_to_ebitda,
-            'net_income_margin': request.net_income_margin,
-            'ebit_to_interest_expense': request.ebit_to_interest_expense,
-            'return_on_assets': request.return_on_assets
+            'long_term_debt_to_total_capital': prediction_request.long_term_debt_to_total_capital,
+            'total_debt_to_ebitda': prediction_request.total_debt_to_ebitda,
+            'net_income_margin': prediction_request.net_income_margin,
+            'ebit_to_interest_expense': prediction_request.ebit_to_interest_expense,
+            'return_on_assets': prediction_request.return_on_assets
         }
         
         ml_result = await ml_model.predict_annual(financial_data)
@@ -2337,6 +2340,7 @@ async def get_prediction_statistics(
         raise HTTPException(status_code=500, detail=f"Error deleting job: {str(e)}")
 
 @router.post("/jobs/{job_id}/cancel")
+@rate_limit_job_control
 async def cancel_job(
     request: Request, job_id: str,
     db: Session = Depends(get_db),
@@ -2405,9 +2409,9 @@ async def cancel_job(
 @router.put("/quarterly/{prediction_id}")
 @rate_limit_ml
 async def update_quarterly_prediction(
-    http_request: Request,
+    request: Request,
     prediction_id: str,
-    request: QuarterlyPredictionRequest,
+    prediction_request: QuarterlyPredictionRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
@@ -2460,25 +2464,25 @@ async def update_quarterly_prediction(
                 raise HTTPException(status_code=403, detail=detail)
         
         company = prediction.company
-        company.name = request.company_name
-        company.market_cap = request.market_cap   # Market cap should be stored as-is (already in millions)
-        company.sector = request.sector
+        company.name = prediction_request.company_name
+        company.market_cap = prediction_request.market_cap   # Market cap should be stored as-is (already in millions)
+        company.sector = prediction_request.sector
         
         financial_data = {
-            'total_debt_to_ebitda': request.total_debt_to_ebitda,
-            'sga_margin': request.sga_margin,
-            'long_term_debt_to_total_capital': request.long_term_debt_to_total_capital,
-            'return_on_capital': request.return_on_capital
+            'total_debt_to_ebitda': prediction_request.total_debt_to_ebitda,
+            'sga_margin': prediction_request.sga_margin,
+            'long_term_debt_to_total_capital': prediction_request.long_term_debt_to_total_capital,
+            'return_on_capital': prediction_request.return_on_capital
         }
         
         ml_result = await quarterly_ml_model.predict_quarterly(financial_data)
         
-        prediction.reporting_year = request.reporting_year
-        prediction.reporting_quarter = request.reporting_quarter
-        prediction.total_debt_to_ebitda = request.total_debt_to_ebitda
-        prediction.sga_margin = request.sga_margin
-        prediction.long_term_debt_to_total_capital = request.long_term_debt_to_total_capital
-        prediction.return_on_capital = request.return_on_capital
+        prediction.reporting_year = prediction_request.reporting_year
+        prediction.reporting_quarter = prediction_request.reporting_quarter
+        prediction.total_debt_to_ebitda = prediction_request.total_debt_to_ebitda
+        prediction.sga_margin = prediction_request.sga_margin
+        prediction.long_term_debt_to_total_capital = prediction_request.long_term_debt_to_total_capital
+        prediction.return_on_capital = prediction_request.return_on_capital
         prediction.logistic_probability = ml_result.get('logistic_probability')
         prediction.gbm_probability = ml_result.get('gbm_probability')
         prediction.ensemble_probability = ml_result.get('ensemble_probability')
@@ -2498,21 +2502,21 @@ async def update_quarterly_prediction(
         
         return {
             "success": True,
-            "message": f"Quarterly prediction updated for {request.company_symbol}",
+            "message": f"Quarterly prediction updated for {prediction_request.company_symbol}",
             "prediction": {
                 "id": str(prediction.id),
                 "company_id": str(prediction.company_id),
-                "company_symbol": request.company_symbol,
-                "company_name": request.company_name,
-                "sector": request.sector,
-                "market_cap": float(request.market_cap),
-                "reporting_year": request.reporting_year,
-                "reporting_quarter": request.reporting_quarter,
+                "company_symbol": prediction_request.company_symbol,
+                "company_name": prediction_request.company_name,
+                "sector": prediction_request.sector,
+                "market_cap": float(prediction_request.market_cap),
+                "reporting_year": prediction_request.reporting_year,
+                "reporting_quarter": prediction_request.reporting_quarter,
                 
-                "total_debt_to_ebitda": float(request.total_debt_to_ebitda),
-                "sga_margin": float(request.sga_margin),
-                "long_term_debt_to_total_capital": float(request.long_term_debt_to_total_capital),
-                "return_on_capital": float(request.return_on_capital),
+                "total_debt_to_ebitda": float(prediction_request.total_debt_to_ebitda),
+                "sga_margin": float(prediction_request.sga_margin),
+                "long_term_debt_to_total_capital": float(prediction_request.long_term_debt_to_total_capital),
+                "return_on_capital": float(prediction_request.return_on_capital),
                 
                 "logistic_probability": float(ml_result.get('logistic_probability', 0)),
                 "gbm_probability": float(ml_result.get('gbm_probability', 0)),
@@ -2537,146 +2541,9 @@ async def update_quarterly_prediction(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error updating quarterly prediction: {str(e)}")
 
-@router.delete("/annual/{prediction_id}")
-async def delete_annual_prediction(
-    request: Request, prediction_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(current_verified_user)
-):
-    """Delete an annual prediction with proper access control"""
-    try:
-        if not check_user_permissions(current_user, "user"):
-            raise HTTPException(
-                status_code=403,
-                detail="Authentication required to delete predictions"
-            )
-
-        prediction = db.query(AnnualPrediction).filter(AnnualPrediction.id == prediction_id).first()
-        if not prediction:
-            raise HTTPException(status_code=404, detail="Prediction not found")
-        
-        if prediction.access_level == "system":
-            if current_user.role != "super_admin":
-                raise HTTPException(
-                    status_code=403,
-                    detail="Only super admin can delete system-level predictions"
-                )
-        else:
-            can_delete = False
-            
-            if current_user.role == "super_admin":
-                can_delete = True
-                
-            elif is_prediction_owner(prediction, current_user):
-                can_delete = True
-                
-            elif (prediction.access_level == "organization" and 
-                  current_user.organization_id and 
-                  prediction.organization_id == current_user.organization_id and
-                  current_user.role in ["org_admin", "org_member"]):
-                can_delete = True
-            
-            if not can_delete:
-                if prediction.access_level == "organization":
-                    if not current_user.organization_id:
-                        detail = "You must be part of an organization to delete organization predictions"
-                    elif prediction.organization_id != current_user.organization_id:
-                        detail = "You can only delete predictions within your organization"
-                    elif current_user.role not in ["org_admin", "org_member"]:
-                        detail = "You need organization member role to delete organization predictions"
-                    else:
-                        detail = "You can only delete predictions that you created or organization predictions within your org"
-                else:
-                    detail = "You can only delete predictions that you created"
-                    
-                raise HTTPException(status_code=403, detail=detail)
-        
-        db.delete(prediction)
-        db.commit()
-        
-        return {
-            "success": True,
-            "message": f"Annual prediction deleted successfully",
-            "deleted_id": prediction_id
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error deleting annual prediction: {str(e)}")
-
-@router.delete("/quarterly/{prediction_id}")
-async def delete_quarterly_prediction(
-    prediction_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(current_verified_user)
-):
-    """Delete a quarterly prediction with proper access control"""
-    try:
-        if not check_user_permissions(current_user, "user"):
-            raise HTTPException(
-                status_code=403,
-                detail="Authentication required to delete predictions"
-            )
-
-        prediction = db.query(QuarterlyPrediction).filter(QuarterlyPrediction.id == prediction_id).first()
-        if not prediction:
-            raise HTTPException(status_code=404, detail="Prediction not found")
-        
-        if prediction.access_level == "system":
-            if current_user.role != "super_admin":
-                raise HTTPException(
-                    status_code=403,
-                    detail="Only super admin can delete system-level predictions"
-                )
-        else:
-            can_delete = False
-            
-            if current_user.role == "super_admin":
-                can_delete = True
-                
-            elif is_prediction_owner(prediction, current_user):
-                can_delete = True
-                
-            elif (prediction.access_level == "organization" and 
-                  current_user.organization_id and 
-                  prediction.organization_id == current_user.organization_id and
-                  current_user.role in ["org_admin", "org_member"]):
-                can_delete = True
-            
-            if not can_delete:
-                if prediction.access_level == "organization":
-                    if not current_user.organization_id:
-                        detail = "You must be part of an organization to delete organization predictions"
-                    elif prediction.organization_id != current_user.organization_id:
-                        detail = "You can only delete predictions within your organization"
-                    elif current_user.role not in ["org_admin", "org_member"]:
-                        detail = "You need organization member role to delete organization predictions"
-                    else:
-                        detail = "You can only delete predictions that you created or organization predictions within your org"
-                else:
-                    detail = "You can only delete predictions that you created"
-                    
-                raise HTTPException(status_code=403, detail=detail)
-        
-        db.delete(prediction)
-        db.commit()
-        
-        return {
-            "success": True,
-            "message": f"Quarterly prediction deleted successfully",
-            "deleted_id": prediction_id
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error deleting quarterly prediction: {str(e)}")
-
 
 @router.get("/stats")
+@rate_limit_analytics
 async def get_prediction_statistics(
     request: Request, db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
@@ -3293,6 +3160,7 @@ async def get_platform_statistics(db: Session):
     }
 
 @router.get("/debug/prediction/{prediction_id}")
+@rate_limit_analytics
 async def debug_prediction_ownership(
     prediction_id: str,
     db: Session = Depends(get_db),
@@ -3358,6 +3226,7 @@ async def debug_prediction_ownership(
 @router.get("/health/redis", 
            summary="Redis Connection Health Check",
            description="Check if Redis connection is working for Celery tasks")
+@rate_limit_health
 async def redis_health_check():
     """Check Redis connection health"""
     try:

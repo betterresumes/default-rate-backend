@@ -162,7 +162,7 @@ async def execute_scaling(request: Request, background_tasks: BackgroundTasks):
 
 @router.post("/manual")
 @rate_limit_job_control
-async def manual_scaling(http_request: Request, request: ManualScalingRequest):
+async def manual_scaling(request: Request, scaling_request: ManualScalingRequest):
     """
     Trigger manual scaling to specific worker count
     
@@ -171,31 +171,31 @@ async def manual_scaling(http_request: Request, request: ManualScalingRequest):
     try:
         # Validate worker count
         config = auto_scaling_service.scaling_config
-        if request.target_workers < config["min_workers"]:
+        if scaling_request.target_workers < config["min_workers"]:
             raise HTTPException(
                 status_code=400, 
-                detail=f"Target workers ({request.target_workers}) below minimum ({config['min_workers']})"
+                detail=f"Target workers ({scaling_request.target_workers}) below minimum ({config['min_workers']})"
             )
         
-        if request.target_workers > config["max_workers"]:
+        if scaling_request.target_workers > config["max_workers"]:
             raise HTTPException(
                 status_code=400,
-                detail=f"Target workers ({request.target_workers}) above maximum ({config['max_workers']})"
+                detail=f"Target workers ({scaling_request.target_workers}) above maximum ({config['max_workers']})"
             )
         
         # Create manual scaling recommendation
         from app.services.auto_scaling_service import ScalingRecommendation
         
         current_workers = auto_scaling_service._estimate_current_workers()
-        action = "scale_up" if request.target_workers > current_workers else "scale_down"
-        if request.target_workers == current_workers:
+        action = "scale_up" if scaling_request.target_workers > current_workers else "scale_down"
+        if scaling_request.target_workers == current_workers:
             action = "maintain"
         
         recommendation = ScalingRecommendation(
             action=action,
-            target_workers=request.target_workers,
+            target_workers=scaling_request.target_workers,
             current_workers=current_workers,
-            reason=f"Manual scaling: {request.reason}",
+            reason=f"Manual scaling: {scaling_request.reason}",
             priority=1,
             cost_impact="manual"
         )
@@ -208,8 +208,8 @@ async def manual_scaling(http_request: Request, request: ManualScalingRequest):
                 "success": True,
                 "action": action,
                 "current_workers": current_workers,
-                "target_workers": request.target_workers,
-                "reason": request.reason,
+                "target_workers": scaling_request.target_workers,
+                "reason": scaling_request.reason,
                 "executed": True,
                 "timestamp": datetime.now().isoformat()
             }
