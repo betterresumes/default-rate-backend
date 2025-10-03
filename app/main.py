@@ -34,20 +34,54 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize database tables and services on startup"""
+    """Initialize database tables and services on startup with comprehensive logging"""
+    
+    # Enhanced startup logging
+    logger.info("=" * 60)
+    logger.info("🚀 ACCUNODE API STARTUP")
+    logger.info("=" * 60)
+    
+    # Environment information
     environment = os.getenv("ENVIRONMENT", "development")
+    aws_region = os.getenv("AWS_REGION", "local")
+    debug_mode = os.getenv("DEBUG", "false").lower() == "true"
     
-    logger.info("🚀 Starting AccuNode API...")
     logger.info(f"🌍 Environment: {environment}")
-    logger.info(f"🏗️ AWS Region: {os.getenv('AWS_REGION', 'local')}")
+    logger.info(f"🏗️ AWS Region: {aws_region}")
+    logger.info(f"🐛 Debug Mode: {debug_mode}")
     logger.info(f"📅 Started at: {datetime.utcnow().isoformat()}")
+    logger.info(f"🐍 Python Version: {os.sys.version}")
     
-    logger.info("📊 Initializing database connection...")
+    # Configuration verification
+    logger.info("\n� Configuration Check:")
+    from app.core.config import Config
+    config = Config()
+    
+    # Check database configuration
+    logger.info("�📊 Database Configuration:")
+    if hasattr(config, 'DATABASE_URL') and config.DATABASE_URL:
+        # Don't log full URL for security, just indicate it's configured
+        db_host = "configured" if config.DATABASE_URL else "not configured"
+        logger.info(f"   Database URL: {db_host}")
+    else:
+        logger.error("   ❌ DATABASE_URL not configured!")
+    
+    # Check Redis configuration
+    logger.info("🔴 Redis Configuration:")
+    redis_url = os.getenv("REDIS_URL", "")
+    if redis_url:
+        logger.info("   Redis URL: configured")
+    else:
+        logger.warning("   ⚠️ Redis URL not configured - rate limiting may fail")
+    
+    # Initialize database
+    logger.info("\n📊 Initializing Database...")
     try:
         create_tables()
         logger.info("✅ Database: Connected and tables verified")
     except Exception as e:
         logger.error(f"❌ Database: Connection failed - {e}")
+        logger.error("   This may cause API failures. Check DATABASE_URL configuration.")
     
     logger.info("🔄 Checking Redis connection...")
     try:

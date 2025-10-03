@@ -14,17 +14,55 @@ env_file = os.path.join(project_root, '.env')
 if os.path.exists(env_file):
     load_dotenv(env_file)
     
-# Debug: Print environment loading status
-print(f"🔄 Celery using Redis URL: {os.getenv('REDIS_URL', 'NOT FOUND')[:20]}...{os.getenv('REDIS_URL', '')}")
+# Enhanced worker startup logging
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Test database URL availability
-db_url = os.getenv('DATABASE_URL')
-if db_url:
-    # Clean the database URL
-    db_url_clean = db_url.strip().strip('"').strip("'")
-    print(f"✅ Database URL loaded: {db_url_clean[:20]}...{db_url_clean[-20:]}")
+logger.info("=" * 50)
+logger.info("🔧 CELERY WORKER STARTUP")
+logger.info("=" * 50)
+
+# Environment check
+environment = os.getenv("ENVIRONMENT", "development")
+aws_region = os.getenv("AWS_REGION", "local")
+logger.info(f"🌍 Environment: {environment}")
+logger.info(f"🏗️ AWS Region: {aws_region}")
+
+# Redis configuration check
+redis_url = os.getenv('REDIS_URL')
+if redis_url:
+    # Show first and last parts for debugging without exposing credentials
+    redis_display = f"{redis_url[:20]}...{redis_url[-10:]}" if len(redis_url) > 30 else redis_url
+    logger.info(f"✅ Redis URL configured: {redis_display}")
 else:
-    print("❌ DATABASE_URL not found in environment!")
+    logger.error("❌ REDIS_URL not found! Worker will fail to start.")
+    logger.info("   Available environment variables:")
+    for key in sorted(os.environ.keys()):
+        if 'redis' in key.lower() or 'cache' in key.lower():
+            logger.info(f"      {key}: {os.environ[key]}")
+
+# Database URL check (for workers that need DB access)
+db_url = os.getenv('DATABASE_URL')
+# Also check the SSM parameter format that might be causing issues
+db_url_alt = os.getenv('DATABASE_URL_ALT') or os.getenv('DB_URL')
+
+if db_url:
+    logger.info(f"✅ DATABASE_URL configured: {db_url[:20]}...{db_url[-20:]}")
+elif db_url_alt:
+    logger.info(f"✅ Alternative DB URL found: {db_url_alt[:20]}...{db_url_alt[-20:]}")
+    os.environ['DATABASE_URL'] = db_url_alt  # Set as primary
+else:
+    logger.error("❌ No DATABASE_URL found!")
+    logger.info("   Checked variables: DATABASE_URL, DATABASE_URL_ALT, DB_URL")
+    logger.info("   Available DB-related environment variables:")
+    for key in sorted(os.environ.keys()):
+        if any(keyword in key.lower() for keyword in ['db', 'database', 'postgres']):
+            value = os.environ[key]
+            # Mask sensitive info
+            if any(sensitive in key.lower() for sensitive in ['password', 'secret', 'key']):
+                value = "***masked***"
+            logger.info(f"      {key}: {value}")
 
 if sys.platform == "darwin":  
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")

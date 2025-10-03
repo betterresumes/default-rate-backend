@@ -9,18 +9,52 @@ import logging
 logger = logging.getLogger(__name__)
 
 def get_parameter_store_value(parameter_name: str, default_value: str = "") -> str:
-    """Get value from AWS Systems Manager Parameter Store."""
-    try:
-        # Only use Parameter Store in AWS environment
-        if os.getenv("AWS_REGION") and os.getenv("ENVIRONMENT", "").lower() == "production":
-            ssm = boto3.client('ssm', region_name=os.getenv("AWS_REGION", "us-east-1"))
-            response = ssm.get_parameter(Name=parameter_name, WithDecryption=True)
-            return response['Parameter']['Value']
-    except Exception as e:
-        logger.warning(f"Failed to get parameter {parameter_name} from Parameter Store: {e}")
+    """Get value from AWS Systems Manager Parameter Store with improved error handling."""
     
-    # Fallback to environment variable or default
-    return os.getenv(parameter_name.replace("/accunode/", "").upper(), default_value)
+    # Extract environment variable name from parameter path
+    env_var_name = parameter_name.replace("/accunode/", "").replace("/", "_").upper()
+    
+    # Always try environment variable first (works in all environments)
+    env_value = os.getenv(env_var_name)
+    if env_value:
+        logger.info(f"✅ Using environment variable {env_var_name}")
+        return env_value
+    
+    # Try legacy DATABASE_URL for backward compatibility
+    if "database" in parameter_name.lower():
+        database_url = os.getenv("DATABASE_URL")
+        if database_url:
+            logger.info("✅ Using DATABASE_URL environment variable")
+            return database_url
+    
+    try:
+        # Only use Parameter Store if explicitly configured and in AWS
+        aws_region = os.getenv("AWS_REGION")
+        use_parameter_store = os.getenv("USE_PARAMETER_STORE", "false").lower() == "true"
+        
+        if aws_region and use_parameter_store:
+            logger.info(f"🔍 Attempting to fetch {parameter_name} from Parameter Store...")
+            ssm = boto3.client('ssm', region_name=aws_region)
+            response = ssm.get_parameter(Name=parameter_name, WithDecryption=True)
+            logger.info(f"✅ Successfully retrieved {parameter_name} from Parameter Store")
+            return response['Parameter']['Value']
+        else:
+            logger.info(f"⚠️ Parameter Store not configured (AWS_REGION: {aws_region}, USE_PARAMETER_STORE: {use_parameter_store})")
+            
+    except Exception as e:
+        logger.error(f"❌ Failed to get parameter {parameter_name} from Parameter Store: {e}")
+        logger.info("📋 Available environment variables:")
+        for key in sorted(os.environ.keys()):
+            if any(keyword in key.lower() for keyword in ['database', 'redis', 'secret']):
+                logger.info(f"   {key}: {'***' if 'secret' in key.lower() or 'password' in key.lower() else os.environ[key]}")
+    
+    # Final fallback
+    if default_value:
+        logger.warning(f"⚠️ Using default value for {parameter_name}")
+        return default_value
+    
+    logger.error(f"❌ No value found for {parameter_name}")
+    return ""
 
 class Config:
     """Base configuration with AWS Parameter Store support."""
@@ -33,14 +67,14 @@ class Config:
     PORT: int = int(os.getenv("PORT", "8000"))
     
     # AWS-compatible database URL with Parameter Store fallback
-    DATABASE_URL: str = get_parameter_store_value("/accunode/database/url", os.getenv("DATABASE_URL", ""))
+    DATABASE_URL: str = get_parameter_store_value("/accunode/database-url", os.getenv("DATABASE_URL", ""))
     
-    # Redis URL with ElastiCache support
-    REDIS_URL: str = get_parameter_store_value("/accunode/redis/url", os.getenv("REDIS_URL", "redis://localhost:6379"))
+    # Redis Configuration
+    REDIS_URL: str = get_parameter_store_value("/accunode/redis-url", os.getenv("REDIS_URL", "redis://localhost:6379"))
     
-    # Secure secrets from Parameter Store
-    SECRET_KEY: str = get_parameter_store_value("/accunode/secrets/secret_key", os.getenv("SECRET_KEY", "your-secret-key-change-in-production"))
-    JWT_SECRET: str = get_parameter_store_value("/accunode/secrets/jwt_secret", os.getenv("JWT_SECRET", "your-jwt-secret-change-in-production"))
+    # Security Configuration
+    SECRET_KEY: str = get_parameter_store_value("/accunode/secrets/secret-key", os.getenv("SECRET_KEY", "your-secret-key-change-in-production"))
+    JWT_SECRET: str = get_parameter_store_value("/accunode/jwt-secret", os.getenv("JWT_SECRET", "your-jwt-secret-change-in-production"))
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
     
     # AWS-specific settings
@@ -58,9 +92,9 @@ class Config:
     MAX_UPLOAD_SIZE: int = int(os.getenv("MAX_UPLOAD_SIZE", "10485760"))  # 10MB
     ALLOWED_EXTENSIONS: set = {".xlsx", ".xls", ".csv"}
     
-    # Celery configuration with Redis backend
-    CELERY_BROKER_URL: str = get_parameter_store_value("/accunode/celery/broker_url", os.getenv("CELERY_BROKER_URL", ""))
-    CELERY_RESULT_BACKEND: str = get_parameter_store_value("/accunode/celery/result_backend", os.getenv("CELERY_RESULT_BACKEND", ""))
+        # Celery Configuration (Redis)
+    CELERY_BROKER_URL: str = get_parameter_store_value("/accunode/celery-broker-url", os.getenv("CELERY_BROKER_URL", ""))
+    CELERY_RESULT_BACKEND: str = get_parameter_store_value("/accunode/celery-result-backend", os.getenv("CELERY_RESULT_BACKEND", ""))
     
     # Set broker URLs from REDIS_URL if not explicitly set
     @property
