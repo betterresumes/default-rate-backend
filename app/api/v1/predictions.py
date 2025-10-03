@@ -410,7 +410,7 @@ async def create_quarterly_prediction(
 @router.get("/annual", response_model=Dict)
 @rate_limit_data_read
 async def get_annual_predictions(
-    request: Request, request: Request, page: int = 1,
+    request: Request, page: int = 1,
     size: int = 10,
     company_symbol: Optional[str] = None,
     reporting_year: Optional[str] = None,
@@ -501,7 +501,7 @@ async def get_annual_predictions(
 @router.get("/quarterly", response_model=Dict)
 @rate_limit_data_read
 async def get_quarterly_predictions(
-    request: Request, request: Request, page: int = 1,
+    request: Request, page: int = 1,
     size: int = 10,
     company_symbol: Optional[str] = None,
     reporting_year: Optional[str] = None,
@@ -596,7 +596,7 @@ async def get_quarterly_predictions(
 @router.get("/annual/system", response_model=Dict)
 @rate_limit_data_read
 async def get_system_annual_predictions(
-    request: Request, request: Request, page: int = 1,
+    request: Request, page: int = 1,
     size: int = 10,
     company_symbol: Optional[str] = None,
     reporting_year: Optional[str] = None,
@@ -696,7 +696,7 @@ async def get_system_annual_predictions(
 @router.get("/quarterly/system", response_model=Dict)
 @rate_limit_data_read
 async def get_system_quarterly_predictions(
-    request: Request, request: Request, page: int = 1,
+    request: Request, page: int = 1,
     size: int = 10,
     company_symbol: Optional[str] = None,
     reporting_year: Optional[str] = None,
@@ -975,7 +975,7 @@ async def bulk_upload_predictions(
 @router.post("/annual/bulk-upload-async")
 @rate_limit_upload
 async def bulk_upload_annual_async(
-    request: Request, request: Request, background_tasks: BackgroundTasks,
+    request: Request, background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
@@ -1077,7 +1077,7 @@ async def bulk_upload_annual_async(
 @router.post("/quarterly/bulk-upload-async")
 @rate_limit_upload
 async def bulk_upload_quarterly_async(
-    request: Request, request: Request, background_tasks: BackgroundTasks,
+    request: Request, background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
@@ -1179,7 +1179,7 @@ async def bulk_upload_quarterly_async(
 @router.get("/jobs/{job_id}/status")
 @rate_limit_data_read
 async def get_bulk_upload_job_status(
-    request: Request, request: Request, job_id: str,
+    request: Request, job_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
@@ -1211,7 +1211,7 @@ async def get_bulk_upload_job_status(
 @router.get("/jobs")
 @rate_limit_data_read
 async def list_bulk_upload_jobs(
-    request: Request, request: Request, status: Optional[str] = None,
+    request: Request, status: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
     db: Session = Depends(get_db),
@@ -1287,7 +1287,7 @@ async def list_bulk_upload_jobs(
 @router.get("/jobs/{job_id}")
 @rate_limit_data_read
 async def get_job_details(
-    request: Request, request: Request, job_id: str,
+    request: Request, job_id: str,
     include_errors: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
@@ -1790,7 +1790,7 @@ async def get_job_results(
 @router.delete("/jobs/{job_id}")
 @rate_limit_job_control
 async def delete_job(
-    request: Request, request: Request, job_id: str,
+    request: Request, job_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
@@ -1850,7 +1850,7 @@ async def delete_job(
 @router.post("/jobs/{job_id}/cancel")
 @rate_limit_job_control
 async def cancel_job(
-    request: Request, request: Request, job_id: str,
+    request: Request, job_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
@@ -1966,7 +1966,8 @@ async def debug_job_predictions(
                 query1 = db.query(AnnualPrediction).filter(
                     AnnualPrediction.created_at >= start_time,
                     AnnualPrediction.created_at <= end_time,
-                    AnnualPrediction.created_by ==
+                    AnnualPrediction.created_by == user_id
+                )
                 if organization_id:
                     query1 = query1.filter(AnnualPrediction.organization_id == organization_id)
                 elif job.organization_id:
@@ -2130,7 +2131,7 @@ async def update_annual_prediction(
 @router.delete("/annual/{prediction_id}")
 @rate_limit_ml
 async def delete_annual_prediction(
-    request: Request, request: Request, prediction_id: str,
+    request: Request, prediction_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
@@ -2171,7 +2172,7 @@ async def delete_annual_prediction(
 @router.get("/stats")
 @rate_limit_analytics
 async def get_prediction_statistics(
-    request: Request, request: Request, db: Session = Depends(get_db),
+    request: Request, db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
     """Get comprehensive prediction statistics - Available to all authenticated users"""
@@ -2336,7 +2337,7 @@ async def get_prediction_statistics(
 
 @router.post("/jobs/{job_id}/cancel")
 async def cancel_job(
-    request: Request, request: Request, job_id: str,
+    request: Request, job_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
@@ -2668,7 +2669,7 @@ async def update_quarterly_prediction(
 
 @router.delete("/annual/{prediction_id}")
 async def delete_annual_prediction(
-    request: Request, request: Request, prediction_id: str,
+    request: Request, prediction_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
@@ -2807,7 +2808,7 @@ async def delete_quarterly_prediction(
 
 @router.get("/stats")
 async def get_prediction_statistics(
-    request: Request, request: Request, db: Session = Depends(get_db),
+    request: Request, db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
     """Get comprehensive prediction statistics - Available to all authenticated users"""
@@ -3069,7 +3070,7 @@ async def get_dashboard_post(
 @router.get("/dashboard")
 @rate_limit_analytics
 async def get_dashboard(
-    request: Request, request: Request, include_platform_stats: bool = False,
+    request: Request, include_platform_stats: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
