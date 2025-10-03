@@ -2057,6 +2057,7 @@ async def debug_worker_health(
 @router.put("/annual/{prediction_id}")
 @rate_limit_ml
 async def update_annual_prediction(
+    http_request: Request,
     prediction_id: str,
     request: AnnualPredictionRequest,
     db: Session = Depends(get_db),
@@ -2401,141 +2402,10 @@ async def cancel_job(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error cancelling job: {str(e)}")
 
-
-@router.put("/annual/{prediction_id}")
-async def update_annual_prediction(
-    prediction_id: str,
-    request: AnnualPredictionRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(current_verified_user)
-):
-    """Update an existing annual prediction with proper access control"""
-    try:
-        if not check_user_permissions(current_user, "user"):
-            raise HTTPException(
-                status_code=403,
-                detail="Authentication required to update predictions"
-            )
-
-        prediction = db.query(AnnualPrediction).filter(AnnualPrediction.id == prediction_id).first()
-        if not prediction:
-            raise HTTPException(status_code=404, detail="Prediction not found")
-        
-        if prediction.access_level == "system":
-            if current_user.role != "super_admin":
-                raise HTTPException(
-                    status_code=403,
-                    detail="Only super admin can update system-level predictions"
-                )
-        else:
-            can_update = False
-            
-            if current_user.role == "super_admin":
-                can_update = True
-                
-            elif is_prediction_owner(prediction, current_user):
-                can_update = True
-                
-            elif (prediction.access_level == "organization" and 
-                  current_user.organization_id and 
-                  prediction.organization_id == current_user.organization_id and
-                  current_user.role in ["org_admin", "org_member"]):
-                can_update = True
-            
-            if not can_update:
-                if prediction.access_level == "organization":
-                    if not current_user.organization_id:
-                        detail = "You must be part of an organization to edit organization predictions"
-                    elif prediction.organization_id != current_user.organization_id:
-                        detail = "You can only edit predictions within your organization"
-                    elif current_user.role not in ["org_admin", "org_member"]:
-                        detail = "You need organization member role to edit organization predictions"
-                    else:
-                        detail = "You can only edit predictions that you created or organization predictions within your org"
-                else:
-                    detail = "You can only edit predictions that you created"
-                    
-                raise HTTPException(status_code=403, detail=detail)
-        
-        company = prediction.company
-        company.name = request.company_name
-        company.market_cap = request.market_cap  # Market cap should be stored as-is (already in millions)
-        company.sector = request.sector
-        
-        financial_data = {
-            'long_term_debt_to_total_capital': request.long_term_debt_to_total_capital,
-            'total_debt_to_ebitda': request.total_debt_to_ebitda,
-            'net_income_margin': request.net_income_margin,
-            'ebit_to_interest_expense': request.ebit_to_interest_expense,
-            'return_on_assets': request.return_on_assets
-        }
-        
-        ml_result = await ml_model.predict_annual(financial_data)
-        
-        prediction.reporting_year = request.reporting_year
-        prediction.reporting_quarter = request.reporting_quarter
-        prediction.long_term_debt_to_total_capital = request.long_term_debt_to_total_capital
-        prediction.total_debt_to_ebitda = request.total_debt_to_ebitda
-        prediction.net_income_margin = request.net_income_margin
-        prediction.ebit_to_interest_expense = request.ebit_to_interest_expense
-        prediction.return_on_assets = request.return_on_assets
-        prediction.probability = ml_result['probability']
-        prediction.risk_level = ml_result['risk_level']
-        prediction.confidence = ml_result['confidence']
-        prediction.predicted_at = datetime.utcnow()
-        
-        db.commit()
-        db.refresh(prediction)
-        
-        organization_name = None
-        if prediction.organization_id:
-            org = db.query(Organization).filter(Organization.id == prediction.organization_id).first()
-            organization_name = org.name if org else None
-        
-        access_level = prediction.access_level
-        
-        return {
-            "success": True,
-            "message": f"Annual prediction updated for {request.company_symbol}",
-            "prediction": {
-                "id": str(prediction.id),
-                "company_id": str(prediction.company_id),
-                "company_symbol": request.company_symbol,
-                "company_name": request.company_name,
-                "sector": request.sector,
-                "market_cap": float(request.market_cap),
-                "reporting_year": request.reporting_year,
-                "reporting_quarter": request.reporting_quarter,
-                
-                "long_term_debt_to_total_capital": float(request.long_term_debt_to_total_capital),
-                "total_debt_to_ebitda": float(request.total_debt_to_ebitda),
-                "net_income_margin": float(request.net_income_margin),
-                "ebit_to_interest_expense": float(request.ebit_to_interest_expense),
-                "return_on_assets": float(request.return_on_assets),
-                
-                "probability": float(ml_result['probability']),
-                "risk_level": ml_result['risk_level'],
-                "confidence": float(ml_result['confidence']),
-                "predicted_at": prediction.predicted_at.isoformat(),
-                
-                "organization_id": str(prediction.organization_id) if prediction.organization_id else None,
-                "organization_name": organization_name,
-                "access_level": access_level,
-                "created_by": str(prediction.created_by),
-                "created_by_email": current_user.email,
-                "created_at": prediction.created_at.isoformat(),
-                "updated_at": prediction.updated_at.isoformat()
-            }
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error updating annual prediction: {str(e)}")
-
-@router.post("/quarterly/{prediction_id}")
+@router.put("/quarterly/{prediction_id}")
+@rate_limit_ml
 async def update_quarterly_prediction(
+    http_request: Request,
     prediction_id: str,
     request: QuarterlyPredictionRequest,
     db: Session = Depends(get_db),
@@ -3033,7 +2903,8 @@ class DashboardRequest(BaseModel):
 @router.post("/dashboard")
 @rate_limit_analytics
 async def get_dashboard_post(
-    request: DashboardRequest,
+    request: Request,
+    dashboard_request: DashboardRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
@@ -3058,7 +2929,7 @@ async def get_dashboard_post(
             "scope": scope
         }
 
-        if request.include_platform_stats:
+        if dashboard_request.include_platform_stats:
             platform_stats = await get_platform_statistics(db)
             response["platform_statistics"] = platform_stats
 
