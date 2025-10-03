@@ -245,7 +245,7 @@ def create_app() -> FastAPI:
 
     @app.get("/")
     @rate_limit_api
-    async def root(request: Request, ):
+    async def root(request: Request):
         """API root endpoint with service information."""
         return {
             "name": "Default Rate Backend API",
@@ -264,7 +264,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     @rate_limit_health
-    async def health_check(request: Request, ):
+    async def health_check(request: Request):
         """Comprehensive health check endpoint for monitoring."""
         import redis
         from sqlalchemy import text
