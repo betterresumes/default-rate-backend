@@ -9,7 +9,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     DEBIAN_FRONTEND=noninteractive \
     AWS_DEFAULT_REGION=us-east-1
 
-# Install system dependencies including AWS CLI requirements
 RUN apt-get update && apt-get install -y \
     gcc \
     curl \

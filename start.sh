@@ -1,6 +1,5 @@
 #!/bin/bash
 
-# AWS-optimized startup script for AccuNode
 set -e
 
 export PORT=${PORT:-8000}
@@ -12,10 +11,8 @@ echo "🌍 Environment: $ENVIRONMENT"
 echo "🔧 Port: $PORT"  
 echo "👷 Workers: $WORKERS"
 
-# Health check for dependencies
 echo "🔍 Checking dependencies..."
 
-# Wait for database if DATABASE_URL is set
 if [ ! -z "$DATABASE_URL" ]; then
     echo "⏳ Waiting for database connection..."
     python -c "
@@ -37,7 +34,6 @@ if db_url:
 "
 fi
 
-# Wait for Redis if REDIS_URL is set
 if [ ! -z "$REDIS_URL" ]; then
     echo "⏳ Waiting for Redis connection..."
     python -c "

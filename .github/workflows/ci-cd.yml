@@ -264,19 +264,19 @@ jobs:
           # instead of fetching from ECS to preserve secrets configuration
           echo "📝 Using local task definition files with Parameter Store secrets..."
           
-          if [ ! -f "deployment/ecs-api-task-definition.json" ]; then
-            echo "❌ API task definition file not found: deployment/ecs-api-task-definition.json"
+          if [ ! -f "deployment/aws/ecs-api-task-definition.json" ]; then
+            echo "❌ API task definition file not found: deployment/aws/ecs-api-task-definition.json"
             exit 1
           fi
           
-          if [ ! -f "deployment/ecs-worker-task-definition.json" ]; then
-            echo "❌ Worker task definition file not found: deployment/ecs-worker-task-definition.json"
+          if [ ! -f "deployment/aws/ecs-worker-task-definition.json" ]; then
+            echo "❌ Worker task definition file not found: deployment/aws/ecs-worker-task-definition.json"
             exit 1
           fi
           
           # Copy local files to working directory
-          cp deployment/ecs-api-task-definition.json api-task-def.json
-          cp deployment/ecs-worker-task-definition.json worker-task-def.json
+          cp deployment/aws/ecs-api-task-definition.json api-task-def.json
+          cp deployment/aws/ecs-worker-task-definition.json worker-task-def.json
           
           # Use the verified image from previous step
           NEW_IMAGE="${{ env.NEW_IMAGE }}"
