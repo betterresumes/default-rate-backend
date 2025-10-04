@@ -4,20 +4,33 @@ Welcome to the AccuNode project documentation! This guide helps you navigate all
 
 ---
 
-## 🚀 **Quick Start (New Team Members)**
+## 🚀 **Quick Start**
 
+### **🔥 For New Developers (Local Setup)**
+**Start here:** [🚀 Local Development Guide](LOCAL_DEVELOPMENT_GUIDE.md)
+
+Complete Docker-based local development setup for the `prod-dev` branch.
+
+### **👥 For New Team Members (AWS Access)**  
 **Start here:** [📋 Team Onboarding Guide](team/TEAM_ONBOARDING_GUIDE.md)
 
-This comprehensive guide covers everything you need to get started with our AWS infrastructure.
+Complete setup guide for AWS infrastructure access and team operations.
 
 ---
 
 ## 📁 **Documentation Structure**
 
-### 👥 **Team Documentation** (`/docs/team/`)
+### � **Development Documentation**
+Core development guides and workflows:
+
+- **[🚀 Local Development Guide](LOCAL_DEVELOPMENT_GUIDE.md)** - Docker-based local development setup (`prod-dev` branch)
+- **[🔄 Development Workflow](DEVELOPMENT_WORKFLOW.md)** - Complete dev workflow: `prod-dev` → `prod` → AWS deployment
+- **[📋 Documentation Summary](team/DOCUMENTATION_SUMMARY.md)** - Overview of all documentation organization
+
+### �👥 **Team Documentation** (`/docs/team/`)
 Essential guides for all team members:
 
-- **[📋 Team Onboarding Guide](team/TEAM_ONBOARDING_GUIDE.md)** - Complete setup guide for new team members
+- **[📋 Team Onboarding Guide](team/TEAM_ONBOARDING_GUIDE.md)** - Complete setup guide for new team members  
 - **[🚀 Quick Reference](team/QUICK_REFERENCE.md)** - Essential commands and daily operations
 
 ### 🏗️ **AWS Infrastructure** (`/docs/aws/`)

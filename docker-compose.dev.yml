@@ -1,0 +1,173 @@
+services:
+  # PostgreSQL Database for local development
+  postgres:
+    image: postgres:15-alpine
+    container_name: accunode-postgres-dev
+    environment:
+      POSTGRES_DB: accunode_development
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: dev_password_123
+      POSTGRES_HOST_AUTH_METHOD: md5
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init_db.sql:ro
+    networks:
+      - accunode-dev
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U admin -d accunode_development" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache for local development
+  redis:
+    image: redis:7-alpine
+    container_name: accunode-redis-dev
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - accunode-dev
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: redis-server --appendonly yes --requirepass dev_redis_password
+
+  # FastAPI Application
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: accunode-api-dev
+    environment:
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - HOST=0.0.0.0
+      - PORT=8000
+      - WORKERS=1
+      - LOG_LEVEL=debug
+
+      # Database Configuration
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=accunode_development
+      - DB_USER=admin
+      - DB_PASSWORD=dev_password_123
+      - DATABASE_URL=postgresql://admin:dev_password_123@postgres:5432/accunode_development
+
+      # Redis Configuration
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=dev_redis_password
+      - REDIS_URL=redis://default:dev_redis_password@redis:6379
+
+      # JWT and Security (development keys)
+      - JWT_SECRET_KEY=dev_jwt_secret_key_not_for_production_use_only
+      - JWT_ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=60
+
+      # Rate limiting
+      - RATE_LIMIT_ENABLED=true
+      - RATE_LIMIT_REQUESTS=100
+      - RATE_LIMIT_WINDOW=60
+
+      # AWS (local development - disabled)
+      - AWS_ACCESS_KEY_ID=local
+      - AWS_SECRET_ACCESS_KEY=local
+      - AWS_REGION=local
+      - AWS_ENDPOINT_URL=http://localstack:4566
+
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - /app/__pycache__
+      - /app/app/__pycache__
+    networks:
+      - accunode-dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    develop:
+      watch:
+        - action: sync
+          path: ./app
+          target: /app/app
+        - action: sync
+          path: ./main.py
+          target: /app/main.py
+        - action: rebuild
+          path: requirements.dev.txt
+
+  # Celery Worker for background tasks
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: accunode-worker-dev
+    environment:
+      - ENVIRONMENT=development
+      - DEBUG=true
+
+      # Database Configuration
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=accunode_development
+      - DB_USER=admin
+      - DB_PASSWORD=dev_password_123
+      - DATABASE_URL=postgresql://admin:dev_password_123@postgres:5432/accunode_development
+
+      # Redis Configuration
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=dev_redis_password
+      - REDIS_URL=redis://default:dev_redis_password@redis:6379
+
+      # JWT and Security (development keys)
+      - JWT_SECRET_KEY=dev_jwt_secret_key_not_for_production_use_only
+      - JWT_ALGORITHM=HS256
+
+    volumes:
+      - .:/app
+    networks:
+      - accunode-dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A app.workers.celery_app worker --loglevel=debug --concurrency=2
+
+  # LocalStack for AWS services simulation (optional)
+  localstack:
+    image: localstack/localstack:latest
+    container_name: accunode-localstack-dev
+    environment:
+      - SERVICES=s3,ssm,secretsmanager
+      - DEBUG=1
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    ports:
+      - "4566:4566"
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - accunode-dev
+
+volumes:
+  postgres_data:
+  redis_data:
+  localstack_data:
+
+
+networks:
+  accunode-dev:
+    driver: bridge
+    name: accunode-development

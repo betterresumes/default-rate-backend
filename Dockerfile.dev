@@ -1,0 +1,56 @@
+# Development Dockerfile - Optimized for local development with hot reload
+FROM python:3.11-slim AS development
+
+# Set working directory
+WORKDIR /app
+
+# Environment variables for development
+ENV PYTHONDONTWRITEBYTECODE=1 \
+  PYTHONUNBUFFERED=1 \
+  PIP_NO_CACHE_DIR=1 \
+  PIP_DISABLE_PIP_VERSION_CHECK=1 \
+  DEBIAN_FRONTEND=noninteractive \
+  ENVIRONMENT=development \
+  DEBUG=true
+
+# Install system dependencies including dev tools
+RUN apt-get update && apt-get install -y \
+  gcc \
+  curl \
+  wget \
+  build-essential \
+  ca-certificates \
+  gnupg \
+  lsb-release \
+  git \
+  vim \
+  postgresql-client \
+  redis-tools \
+  && rm -rf /var/lib/apt/lists/* \
+  && apt-get clean
+
+# Upgrade pip
+RUN python -m pip install --upgrade pip --retries 5 --timeout 30
+
+# Copy requirements
+COPY requirements.dev.txt requirements.prod.txt ./
+
+# Install Python dependencies (dev + prod)
+RUN pip install --no-cache-dir \
+  --retries 5 \
+  --timeout 300 \
+  -r requirements.dev.txt
+
+# Copy application code
+COPY . .
+
+# Create non-root user for development
+RUN groupadd -r appuser && useradd -r -g appuser appuser && \
+  chown -R appuser:appuser /app
+USER appuser
+
+# Expose port
+EXPOSE 8000
+
+# Default command for development with auto-reload
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--log-level", "debug"]
