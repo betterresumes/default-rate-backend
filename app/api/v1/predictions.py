@@ -9,6 +9,7 @@ import io
 import math
 import logging
 import json
+import time
 
 from ...core.database import get_db, User, Company, AnnualPrediction, QuarterlyPrediction, Organization, BulkUploadJob
 from ...schemas.schemas import (
@@ -2083,21 +2084,31 @@ async def update_annual_prediction(
         if not prediction:
             raise HTTPException(status_code=404, detail="Prediction not found")
         
-        # Check ownership
+        # Simplified ownership check - anyone can edit their created data
         if not is_prediction_owner(prediction, current_user):
-            raise HTTPException(
-                status_code=403,
-                detail="You can only update your own predictions"
-            )
+            # Allow super admin to edit any prediction
+            if current_user.role != "super_admin":
+                raise HTTPException(
+                    status_code=403,
+                    detail="You can only update predictions that you created"
+                )
         
-        # Update financial data
+        # Update company information
+        company = prediction.company
+        company.name = prediction_request.company_name
+        company.market_cap = prediction_request.market_cap
+        company.sector = prediction_request.sector
+        
+        # Update prediction data
+        prediction.reporting_year = prediction_request.reporting_year
+        prediction.reporting_quarter = prediction_request.reporting_quarter
         prediction.long_term_debt_to_total_capital = prediction_request.long_term_debt_to_total_capital
         prediction.total_debt_to_ebitda = prediction_request.total_debt_to_ebitda
         prediction.net_income_margin = prediction_request.net_income_margin
         prediction.ebit_to_interest_expense = prediction_request.ebit_to_interest_expense
         prediction.return_on_assets = prediction_request.return_on_assets
         
-        # Recalculate ML prediction
+        # Recalculate ML prediction with updated financial data
         financial_data = {
             'long_term_debt_to_total_capital': prediction_request.long_term_debt_to_total_capital,
             'total_debt_to_ebitda': prediction_request.total_debt_to_ebitda,
@@ -2115,16 +2126,45 @@ async def update_annual_prediction(
         prediction.predicted_at = datetime.utcnow()
         
         db.commit()
+        db.refresh(prediction)
+        
+        # Get organization information for response
+        organization_name = None
+        if prediction.organization_id:
+            org = db.query(Organization).filter(Organization.id == prediction.organization_id).first()
+            organization_name = org.name if org else None
         
         return {
             "success": True,
-            "message": "Annual prediction updated successfully",
+            "message": f"Annual prediction updated for {prediction_request.company_symbol}",
             "prediction": {
                 "id": str(prediction.id),
-                "probability": float(prediction.probability),
-                "risk_level": prediction.risk_level,
-                "confidence": float(prediction.confidence),
-                "updated_at": datetime.utcnow().isoformat()
+                "company_id": str(prediction.company_id),
+                "company_symbol": prediction_request.company_symbol,
+                "company_name": prediction_request.company_name,
+                "sector": prediction_request.sector,
+                "market_cap": float(prediction_request.market_cap),
+                "reporting_year": prediction_request.reporting_year,
+                "reporting_quarter": prediction_request.reporting_quarter,
+                
+                "long_term_debt_to_total_capital": float(prediction_request.long_term_debt_to_total_capital),
+                "total_debt_to_ebitda": float(prediction_request.total_debt_to_ebitda),
+                "net_income_margin": float(prediction_request.net_income_margin),
+                "ebit_to_interest_expense": float(prediction_request.ebit_to_interest_expense),
+                "return_on_assets": float(prediction_request.return_on_assets),
+                
+                "probability": float(ml_result['probability']),
+                "risk_level": ml_result['risk_level'],
+                "confidence": float(ml_result['confidence']),
+                "predicted_at": prediction.predicted_at.isoformat(),
+                
+                "access_level": prediction.access_level,
+                "organization_id": str(prediction.organization_id) if prediction.organization_id else None,
+                "organization_name": organization_name,
+                "created_by": str(prediction.created_by),
+                "created_by_email": current_user.email,
+                "created_at": prediction.created_at.isoformat(),
+                "updated_at": prediction.updated_at.isoformat() if prediction.updated_at else None
             }
         }
         
@@ -2155,11 +2195,42 @@ async def delete_annual_prediction(
         if not prediction:
             raise HTTPException(status_code=404, detail="Prediction not found")
         
-        if not is_prediction_owner(prediction, current_user):
-            raise HTTPException(
-                status_code=403,
-                detail="You can only delete your own predictions"
-            )
+        # Check ownership and access control (same as update endpoint)
+        if prediction.access_level == "system":
+            if current_user.role != "super_admin":
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only super admin can delete system-level predictions"
+                )
+        else:
+            can_delete = False
+            
+            if current_user.role == "super_admin":
+                can_delete = True
+                
+            elif is_prediction_owner(prediction, current_user):
+                can_delete = True
+                
+            elif (prediction.access_level == "organization" and 
+                  current_user.organization_id and 
+                  prediction.organization_id == current_user.organization_id and
+                  current_user.role in ["org_admin", "org_member"]):
+                can_delete = True
+            
+            if not can_delete:
+                if prediction.access_level == "organization":
+                    if not current_user.organization_id:
+                        detail = "You must be part of an organization to delete organization predictions"
+                    elif prediction.organization_id != current_user.organization_id:
+                        detail = "You can only delete predictions within your organization"
+                    elif current_user.role not in ["org_admin", "org_member"]:
+                        detail = "You need organization member role to delete organization predictions"
+                    else:
+                        detail = "You can only delete predictions that you created or organization predictions within your org"
+                else:
+                    detail = "You can only delete predictions that you created"
+                    
+                raise HTTPException(status_code=403, detail=detail)
         
         db.delete(prediction)
         db.commit()
@@ -2430,41 +2501,14 @@ async def update_quarterly_prediction(
         if not prediction:
             raise HTTPException(status_code=404, detail="Prediction not found")
         
-        if prediction.access_level == "system":
+        # Simplified ownership check - anyone can edit their created data
+        if not is_prediction_owner(prediction, current_user):
+            # Allow super admin to edit any prediction
             if current_user.role != "super_admin":
                 raise HTTPException(
                     status_code=403,
-                    detail="Only super admin can update system-level predictions"
+                    detail="You can only update predictions that you created"
                 )
-        else:
-            can_update = False
-            
-            if current_user.role == "super_admin":
-                can_update = True
-                
-            elif is_prediction_owner(prediction, current_user):
-                can_update = True
-                
-            elif (prediction.access_level == "organization" and 
-                  current_user.organization_id and 
-                  prediction.organization_id == current_user.organization_id and
-                  current_user.role in ["org_admin", "org_member"]):
-                can_update = True
-            
-            if not can_update:
-                if prediction.access_level == "organization":
-                    if not current_user.organization_id:
-                        detail = "You must be part of an organization to update organization predictions"
-                    elif prediction.organization_id != current_user.organization_id:
-                        detail = "You can only update predictions within your organization"
-                    elif current_user.role not in ["org_admin", "org_member"]:
-                        detail = "You need organization member role to update organization predictions"
-                    else:
-                        detail = "You can only update predictions that you created or organization predictions within your org"
-                else:
-                    detail = "You can only update predictions that you created"
-                    
-                raise HTTPException(status_code=403, detail=detail)
         
         company = prediction.company
         company.name = prediction_request.company_name
@@ -2543,6 +2587,78 @@ async def update_quarterly_prediction(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error updating quarterly prediction: {str(e)}")
+
+
+@router.delete("/quarterly/{prediction_id}")
+@rate_limit_ml
+async def delete_quarterly_prediction(
+    request: Request, prediction_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(current_verified_user)
+):
+    """Delete a quarterly prediction with proper access control"""
+    try:
+        if not check_user_permissions(current_user, "user"):
+            raise HTTPException(
+                status_code=403,
+                detail="Authentication required to delete predictions"
+            )
+
+        prediction = db.query(QuarterlyPrediction).filter(QuarterlyPrediction.id == prediction_id).first()
+        
+        if not prediction:
+            raise HTTPException(status_code=404, detail="Prediction not found")
+        
+        # Check ownership and access control (same as update endpoint)
+        if prediction.access_level == "system":
+            if current_user.role != "super_admin":
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only super admin can delete system-level predictions"
+                )
+        else:
+            can_delete = False
+            
+            if current_user.role == "super_admin":
+                can_delete = True
+                
+            elif is_prediction_owner(prediction, current_user):
+                can_delete = True
+                
+            elif (prediction.access_level == "organization" and 
+                  current_user.organization_id and 
+                  prediction.organization_id == current_user.organization_id and
+                  current_user.role in ["org_admin", "org_member"]):
+                can_delete = True
+            
+            if not can_delete:
+                if prediction.access_level == "organization":
+                    if not current_user.organization_id:
+                        detail = "You must be part of an organization to delete organization predictions"
+                    elif prediction.organization_id != current_user.organization_id:
+                        detail = "You can only delete predictions within your organization"
+                    elif current_user.role not in ["org_admin", "org_member"]:
+                        detail = "You need organization member role to delete organization predictions"
+                    else:
+                        detail = "You can only delete predictions that you created or organization predictions within your org"
+                else:
+                    detail = "You can only delete predictions that you created"
+                    
+                raise HTTPException(status_code=403, detail=detail)
+        
+        db.delete(prediction)
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": "Quarterly prediction deleted successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error deleting quarterly prediction: {str(e)}")
 
 
 @router.get("/stats")
