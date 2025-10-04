@@ -27,6 +27,7 @@ from app.api.v1.organizations_multi_tenant import router as organizations_router
 from app.api.v1.users import router as users_router
 from app.api.v1 import companies, predictions
 from app.api.v1.scaling import router as scaling_router
+from app.api.v1.debug import debug_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
