@@ -8,7 +8,7 @@ from typing import Optional
 from ...core.database import get_db, User, Tenant, Organization
 from ...schemas.schemas import UserCreate, UserResponse
 from .auth_multi_tenant import get_current_active_user, AuthManager
-from .auth_admin import require_super_admin
+from .auth_admin import require_super_admin, require_tenant_admin_or_above
 from ...middleware.rate_limiting import (
     rate_limit_tenant_create, rate_limit_user_create, rate_limit_tenant_read,
     rate_limit_user_delete, rate_limit_user_update
@@ -416,7 +416,7 @@ async def assign_user_to_organization(
     request: Request,
     assignment: AssignUserToOrgRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_super_admin)
+    current_user: User = Depends(require_tenant_admin_or_above)
 ):
     """
     Assign any user to any organization with specified role.
@@ -442,6 +442,13 @@ async def assign_user_to_organization(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Organization with ID {assignment.organization_id} not found"
+            )
+        
+        # Tenant admin can only manage organizations within their tenant
+        if current_user.role == "tenant_admin" and current_user.tenant_id != organization.tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Tenant admin can only manage organizations within their own tenant"
             )
         
         tenant = db.query(Tenant).filter(Tenant.id == organization.tenant_id).first()

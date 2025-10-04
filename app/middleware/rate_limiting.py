@@ -199,6 +199,10 @@ def rate_limit_data_read(func):
     """Rate limit for data read operations"""
     return limiter.limit("200/hour,1000/day")(func)
 
+def rate_limit_prediction_read(func):
+    """Rate limit for prediction data read operations (higher limits for ML workflows)"""
+    return limiter.limit("500/hour,2000/day")(func)
+
 def rate_limit_analytics(func):
     """Rate limit for analytics/dashboard operations"""
     return limiter.limit("100/hour,500/day")(func)

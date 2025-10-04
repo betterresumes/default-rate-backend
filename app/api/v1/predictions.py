@@ -18,7 +18,7 @@ from ...services.ml_service import ml_model
 from ...services.quarterly_ml_service import quarterly_ml_model
 from .auth_multi_tenant import get_current_active_user as current_verified_user
 from app.workers.celery_app import celery_app
-from ...middleware.rate_limiting import rate_limit_ml, rate_limit_upload, rate_limit_data_read, rate_limit_analytics, rate_limit_job_control, rate_limit_health
+from ...middleware.rate_limiting import rate_limit_ml, rate_limit_upload, rate_limit_data_read, rate_limit_prediction_read, rate_limit_analytics, rate_limit_job_control, rate_limit_health
 
 router = APIRouter()
 
@@ -408,7 +408,7 @@ async def create_quarterly_prediction(
 
 
 @router.get("/annual", response_model=Dict)
-@rate_limit_data_read
+@rate_limit_prediction_read
 async def get_annual_predictions(
     request: Request, page: int = 1,
     size: int = 10,
@@ -499,7 +499,7 @@ async def get_annual_predictions(
         raise HTTPException(status_code=500, detail=f"Error fetching annual predictions: {str(e)}")
 
 @router.get("/quarterly", response_model=Dict)
-@rate_limit_data_read
+@rate_limit_prediction_read
 async def get_quarterly_predictions(
     request: Request, page: int = 1,
     size: int = 10,
@@ -594,7 +594,7 @@ async def get_quarterly_predictions(
 
 
 @router.get("/annual/system", response_model=Dict)
-@rate_limit_data_read
+@rate_limit_prediction_read
 async def get_system_annual_predictions(
     request: Request, page: int = 1,
     size: int = 10,
@@ -694,7 +694,7 @@ async def get_system_annual_predictions(
         raise HTTPException(status_code=500, detail=f"Error fetching system annual predictions: {str(e)}")
 
 @router.get("/quarterly/system", response_model=Dict)
-@rate_limit_data_read
+@rate_limit_prediction_read
 async def get_system_quarterly_predictions(
     request: Request, page: int = 1,
     size: int = 10,
