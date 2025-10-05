@@ -221,7 +221,8 @@ def create_app() -> FastAPI:
         allow_origins=[
             os.getenv("CORS_ORIGIN", "http://localhost:3000"),
             "https://accunode.ai",
-            "https://client-eta-sepia.vercel.app"
+            "https://client-eta-sepia.vercel.app",
+            "https://accunode-ten.vercel.app"
         ],
         allow_credentials=True,
         allow_methods=["*"],
