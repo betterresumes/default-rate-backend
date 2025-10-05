@@ -8,6 +8,36 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+def parse_file_size(size_str: str) -> int:
+    """Parse human-readable file size (e.g., '10MB', '500KB') to bytes."""
+    size_str = size_str.strip().upper()
+    
+    # Handle plain numbers (already in bytes)
+    if size_str.isdigit():
+        return int(size_str)
+    
+    # Handle human-readable formats
+    units = {
+        'B': 1,
+        'KB': 1024,
+        'MB': 1024 * 1024,
+        'GB': 1024 * 1024 * 1024
+    }
+    
+    for unit, multiplier in units.items():
+        if size_str.endswith(unit):
+            try:
+                # Extract the numeric part before the unit
+                number_part = size_str[:-len(unit)]
+                number = float(number_part)
+                return int(number * multiplier)
+            except (ValueError, IndexError):
+                continue
+    
+    # Fallback to default if parsing fails
+    logger.warning(f"Invalid file size format: {size_str}, using default 10MB")
+    return 10 * 1024 * 1024  # 10MB default
+
 def get_parameter_store_value(parameter_name: str, default_value: str = "") -> str:
     """Get value from AWS Systems Manager Parameter Store with improved error handling."""
     
@@ -89,7 +119,7 @@ class Config:
         "https://accunode.ai"  # Add your frontend domains
     ]
     
-    MAX_UPLOAD_SIZE: int = int(os.getenv("MAX_UPLOAD_SIZE", "10485760"))  # 10MB
+    MAX_UPLOAD_SIZE: int = parse_file_size(os.getenv("MAX_UPLOAD_SIZE", "10MB"))
     ALLOWED_EXTENSIONS: set = {".xlsx", ".xls", ".csv"}
     
         # Celery Configuration (Redis)
