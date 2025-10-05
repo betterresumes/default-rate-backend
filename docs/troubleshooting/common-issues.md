@@ -547,15 +547,29 @@ aws ecs update-service \
 ### 2. Database Emergency Access
 
 ```bash
-# Access via bastion host
-ssh -i bastion-key.pem ec2-user@bastion.accunode.com
+# 1. Connect to EC2 Bastion Host
+ssh -i bastion-access-key.pem ubuntu@52.91.36.2
 
-# Connect to RDS
-psql -h accunode-prod-db.xxxxxxxxx.us-east-1.rds.amazonaws.com -U accunode_user -d accunode_prod
+# 2. From bastion, connect to PostgreSQL RDS
+psql -h accunode-postgres.ck36iu4u6mpj.us-east-1.rds.amazonaws.com -U accunode_admin -d postgres
 
-# Check database status
-SELECT * FROM pg_stat_activity WHERE state = 'active';
-SELECT * FROM pg_stat_database WHERE datname = 'accunode_prod';
+# 3. Check database status and connections
+SELECT COUNT(*) as active_connections FROM pg_stat_activity WHERE state = 'active';
+SELECT datname, numbackends FROM pg_stat_database WHERE datname = 'postgres';
+
+# 4. Run database reset if needed (from bastion host)
+psql -h accunode-postgres.ck36iu4u6mpj.us-east-1.rds.amazonaws.com -U accunode_admin -d postgres -f /tmp/reset_commands.sql
+
+# 5. Check table counts after operations
+SELECT 
+    schemaname, 
+    tablename, 
+    n_tup_ins as inserts,
+    n_tup_upd as updates, 
+    n_tup_del as deletes
+FROM pg_stat_user_tables 
+ORDER BY n_tup_ins + n_tup_upd + n_tup_del DESC 
+LIMIT 10;
 ```
 
 ## Getting Help

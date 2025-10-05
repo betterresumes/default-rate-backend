@@ -13,7 +13,7 @@
 
 1. **Clone and setup**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/accunodeai/server.git
    cd backend
    make setup
    ```
@@ -95,16 +95,6 @@ REDIS_URL=redis://:dev_redis_password@localhost:6379/0
 SECRET_KEY=your-secret-key
 ```
 
-### Database Operations
-```bash
-# Reset database
-make db-reset
-
-# Run migrations
-make db-migrate
-
-# Create super admin
-python scripts/create-super_admin.py
 ```
 
 
@@ -131,11 +121,4 @@ python scripts/create-super_admin.py
 - **[API Reference](./docs/api-documentation/)** - All API endpoints
 - **[System Architecture](./docs/core-application/system-architecture.md)** - Technical design
 - **[Database Design](./docs/core-application/database-design.md)** - Schema and relationships
-
-### Key API Endpoints
-- **Authentication**: `/api/v1/auth/` - Login, registration, tokens
-- **Predictions**: `/api/v1/predictions/` - ML model endpoints
-- **Organizations**: `/api/v1/organizations/` - Multi-tenant management
-- **Users**: `/api/v1/users/` - User management
-- **Health**: `/health` - System status
 
