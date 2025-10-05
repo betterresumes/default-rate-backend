@@ -216,15 +216,29 @@ def create_app() -> FastAPI:
 
     app.add_middleware(GZipMiddleware, minimum_size=1000)
 
+    # Configure CORS origins
+    cors_origins = []
+    
+    # Add origins from environment variable (comma-separated)
+    cors_env = os.getenv("CORS_ORIGIN", "")
+    if cors_env:
+        cors_origins.extend([origin.strip() for origin in cors_env.split(",")])
+    
+    # Add default/fallback origins
+    default_origins = [
+        "http://localhost:3000",
+        "https://accunode.ai",
+        "https://www.accunode.ai",
+        "https://client-eta-sepia.vercel.app",
+        "https://accunode-ten.vercel.app"
+    ]
+    
+    # Combine and deduplicate
+    all_origins = list(set(cors_origins + default_origins))
+    
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            os.getenv("CORS_ORIGIN", "http://localhost:3000"),
-            "https://accunode.ai",
-            "https://www.accunode.ai",
-            "https://client-eta-sepia.vercel.app",
-            "https://accunode-ten.vercel.app"
-        ],
+        allow_origins=all_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

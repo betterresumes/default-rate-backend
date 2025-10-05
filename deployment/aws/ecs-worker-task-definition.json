@@ -66,7 +66,7 @@
         },
         {
           "name": "CORS_ORIGIN",
-          "value": "https://accunode.ai,https://client-eta-sepia.vercel.app"
+          "value": "https://accunode.ai,https://www.accunode.ai,https://client-eta-sepia.vercel.app"
         },
         {
           "name": "PYTHONUNBUFFERED",
