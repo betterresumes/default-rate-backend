@@ -1,43 +1,11 @@
 # Authentication System
 
-This document explains how AccuNode handles user login, permissions, and data access in simple terms with visual diagrams.
-
 ## What is Authentication?
 
 Authentication is how AccuNode knows who you are and what you're allowed to do. It's like having an ID card that shows:
 - Your identity (who you are)
 - Your role (what you can access)
 - Your organization (which data you can see)
-
-## How AccuNode Authentication Works
-
-### Step-by-Step Login Process
-
-```
-1. User Registration
-   ↓
-2. User Login (Email + Password)
-   ↓
-3. System Creates Security Token
-   ↓
-4. User Uses Token for All Requests
-   ↓
-5. System Checks Permissions
-```
-
-### Authentication Flow Diagram
-
-```
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│   Register  │───▶│    Login    │───▶│ Get Token   │
-│             │    │             │    │             │
-└─────────────┘    └─────────────┘    └─────────────┘
-                                              │
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│ Make Request│◀───│Check Permissions│◀─│ Use Token   │
-│             │    │             │    │             │
-└─────────────┘    └─────────────┘    └─────────────┘
-```
 
 ## User Roles and Permissions
 
@@ -275,3 +243,24 @@ When something goes wrong, you'll see helpful error messages:
 | **"Invalid token"** | Your session token was corrupted | Log out and log in again |
 
 This authentication system keeps your data secure while making it easy to collaborate with your team through organizations and role-based permissions.
+
+
+## 🏢 **Multi-Tenant Access Control**
+
+### **Data Access Levels**
+```python
+class AccessLevel(str, Enum):
+    PERSONAL = "personal"        # User's own predictions/data
+    ORGANIZATION = "organization" # Shared within organization
+    SYSTEM = "system"            # Platform-wide public data
+```
+
+### **Access Control Matrix**
+
+| User Role | Personal Data | Org Data | System Data | Cross-Org Data | User Management | Org Management |
+|-----------|---------------|----------|-------------|----------------|-----------------|----------------|
+| **super_admin** | ✅ System Data | ✅ All Orgs | ✅ Full Access | ✅ Full Access | ✅ All Levels | ✅ All Orgs |
+| **tenant_admin** | ✅ Own + Tenant | ✅ Tenant Orgs | ✅ Full Access | ✅ Tenant Only | ✅ Tenant Users | ✅ Tenant Orgs |
+| **org_admin** | ✅ Own + Org | ✅ Own Org | ✅ Read Only | ❌ None | ✅ Org Members | ✅ Own Org |
+| **org_member** | ✅ Own | ✅ Own Org | ✅ Read Only | ❌ None | ❌ None | ❌ None |
+| **user** | ✅ Own | ❌ None | ✅ Read Only | ❌ None | ❌ None | ❌ None |

@@ -27,8 +27,6 @@ Based on the actual FastAPI router configuration in `app/main.py`, the API inclu
 5. **Organizations** (`/api/v1/organizations`) - Organization management
 6. **Tenants** (`/api/v1/tenants`) - Tenant administration
 7. **Admin** (`/api/v1/admin`) - Administrative utilities
-8. **Debug** (`/api/v1/debug`) - Debug endpoints
-9. **Scaling** (`/api/v1/scaling`) - Auto-scaling endpoints
 
 ## Authentication System
 
@@ -256,14 +254,3 @@ GET /health
 - **422**: Unprocessable Entity
 - **429**: Rate Limited
 - **500**: Internal Server Error
-
-## Configuration & Deployment
-
-### Environment Configuration
-- **Development**: Local development setup
-- **Production**: AWS deployment with Parameter Store
-- **Database**: PostgreSQL connection with pooling
-- **Redis**: Session storage and task queue
-- **Secret Management**: AWS Parameter Store integration
-
-This API provides a robust, scalable system for default probability prediction with comprehensive multi-tenant support and advanced machine learning capabilities.

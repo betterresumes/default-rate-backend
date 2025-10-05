@@ -33,7 +33,7 @@ This guide covers the complete production deployment of AccuNode, including infr
 └─────────────────────┬───────────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────────┐
-│  Infrastructure Layer (Terraform)                         │
+│  Infrastructure Layer                                     │
 │  ├── VPC, Subnets, Security Groups                        │
 │  ├── RDS PostgreSQL                                       │
 │  ├── ElastiCache Redis                                    │
@@ -332,99 +332,6 @@ curl -k https://api.accunode.com/health
 }
 ```
 
-### 6.2 API Testing
-
-Test core API functionality:
-
-```bash
-# Test authentication
-curl -X POST https://api.accunode.com/api/v1/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "test@example.com",
-    "password": "SecurePassword123",
-    "full_name": "Test User"
-  }'
-
-# Test ML prediction
-curl -X POST https://api.accunode.com/api/v1/predictions/annual \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "company_symbol": "TEST",
-    "company_name": "Test Company",
-    "market_cap": 1000000,
-    "sector": "Technology",
-    "reporting_year": "2024",
-    "long_term_debt_to_total_capital": 25.0,
-    "total_debt_to_ebitda": 2.5,
-    "net_income_margin": 10.0,
-    "ebit_to_interest_expense": 15.0,
-    "return_on_assets": 8.0
-  }'
-```
-
-### 6.3 Monitoring Setup
-
-Verify CloudWatch metrics:
-
-```bash
-# Check ECS metrics
-aws cloudwatch get-metric-statistics \
-  --namespace AWS/ECS \
-  --metric-name CPUUtilization \
-  --dimensions Name=ServiceName,Value=accunode-api-service \
-  --start-time 2025-10-05T00:00:00Z \
-  --end-time 2025-10-05T23:59:59Z \
-  --period 300 \
-  --statistics Average
-
-# Check ALB metrics
-aws cloudwatch get-metric-statistics \
-  --namespace AWS/ApplicationELB \
-  --metric-name RequestCount \
-  --dimensions Name=LoadBalancer,Value=app/accunode-alb/xxxxxxxxxxxxx \
-  --start-time 2025-10-05T00:00:00Z \
-  --end-time 2025-10-05T23:59:59Z \
-  --period 300 \
-  --statistics Sum
-```
-
-## Step 7: DNS Configuration
-
-### 7.1 Route53 Setup
-
-Configure DNS records:
-
-```bash
-# Create hosted zone (if not exists)
-aws route53 create-hosted-zone --name accunode.com --caller-reference $(date +%s)
-
-# Create A record for API
-aws route53 change-resource-record-sets --hosted-zone-id Z1234567890ABC --change-batch file://api-dns-record.json
-```
-
-### 7.2 DNS Record Configuration
-
-Create `api-dns-record.json`:
-
-```json
-{
-  "Changes": [{
-    "Action": "CREATE",
-    "ResourceRecordSet": {
-      "Name": "api.accunode.com",
-      "Type": "A",
-      "AliasTarget": {
-        "DNSName": "accunode-alb-1234567890.us-east-1.elb.amazonaws.com",
-        "EvaluateTargetHealth": true,
-        "HostedZoneId": "Z35SXDOTRQ7X7K"
-      }
-    }
-  }]
-}
-```
-
 ## Production Environment Variables
 
 The application uses these environment variables in production:
@@ -455,62 +362,3 @@ ML_MODEL_PATH=/app/models/
 ANNUAL_MODEL_FILE=annual_logistic_model.pkl
 QUARTERLY_MODEL_FILE=quarterly_lgb_model.pkl
 ```
-
-## Security Considerations
-
-### 1. Network Security
-- All resources in private subnets except ALB
-- Security groups with minimal required access
-- Bastion host for administrative access
-- VPC Flow Logs enabled
-
-### 2. Data Security  
-- RDS encryption at rest enabled
-- Redis encryption in transit enabled
-- Secrets stored in Parameter Store with encryption
-- Regular automated backups
-
-### 3. Application Security
-- HTTPS only (HTTP redirects to HTTPS)
-- JWT token-based authentication
-- Rate limiting on all API endpoints
-- Input validation and sanitization
-
-## Troubleshooting
-
-### Common Deployment Issues
-
-1. **ECS Service Won't Start**
-   ```bash
-   # Check task logs
-   aws logs tail /ecs/accunode-api --follow
-   
-   # Check task definition
-   aws ecs describe-task-definition --task-definition accunode-api-task
-   ```
-
-2. **Database Connection Issues**
-   ```bash
-   # Test from bastion
-   telnet RDS-ENDPOINT 5432
-   
-   # Check security groups
-   aws ec2 describe-security-groups --group-ids sg-rds-id
-   ```
-
-3. **Load Balancer Health Checks Failing**
-   ```bash
-   # Check target group health
-   aws elbv2 describe-target-health --target-group-arn TARGET-GROUP-ARN
-   
-   # Test health endpoint directly
-   curl -H "Host: api.accunode.com" http://CONTAINER-IP:8000/health
-   ```
-
-### Rollback Procedures
-
-If deployment fails, follow the [Rollback Procedures](./rollback-procedures.md) guide to revert to the previous working version.
-
----
-
-*For additional deployment troubleshooting, refer to the [Troubleshooting Guide](../troubleshooting/common-issues.md).*

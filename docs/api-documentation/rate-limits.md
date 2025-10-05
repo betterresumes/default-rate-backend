@@ -6,6 +6,7 @@ Overview
 - Exceeding limits returns 429 with Retry-After header.
 
 429 response example
+```json
 {
   "error": "Rate limit exceeded",
   "message": "Too many requests. Please slow down and try again later.",
@@ -13,6 +14,7 @@ Overview
   "retry_after": 60,
   "client_id": "1.2.3.4"
 }
+```
 
 Standard headers
 - Retry-After: seconds until next allowed request

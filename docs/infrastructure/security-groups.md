@@ -456,7 +456,3 @@ aws ec2 describe-network-interfaces --filters "Name=group-id,Values=sg-12345678"
 # Validate security group references
 aws ec2 describe-security-groups --group-ids sg-12345678 --query 'SecurityGroups[0].IpPermissions[?UserIdGroupPairs[0].GroupId]'
 ```
-
----
-
-*For additional security troubleshooting, refer to the [AWS Infrastructure Issues](../troubleshooting/aws-infrastructure-issues.md) guide.*

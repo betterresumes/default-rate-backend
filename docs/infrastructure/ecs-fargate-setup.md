@@ -28,8 +28,6 @@ AccuNode runs on Amazon ECS Fargate for serverless container orchestration, prov
 ### **Resource Specifications**
 | Environment | CPU (vCPU) | Memory (GB) | Storage | Min Tasks | Max Tasks |
 |-------------|------------|-------------|---------|-----------|-----------|
-| **Development** | 0.25 | 0.5 | 20GB | 1 | 2 |
-| **Staging** | 0.5 | 1.0 | 30GB | 1 | 3 |
 | **Production** | 1.0 | 2.0 | 50GB | 2 | 10 |
 
 ---

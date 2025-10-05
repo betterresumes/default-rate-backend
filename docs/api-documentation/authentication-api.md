@@ -268,24 +268,3 @@ auth = AccuNodeAuth("http://localhost:8000")
 result = auth.login("user@example.com", "password123")
 headers = auth.get_headers()
 ```
-
-## Testing
-
-### Test with curl
-```bash
-# Register
-curl -X POST http://localhost:8000/api/v1/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"test@example.com","password":"test123","full_name":"Test User"}'
-
-# Login  
-curl -X POST http://localhost:8000/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"test@example.com","password":"test123"}'
-
-# Use token (replace YOUR_TOKEN with actual token)
-curl -X GET http://localhost:8000/api/v1/users/profile \
-  -H "Authorization: Bearer YOUR_TOKEN"
-```
-
-This authentication system provides secure, scalable user management for AccuNode with industry-standard security practices.

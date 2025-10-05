@@ -460,33 +460,3 @@ print(f"Risk Level: {result['prediction']['risk_level']}")
 | **org_admin** | ✅ Yes | ✅ Yes |
 | **tenant_admin** | ✅ Yes | ✅ Yes |
 | **super_admin** | ✅ Yes | ✅ Yes |
-
-### Ratio Validation Rules
-
-**All ratios must be**:
-- ✅ Numeric values (decimals allowed)
-- ✅ Non-null (required fields)
-- ✅ Within reasonable business ranges
-
-**Specific validations**:
-- **Current Ratio**: Must be > 0 (typically 0.5 - 10.0)
-- **Quick Ratio**: Must be > 0 (typically 0.3 - 8.0)  
-- **Debt to Equity**: Must be ≥ 0 (typically 0.0 - 5.0)
-- **Return on Assets**: Can be negative (typically -1.0 to 1.0)
-- **Profit Margin**: Can be negative (typically -1.0 to 1.0)
-- **Return on Equity**: Can be negative (typically -2.0 to 2.0)
-- **Asset Turnover**: Must be > 0 (typically 0.1 - 5.0)
-
-## Model Information
-
-The ML Predictions API provides state-of-the-art financial risk assessment powered by machine learning models trained on real financial data.
-
-### Annual Model
-- **Algorithm**: Logistic Regression with preprocessing
-- **Features**: 5 financial ratios (long_term_debt_to_total_capital, total_debt_to_ebitda, net_income_margin, ebit_to_interest_expense, return_on_assets)
-- **Output**: Risk level prediction with probability scores
-
-### Quarterly Model
-- **Algorithm**: Ensemble (Logistic Regression + LightGBM)
-- **Features**: 4 financial ratios (total_debt_to_ebitda, sga_margin, long_term_debt_to_total_capital, return_on_capital)
-- **Output**: Default probability with confidence metrics

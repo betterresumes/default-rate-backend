@@ -686,30 +686,3 @@ print(f"Created user: {new_user['id']}")
 users = users_api.list_users(is_active=True)
 print(f"Active users: {users['total']}")
 ```
-
-## Testing
-
-### Test with curl
-```bash
-# Get my profile
-curl -X GET http://localhost:8000/api/v1/users/profile \
-  -H "Authorization: Bearer YOUR_TOKEN"
-
-# Update my profile  
-curl -X PUT http://localhost:8000/api/v1/users/profile \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"full_name":"Updated Name"}'
-
-# List users (admin only)
-curl -X GET http://localhost:8000/api/v1/users?limit=10 \
-  -H "Authorization: Bearer YOUR_TOKEN"
-
-# Create user (admin only)
-curl -X POST http://localhost:8000/api/v1/users \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"email":"test@example.com","username":"testuser","full_name":"Test User","password":"SecurePass123!","role":"org_member"}'
-```
-
-The Users API provides comprehensive user management with role-based access control, ensuring secure and appropriate access to user data and administrative functions.

@@ -24,6 +24,3 @@ Key env in workflow
 Triggers
 - push to prod (deploy)
 - pull_request to prod (scan/build only)
-
-Notes
-- Update this doc if staging workflow is added.

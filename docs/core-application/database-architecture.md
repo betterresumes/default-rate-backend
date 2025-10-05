@@ -341,7 +341,7 @@ AccuNode has **3 levels of data access**:
 ┌─────────────────────────────────────────────┐
 │         SUPER ADMIN (Global View)           │
 │                                             │
-│ Admin → Can see: Everything in all orgs     │
+│        Admin → Create System data    │
 └─────────────────────────────────────────────┘
 ```
 
@@ -355,50 +355,61 @@ AccuNode has **3 levels of data access**:
 | **Tenant Admin** | ✅ Yes | ✅ Full Access | ✅ Read Only | ❌ No |
 | **Super Admin** | ✅ Yes | ✅ Full Access | ✅ Full Access | ✅ Yes |
 
-## Database Performance & Security
 
-### Performance Features
+## 🔗 **Entity Relationship Diagram**
 
-**Connection Pooling**: 
-- The database maintains 20 active connections
-- Can scale up to 50 connections during high usage
-- Connections are recycled every 5 minutes for freshness
+### **Complete ERD**
+```
+                    ┌─────────────────┐
+                    │  organizations  │
+                    ├─────────────────┤
+                    │ id (PK)         │
+                    │ name            │
+                    │ domain          │
+                    │ created_at      │
+                    │ updated_at      │
+                    └─────────┬───────┘
+                              │
+                              │ 1:N
+                              ▼
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│      users      │    │    companies    │    │  bulk_upload_   │
+├─────────────────┤    ├─────────────────┤    │      jobs       │
+│ id (PK)         │◄──►│ id (PK)         │    ├─────────────────┤
+│ email           │    │ symbol          │    │ id (PK)         │
+│ password_hash   │    │ name            │    │ filename        │
+│ role            │    │ sector          │    │ status          │
+│ organization_id │    │ market_cap      │    │ total_rows      │
+│ is_verified     │    │ organization_id │    │ processed_rows  │
+│ created_at      │    │ access_level    │    │ success_count   │
+│ updated_at      │    │ created_by      │    │ error_count     │
+│ last_login      │    │ created_at      │    │ created_by      │
+└─────────┬───────┘    │ updated_at      │    │ created_at      │
+          │            └─────────┬───────┘    │ updated_at      │
+          │                      │            └─────────────────┘
+          │ 1:N                  │ 1:N
+          ▼                      ▼
+┌─────────────────┐    ┌─────────────────┐
+│annual_predictions│    │quarterly_predic.│
+├─────────────────┤    ├─────────────────┤
+│ id (PK)         │    │ id (PK)         │
+│ company_id (FK) │    │ company_id (FK) │
+│ reporting_year  │    │ reporting_year  │
+│ probability     │    │ reporting_qtr   │
+│ risk_level      │    │ logistic_prob   │
+│ confidence      │    │ gbm_probability │
+│ access_level    │    │ ensemble_prob   │
+│ organization_id │    │ risk_level      │
+│ created_by (FK) │    │ confidence      │
+│ predicted_at    │    │ access_level    │
+│ created_at      │    │ organization_id │
+│ updated_at      │    │ created_by (FK) │
+│                 │    │ predicted_at    │
+│ + 5 fin ratios  │    │ created_at      │
+└─────────────────┘    │ updated_at      │
+                       │                 │
+                       │ + 6 fin ratios  │
+                       └─────────────────┘
+```
 
-**Fast Searches**:
-- Database indexes are like a book's index - they make searches super fast
-- Common searches (by company, year, organization) are optimized
-- Multiple search criteria can be used together efficiently
-
-**Data Loading**:
-- Related data is loaded together to avoid multiple trips to the database
-- Example: When you load a company, its predictions come with it
-
-### Security Features
-
-**Unique Identifiers**:
-- Every record has a unique ID (UUID) that can't be guessed
-- This prevents unauthorized access to data
-
-**Access Filtering**:
-- Every database query automatically filters based on user permissions  
-- Users can never accidentally see data they shouldn't
-- The system double-checks permissions before showing any data
-
-**Data Validation**:
-- All data is checked for correctness before being stored
-- Invalid data is rejected with helpful error messages
-- This keeps the database clean and reliable
-
-### Backup & Recovery
-
-**Automatic Backups**:
-- Database is backed up regularly
-- Multiple backup copies are kept for safety
-- Backups are stored separately from main database
-
-**Data Integrity**:
-- The database checks that all relationships make sense
-- Orphaned data (predictions without companies) is prevented
-- Regular integrity checks ensure data consistency
-
-This architecture ensures AccuNode's data is fast, secure, and always available when you need it.
+---
