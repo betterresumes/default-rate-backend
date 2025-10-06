@@ -28,6 +28,7 @@ from app.api.v1.users import router as users_router
 from app.api.v1 import companies, predictions
 from app.api.v1.scaling import router as scaling_router
 from app.api.v1.debug import debug_router
+from app.api.v1.contact import router as contact_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -263,6 +264,7 @@ def create_app() -> FastAPI:
     app.include_router(companies.router, prefix="/api/v1/companies", tags=["Companies"])
     app.include_router(predictions.router, prefix="/api/v1/predictions", tags=["Predictions"])
     app.include_router(scaling_router, tags=["Auto-Scaling"])
+    app.include_router(contact_router, prefix="/api/v1", tags=["Contact"])
 
     @app.get("/")
     @rate_limit_api
