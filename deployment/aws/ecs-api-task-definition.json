@@ -71,7 +71,7 @@
         },
         {
           "name": "CORS_ORIGIN",
-          "value": "https://www.accunode.ai,https://client-eta-sepia.vercel.app,http://localhost:3000,https://d3tytmnn6rkqkb.cloudfront.net"
+          "value": "https://www.accunode.ai,https://accunode.ai,https://client-eta-sepia.vercel.app,http://localhost:3000,https://d3tytmnn6rkqkb.cloudfront.net"
         },
         {
           "name": "PYTHONUNBUFFERED",

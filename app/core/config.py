@@ -116,6 +116,7 @@ class Config:
         "http://localhost:3000",
         "http://localhost:8080",
         "https://api.accunode.ai",  # Add your production domain
+        "https://www.accunode.ai",  # Add your frontend domains
         "https://accunode.ai"  # Add your frontend domains
     ]
     

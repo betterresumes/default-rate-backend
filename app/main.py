@@ -232,6 +232,7 @@ def create_app() -> FastAPI:
     default_origins = [
         "http://localhost:3000",
         "https://www.accunode.ai",
+        "https://accunode.ai",
         "https://client-eta-sepia.vercel.app",
         "https://accunode-ten.vercel.app"
     ]
