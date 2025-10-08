@@ -25,6 +25,36 @@ AccuNode offers two types of financial risk predictions:
 - **Access Control**: Multi-tenant with 3-level hierarchy (personal/organization/system)
 - **Rate Limiting**: Applied to all ML endpoints
 
+## Query Parameters
+
+All GET endpoints support the following query parameters:
+
+| Parameter | Type | Required | Description | Access Level |
+|-----------|------|----------|-------------|--------------|
+| `page` | int | No | Page number (default: 1) | All users |
+| `size` | int | No | Items per page (default: 10) | All users |
+| `company_symbol` | string | No | Filter by company symbol | All users |
+| `reporting_year` | string | No | Filter by reporting year | All users |
+| `reporting_quarter` | string | No | Filter by quarter (quarterly only) | All users |
+| `organization_id` | string | No | **Filter by organization ID** | **tenant_admin+ only** |
+
+### Organization Filtering (New Feature)
+
+**Tenant admins** can now filter predictions by specific organization using the `organization_id` parameter:
+
+```bash
+# Get predictions from specific organization
+GET /api/v1/predictions/annual?organization_id=326ae596-2a69-463c-8db1-cfbfe249ff0b
+
+# Combine with other filters
+GET /api/v1/predictions/annual?organization_id=326ae596-2a69-463c-8db1-cfbfe249ff0b&company_symbol=AAPL
+```
+
+**Access Control:**
+- ✅ **tenant_admin**: Can access any organization within their tenant
+- ✅ **super_admin**: Can access any organization system-wide  
+- ❌ **Other roles**: Parameter is ignored, returns 403 Forbidden
+
 ## Core Endpoints
 
 | HTTP Method | Endpoint | Purpose |

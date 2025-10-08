@@ -35,13 +35,14 @@ def get_user_access_level(user: User):
     else:
         return "personal"  # Personal data only
 
-def get_data_access_filter(user: User, prediction_model, include_system: bool = False):
-    """Get access filter for predictions - excludes system data by default"""
+def get_data_access_filter(user: User, prediction_model, include_system: bool = False, organization_id: Optional[str] = None, db: Session = None):
+    """Enhanced access filter for predictions with tenant admin cross-organization support"""
     conditions = []
     
     if user.role == "super_admin" and include_system:
         return None
     
+    # Personal predictions (always accessible)
     conditions.append(
         and_(
             prediction_model.access_level == "personal",
@@ -49,10 +50,48 @@ def get_data_access_filter(user: User, prediction_model, include_system: bool = 
         )
     )
     
-    if user.organization_id:
+    # Organization-level access with tenant admin cross-org support
+    if user.role == "tenant_admin":
+        # Tenant admin can access predictions from any org in their tenant
+        if organization_id:
+            # Verify the organization belongs to tenant admin's tenant
+            if db:
+                org = db.query(Organization).filter(
+                    Organization.id == organization_id,
+                    Organization.tenant_id == user.tenant_id
+                ).first()
+                
+                if org:
+                    conditions.append(
+                        and_(
+                            prediction_model.access_level == "organization",
+                            prediction_model.organization_id == organization_id
+                        )
+                    )
+                else:
+                    # Organization not found or not accessible, return no results
+                    from sqlalchemy import false
+                    conditions.append(false())
+        else:
+            # No specific org requested - show all orgs in tenant
+            if db:
+                tenant_org_ids = db.query(Organization.id).filter(
+                    Organization.tenant_id == user.tenant_id
+                ).all()
+                tenant_org_ids = [str(org_id[0]) for org_id in tenant_org_ids]
+                
+                if tenant_org_ids:
+                    conditions.append(
+                        and_(
+                            prediction_model.access_level == "organization",
+                            prediction_model.organization_id.in_(tenant_org_ids)
+                        )
+                    )
+    elif user.organization_id:
+        # Regular org users - restricted to their organization
         conditions.append(
             and_(
-                prediction_model.access_level == "organization",
+                prediction_model.access_level == "organization", 
                 prediction_model.organization_id == user.organization_id
             )
         )
@@ -415,15 +454,33 @@ async def get_annual_predictions(
     size: int = 10,
     company_symbol: Optional[str] = None,
     reporting_year: Optional[str] = None,
+    organization_id: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
-    """Get paginated annual predictions (personal + organization data only - excludes system data)"""
+    """
+    Get paginated annual predictions (personal + organization data only - excludes system data)
+    
+    Parameters:
+    - organization_id: Optional[str] - Filter by specific organization (tenant_admin+ only)
+    
+    Access Control:
+    - Regular users: Personal + their organization predictions only
+    - Tenant admins: Can specify organization_id to access any org in their tenant
+    - Super admins: All data (when include_system=True)
+    """
     try:
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
                 detail="Authentication required to view predictions"
+            )
+        
+        # Validate organization_id parameter usage
+        if organization_id and current_user.role not in ["tenant_admin", "super_admin"]:
+            raise HTTPException(
+                status_code=403,
+                detail="Only tenant admins and super admins can filter by organization_id"
             )
 
         query = db.query(
@@ -439,7 +496,7 @@ async def get_annual_predictions(
             User, AnnualPrediction.created_by == User.id
         )
         
-        access_filter = get_data_access_filter(current_user, AnnualPrediction, include_system=False)
+        access_filter = get_data_access_filter(current_user, AnnualPrediction, include_system=False, organization_id=organization_id, db=db)
         if access_filter is not None:
             query = query.filter(access_filter)
         
@@ -507,15 +564,33 @@ async def get_quarterly_predictions(
     company_symbol: Optional[str] = None,
     reporting_year: Optional[str] = None,
     reporting_quarter: Optional[str] = None,
+    organization_id: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
-    """Get paginated quarterly predictions (personal + organization data only - excludes system data)"""
+    """
+    Get paginated quarterly predictions (personal + organization data only - excludes system data)
+    
+    Parameters:
+    - organization_id: Optional[str] - Filter by specific organization (tenant_admin+ only)
+    
+    Access Control:
+    - Regular users: Personal + their organization predictions only  
+    - Tenant admins: Can specify organization_id to access any org in their tenant
+    - Super admins: All data (when include_system=True)
+    """
     try:
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
                 detail="Authentication required to view predictions"
+            )
+        
+        # Validate organization_id parameter usage
+        if organization_id and current_user.role not in ["tenant_admin", "super_admin"]:
+            raise HTTPException(
+                status_code=403,
+                detail="Only tenant admins and super admins can filter by organization_id"
             )
 
         query = db.query(
@@ -531,7 +606,7 @@ async def get_quarterly_predictions(
             User, QuarterlyPrediction.created_by == User.id
         )
         
-        access_filter = get_data_access_filter(current_user, QuarterlyPrediction, include_system=False)
+        access_filter = get_data_access_filter(current_user, QuarterlyPrediction, include_system=False, organization_id=organization_id, db=db)
         if access_filter is not None:
             query = query.filter(access_filter)
         if company_symbol:
