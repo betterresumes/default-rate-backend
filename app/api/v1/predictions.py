@@ -147,6 +147,41 @@ def create_or_get_company(db: Session, company_symbol: str, company_name: str,
     db.refresh(company)
     return company
 
+def create_or_get_company_with_org(db: Session, company_symbol: str, company_name: str,
+                                   market_cap: float, sector: str, user: User, 
+                                   access_level: str, target_organization_id: Optional[str]):
+    """Create company with explicit access level and organization support"""
+    
+    query = db.query(Company).filter(
+        Company.symbol == company_symbol.upper(),
+        Company.access_level == access_level
+    )
+    
+    if access_level == "organization" and target_organization_id:
+        query = query.filter(Company.organization_id == target_organization_id)
+    elif access_level == "personal":
+        query = query.filter(Company.created_by == str(user.id))
+    
+    existing_company = query.first()
+    
+    if existing_company:
+        return existing_company
+    
+    company = Company(
+        symbol=company_symbol.upper(),
+        name=company_name,
+        market_cap=market_cap,
+        sector=sector,
+        access_level=access_level,
+        organization_id=target_organization_id,
+        created_by=str(user.id)
+    )
+    
+    db.add(company)
+    db.commit()
+    db.refresh(company)
+    return company
+
 def check_user_permissions(user: User, required_role: str = "user"):
     """Check if user has required permissions based on 5-role hierarchy"""
     role_hierarchy = {
@@ -185,16 +220,51 @@ def is_prediction_owner(prediction, current_user):
     
     return prediction_creator and current_user_id and prediction_creator == current_user_id
 
+async def determine_prediction_access(current_user: User, organization_id: Optional[str], db: Session):
+    """Determine access level and target organization for prediction creation"""
+    
+    # If organization_id is provided, validate tenant admin/super admin access
+    if organization_id:
+        if current_user.role == "super_admin":
+            # Super admin can create in any organization
+            organization = db.query(Organization).filter(Organization.id == organization_id).first()
+            if not organization:
+                raise HTTPException(status_code=404, detail="Organization not found")
+            return "organization", organization_id
+            
+        elif current_user.role == "tenant_admin":
+            # Tenant admin can only create in organizations within their tenant
+            organization = db.query(Organization).filter(
+                Organization.id == organization_id,
+                Organization.tenant_id == current_user.tenant_id
+            ).first()
+            
+            if not organization:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Organization not found or not accessible within your tenant"
+                )
+            return "organization", organization_id
+    
+    # Fallback to existing logic for other cases
+    if current_user.role == "super_admin":
+        return "system", None
+    elif current_user.role in ["org_admin", "org_member"] and current_user.organization_id:
+        return "organization", current_user.organization_id
+    else:
+        return "personal", None
+
 
 @router.post("/annual", response_model=Dict)
 @rate_limit_ml
 async def create_annual_prediction(
     request: Request,
     prediction_request: AnnualPredictionRequest,
+    organization_id: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
-    """Create annual prediction with simplified 3-level access control"""
+    """Create annual prediction with tenant admin cross-organization support"""
     try:
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
@@ -202,16 +272,27 @@ async def create_annual_prediction(
                 detail="Authentication required to create predictions"
             )
 
-        access_level = get_user_access_level(current_user)
-        organization_id = current_user.organization_id if access_level == "organization" else None
+        # Validate organization_id parameter usage
+        if organization_id and current_user.role not in ["tenant_admin", "super_admin"]:
+            raise HTTPException(
+                status_code=403,
+                detail="Only tenant admins and super admins can create predictions in specific organizations"
+            )
+
+        # Determine access level and target organization
+        access_level, target_organization_id = await determine_prediction_access(
+            current_user, organization_id, db
+        )
         
-        company = create_or_get_company(
+        company = create_or_get_company_with_org(
             db=db,
             company_symbol=prediction_request.company_symbol,
             company_name=prediction_request.company_name,
             market_cap=prediction_request.market_cap,
             sector=prediction_request.sector,
-            user=current_user
+            user=current_user,
+            access_level=access_level,
+            target_organization_id=target_organization_id
         )
         
         existing_query = db.query(AnnualPrediction).filter(
@@ -221,7 +302,7 @@ async def create_annual_prediction(
         )
         
         if access_level == "organization":
-            existing_query = existing_query.filter(AnnualPrediction.organization_id == organization_id)
+            existing_query = existing_query.filter(AnnualPrediction.organization_id == target_organization_id)
         elif access_level == "personal":
             existing_query = existing_query.filter(AnnualPrediction.created_by == str(current_user.id))
         
@@ -252,7 +333,7 @@ async def create_annual_prediction(
         prediction = AnnualPrediction(
             id=uuid.uuid4(),
             company_id=company.id,
-            organization_id=organization_id,
+            organization_id=target_organization_id,
             access_level=access_level,
             reporting_year=prediction_request.reporting_year,
             reporting_quarter=prediction_request.reporting_quarter,
@@ -276,8 +357,8 @@ async def create_annual_prediction(
         db.refresh(prediction)
         
         organization_name = None
-        if organization_id:
-            org = db.query(Organization).filter(Organization.id == organization_id).first()
+        if target_organization_id:
+            org = db.query(Organization).filter(Organization.id == target_organization_id).first()
             organization_name = org.name if org else None
         
         return {
@@ -323,10 +404,16 @@ async def create_annual_prediction(
 async def create_quarterly_prediction(
     request: Request,
     prediction_request: QuarterlyPredictionRequest,
+    organization_id: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
-    """Create quarterly prediction with simplified 3-level access control"""
+    """
+    Create quarterly prediction with cross-organization support for tenant admins
+    
+    For tenant admins: Pass organization_id to create prediction in specific organization within their tenant
+    For other roles: organization_id parameter is ignored, uses standard access control
+    """
     try:
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
@@ -334,16 +421,20 @@ async def create_quarterly_prediction(
                 detail="Authentication required to create predictions"
             )
 
-        access_level = get_user_access_level(current_user)
-        organization_id = current_user.organization_id if access_level == "organization" else None
+        # Determine access level and target organization
+        access_level, target_organization_id = determine_prediction_access(
+            current_user, organization_id, db
+        )
         
-        company = create_or_get_company(
+        company = create_or_get_company_with_org(
             db=db,
             company_symbol=prediction_request.company_symbol,
             company_name=prediction_request.company_name,
             market_cap=prediction_request.market_cap,
             sector=prediction_request.sector,
-            user=current_user
+            user=current_user,
+            access_level=access_level,
+            target_organization_id=target_organization_id
         )
         
         existing_query = db.query(QuarterlyPrediction).filter(
@@ -354,7 +445,7 @@ async def create_quarterly_prediction(
         )
         
         if access_level == "organization":
-            existing_query = existing_query.filter(QuarterlyPrediction.organization_id == organization_id)
+            existing_query = existing_query.filter(QuarterlyPrediction.organization_id == target_organization_id)
         elif access_level == "personal":
             existing_query = existing_query.filter(QuarterlyPrediction.created_by == str(current_user.id))
         
@@ -378,7 +469,7 @@ async def create_quarterly_prediction(
         prediction = QuarterlyPrediction(
             id=uuid.uuid4(),
             company_id=company.id,
-            organization_id=organization_id,
+            organization_id=target_organization_id,
             access_level=access_level,
             reporting_year=prediction_request.reporting_year,
             reporting_quarter=prediction_request.reporting_quarter,
@@ -403,8 +494,8 @@ async def create_quarterly_prediction(
         db.refresh(prediction)
         
         organization_name = None
-        if organization_id:
-            org = db.query(Organization).filter(Organization.id == organization_id).first()
+        if target_organization_id:
+            org = db.query(Organization).filter(Organization.id == target_organization_id).first()
             organization_name = org.name if org else None
         
         return {
@@ -2958,7 +3049,7 @@ from typing import Optional
 
 class DashboardRequest(BaseModel):
     include_platform_stats: bool = False
-    organization_filter: Optional[str] = None
+    organization_id: Optional[str] = None  # Renamed from organization_filter for consistency
     custom_scope: Optional[str] = None
 
 @router.post("/dashboard")
@@ -2969,20 +3060,37 @@ async def get_dashboard_post(
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
-    """Enhanced dashboard API with SEPARATE user data and platform statistics"""
+    """
+    Enhanced dashboard API with SEPARATE user data and platform statistics
+    
+    Parameters:
+    - organization_id: Optional[str] - Get dashboard for specific organization (tenant_admin+ only)
+    """
     try:
-        if current_user.role == "super_admin":
+        # Validate organization_id parameter usage
+        if dashboard_request.organization_id and current_user.role not in ["tenant_admin", "super_admin"]:
+            raise HTTPException(
+                status_code=403,
+                detail="Only tenant admins and super admins can filter dashboard by organization_id"
+            )
+        
+        # Check if tenant admin is requesting cross-organization access first
+        if dashboard_request.organization_id and current_user.role == "tenant_admin":
+            # Tenant admin requesting specific organization dashboard
+            user_dashboard = await get_tenant_admin_organization_dashboard(db, current_user, dashboard_request.organization_id)
+            scope = "tenant_cross_organization"
+        elif dashboard_request.organization_id and current_user.role == "super_admin":
+            # Super admin requesting specific organization dashboard
+            user_dashboard = await get_tenant_admin_organization_dashboard(db, current_user, dashboard_request.organization_id)
+            scope = "super_admin_cross_organization"
+        elif current_user.role == "super_admin":
             scope = "system"
+            user_dashboard = await get_system_dashboard(db, current_user)
         elif current_user.role in ["tenant_admin", "org_admin", "org_member"] and current_user.organization_id:
             scope = "organization"
-        else:
-            scope = "personal"
-
-        if scope == "system":
-            user_dashboard = await get_system_dashboard(db, current_user)
-        elif scope == "organization":
             user_dashboard = await get_organization_dashboard(db, current_user)
         else:
+            scope = "personal"
             user_dashboard = await get_personal_dashboard(db, current_user)
 
         response = {
@@ -3002,24 +3110,43 @@ async def get_dashboard_post(
 @router.get("/dashboard")
 @rate_limit_analytics
 async def get_dashboard(
-    request: Request, include_platform_stats: bool = False,
+    request: Request, 
+    include_platform_stats: bool = False,
+    organization_id: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
-    """GET version of dashboard API with user and system last updated times"""
+    """
+    GET version of dashboard API with user and system last updated times
+    
+    Parameters:
+    - organization_id: Optional[str] - Get dashboard for specific organization (tenant_admin+ only)
+    """
     try:
-        if current_user.role == "super_admin":
+        # Validate organization_id parameter usage
+        if organization_id and current_user.role not in ["tenant_admin", "super_admin"]:
+            raise HTTPException(
+                status_code=403,
+                detail="Only tenant admins and super admins can filter dashboard by organization_id"
+            )
+        
+        # Check if tenant admin is requesting cross-organization access first
+        if organization_id and current_user.role == "tenant_admin":
+            # Tenant admin requesting specific organization dashboard
+            user_dashboard = await get_tenant_admin_organization_dashboard(db, current_user, organization_id)
+            scope = "tenant_cross_organization"
+        elif organization_id and current_user.role == "super_admin":
+            # Super admin requesting specific organization dashboard
+            user_dashboard = await get_tenant_admin_organization_dashboard(db, current_user, organization_id)
+            scope = "super_admin_cross_organization"
+        elif current_user.role == "super_admin":
             scope = "system"
+            user_dashboard = await get_system_dashboard(db, current_user)
         elif current_user.role in ["tenant_admin", "org_admin", "org_member"] and current_user.organization_id:
             scope = "organization"
-        else:
-            scope = "personal"
-
-        if scope == "system":
-            user_dashboard = await get_system_dashboard(db, current_user)
-        elif scope == "organization":
             user_dashboard = await get_organization_dashboard(db, current_user)
         else:
+            scope = "personal"
             user_dashboard = await get_personal_dashboard(db, current_user)
 
         response = {
@@ -3222,6 +3349,108 @@ async def get_organization_dashboard(db: Session, current_user: User):
         "last_updated_times": {
             "user_last_updated": user_last_updated.isoformat() if user_last_updated else None,
             "system_last_updated": system_last_updated.isoformat() if system_last_updated else None
+        }
+    }
+
+async def get_tenant_admin_organization_dashboard(db: Session, current_user: User, organization_id: str):
+    """Get organization-specific dashboard data for tenant admin or super admin"""
+    
+    # Verify the organization exists and is accessible
+    if current_user.role == "super_admin":
+        # Super admin can access any organization
+        organization = db.query(Organization).filter(Organization.id == organization_id).first()
+        if not organization:
+            raise HTTPException(status_code=404, detail="Organization not found")
+    else:
+        # Tenant admin can only access organizations within their tenant
+        organization = db.query(Organization).filter(
+            Organization.id == organization_id,
+            Organization.tenant_id == current_user.tenant_id
+        ).first()
+        
+        if not organization:
+            raise HTTPException(
+                status_code=404, 
+                detail="Organization not found or not accessible within your tenant"
+            )
+    
+    # Get organization-specific data
+    companies = db.query(Company).filter(
+        Company.organization_id == organization_id
+    ).all()
+    
+    annual_predictions = db.query(AnnualPrediction).filter(
+        AnnualPrediction.organization_id == organization_id
+    ).all()
+    
+    quarterly_predictions = db.query(QuarterlyPrediction).filter(
+        QuarterlyPrediction.organization_id == organization_id
+    ).all()
+    
+    # Calculate metrics
+    total_companies = len(companies)
+    annual_predictions_count = len(annual_predictions)
+    quarterly_predictions_count = len(quarterly_predictions)
+    total_predictions = annual_predictions_count + quarterly_predictions_count
+    
+    # Calculate average default rate
+    if annual_predictions:
+        total_probability = sum(pred.probability for pred in annual_predictions if pred.probability is not None)
+        average_default_rate = total_probability / len(annual_predictions)
+    else:
+        average_default_rate = 0
+    
+    # Count high risk companies
+    high_risk_companies = sum(1 for pred in annual_predictions if pred.risk_level == "High Risk")
+    
+    # Count sectors
+    sectors_covered = len(set(company.sector for company in companies if company.sector))
+    
+    # Get last updated times for the organization
+    org_last_updated = None
+    if annual_predictions or quarterly_predictions:
+        latest_annual = max(annual_predictions, key=lambda x: x.created_at) if annual_predictions else None
+        latest_quarterly = max(quarterly_predictions, key=lambda x: x.created_at) if quarterly_predictions else None
+        
+        if latest_annual and latest_quarterly:
+            org_last_updated = max(latest_annual.created_at, latest_quarterly.created_at)
+        elif latest_annual:
+            org_last_updated = latest_annual.created_at
+        elif latest_quarterly:
+            org_last_updated = latest_quarterly.created_at
+    
+    # Get user's last updated time in this organization
+    user_annual_predictions = [p for p in annual_predictions if p.created_by == str(current_user.id)]
+    user_quarterly_predictions = [p for p in quarterly_predictions if p.created_by == str(current_user.id)]
+    
+    user_last_updated = None
+    if user_annual_predictions or user_quarterly_predictions:
+        latest_user_annual = max(user_annual_predictions, key=lambda x: x.created_at) if user_annual_predictions else None
+        latest_user_quarterly = max(user_quarterly_predictions, key=lambda x: x.created_at) if user_quarterly_predictions else None
+        
+        if latest_user_annual and latest_user_quarterly:
+            user_last_updated = max(latest_user_annual.created_at, latest_user_quarterly.created_at)
+        elif latest_user_annual:
+            user_last_updated = latest_user_annual.created_at
+        elif latest_user_quarterly:
+            user_last_updated = latest_user_quarterly.created_at
+    
+    return {
+        "scope": "tenant_cross_organization",
+        "user_name": current_user.full_name,
+        "organization_name": organization.name,
+        "organization_id": organization_id,
+        "total_companies": total_companies,
+        "total_predictions": total_predictions,
+        "annual_predictions": annual_predictions_count,
+        "quarterly_predictions": quarterly_predictions_count,
+        "average_default_rate": round(average_default_rate, 4),
+        "high_risk_companies": high_risk_companies,
+        "sectors_covered": sectors_covered,
+        "data_scope": f"Data from {organization.name} (Cross-organization access)",
+        "last_updated_times": {
+            "user_last_updated": user_last_updated.isoformat() if user_last_updated else None,
+            "organization_last_updated": org_last_updated.isoformat() if org_last_updated else None
         }
     }
 
