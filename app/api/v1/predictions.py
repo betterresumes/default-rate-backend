@@ -220,7 +220,7 @@ def is_prediction_owner(prediction, current_user):
     
     return prediction_creator and current_user_id and prediction_creator == current_user_id
 
-async def determine_prediction_access(current_user: User, organization_id: Optional[str], db: Session):
+def determine_prediction_access(current_user: User, organization_id: Optional[str], db: Session):
     """Determine access level and target organization for prediction creation"""
     
     # If organization_id is provided, validate tenant admin/super admin access
@@ -280,7 +280,7 @@ async def create_annual_prediction(
             )
 
         # Determine access level and target organization
-        access_level, target_organization_id = await determine_prediction_access(
+        access_level, target_organization_id = determine_prediction_access(
             current_user, organization_id, db
         )
         
