@@ -219,8 +219,8 @@ Message:
 Submitted at: {context['timestamp']}
             """.strip()
             
-            # Prepare email details
-            email_subject = f"{self.config.EMAIL_SUBJECT_PREFIX} {subject}"
+            # Prepare email details - Include user name in subject
+            email_subject = f"{self.config.EMAIL_SUBJECT_PREFIX} [{name}] {subject}"
             to_emails = [self.config.EMAIL_TO]
             
             # Send email

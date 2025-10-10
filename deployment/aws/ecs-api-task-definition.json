@@ -37,6 +37,14 @@
         {
           "name": "SECRET_KEY",
           "valueFrom": "/accunode/secret-key"
+        },
+        {
+          "name": "SMTP_USERNAME",
+          "valueFrom": "/accunode/smtp-username"
+        },
+        {
+          "name": "SMTP_PASSWORD",
+          "valueFrom": "/accunode/smtp-password"
         }
       ],
       "environment": [
@@ -104,6 +112,38 @@
         {
           "name": "LOG_LEVEL",
           "value": "INFO"
+        },
+        {
+          "name": "SMTP_HOST",
+          "value": "smtp.gmail.com"
+        },
+        {
+          "name": "SMTP_PORT",
+          "value": "587"
+        },
+        {
+          "name": "SMTP_TLS",
+          "value": "true"
+        },
+        {
+          "name": "SMTP_SSL",
+          "value": "false"
+        },
+        {
+          "name": "EMAIL_FROM",
+          "value": "noreply@accunode.ai"
+        },
+        {
+          "name": "EMAIL_FROM_NAME",
+          "value": "AccuNode Contact"
+        },
+        {
+          "name": "EMAIL_TO",
+          "value": "contact@accunode.ai"
+        },
+        {
+          "name": "EMAIL_SUBJECT_PREFIX",
+          "value": "[AccuNode Contact]"
         }
       ],
       "healthCheck": {
