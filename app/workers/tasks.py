@@ -306,7 +306,8 @@ def process_annual_bulk_upload_task(
     job_id: str, 
     data: List[Dict[str, Any]], 
     user_id: str, 
-    organization_id: Optional[str]
+    organization_id: Optional[str],
+    access_level: str = "personal"
 ) -> Dict[str, Any]:
     """
     Enhanced Celery task to process annual predictions bulk upload with comprehensive logging
@@ -315,7 +316,8 @@ def process_annual_bulk_upload_task(
         job_id: Bulk upload job ID
         data: List of row data from Excel/CSV
         user_id: ID of user who initiated upload
-        organization_id: Organization ID (None for super admin global uploads)
+        organization_id: Organization ID for the predictions
+        access_level: Access level (personal, organization, system)
         
     Returns:
         Dictionary with processing results
@@ -703,7 +705,8 @@ def process_quarterly_bulk_upload_task(
     job_id: str, 
     data: List[Dict[str, Any]], 
     user_id: str, 
-    organization_id: Optional[str]
+    organization_id: Optional[str],
+    access_level: str = "personal"
 ) -> Dict[str, Any]:
     """
     Enhanced Celery task to process quarterly predictions bulk upload with comprehensive logging
@@ -711,6 +714,9 @@ def process_quarterly_bulk_upload_task(
     Args:
         job_id: Bulk upload job ID
         data: List of row data from Excel/CSV
+        user_id: ID of user who initiated upload
+        organization_id: Organization ID for the predictions
+        access_level: Access level (personal, organization, system)
         user_id: ID of user who initiated upload
         organization_id: Organization ID (None for super admin global uploads)
         

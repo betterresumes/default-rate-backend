@@ -1,6 +1,7 @@
 import os
 import sys
 from celery import Celery
+from kombu import Queue
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -174,6 +175,14 @@ celery_app.conf.update(
     # AUTO-SCALING QUEUE DECLARATIONS
     task_create_missing_queues=True,
     task_queue_max_priority=10,
+    
+    # EXPLICIT QUEUE DECLARATIONS
+    task_queues=[
+        Queue('high_priority', routing_key='high_priority', queue_arguments={'x-max-priority': 10}),
+        Queue('medium_priority', routing_key='medium_priority', queue_arguments={'x-max-priority': 10}),
+        Queue('low_priority', routing_key='low_priority', queue_arguments={'x-max-priority': 10}),
+        Queue('celery', routing_key='celery'),  # Default queue
+    ],
 )
 
 celery_app.conf.beat_schedule = {}

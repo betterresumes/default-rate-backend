@@ -78,6 +78,16 @@ async def create_organization(
                 detail="Cannot create organization for inactive tenant"
             )
     
+    # Check if organization name already exists (case-insensitive)
+    existing_name = db.query(Organization).filter(
+        Organization.name.ilike(org_data.name.strip())
+    ).first()
+    if existing_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Organization with name '{org_data.name}' already exists"
+        )
+
     if org_data.domain:
         if not validate_organization_domain(org_data.domain):
             raise HTTPException(
@@ -120,8 +130,35 @@ async def create_organization(
     )
     
     db.add(new_organization)
-    db.commit()
-    db.refresh(new_organization)
+    
+    try:
+        db.commit()
+        db.refresh(new_organization)
+    except Exception as e:
+        db.rollback()
+        # Handle specific database constraint violations
+        if "duplicate key value violates unique constraint" in str(e):
+            if "ix_organizations_name" in str(e):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Organization with name '{org_data.name}' already exists"
+                )
+            elif "ix_organizations_slug" in str(e):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Organization slug already exists. Please try again."
+                )
+            elif "organizations_domain_key" in str(e):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Domain '{org_data.domain}' is already registered"
+                )
+        
+        # Generic database error
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create organization. Please try again."
+        )
     
     return OrganizationResponse.from_orm(new_organization)
 

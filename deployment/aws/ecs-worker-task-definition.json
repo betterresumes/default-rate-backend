@@ -10,7 +10,7 @@
     {
       "name": "accunode-worker",
       "image": "461962182774.dkr.ecr.us-east-1.amazonaws.com/accunode:latest",
-      "command": ["celery", "-A", "app.workers.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--queues=high_priority,medium_priority,low_priority"],
+      "command": ["celery", "-A", "app.workers.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--queues=high_priority,medium_priority,low_priority,celery"],
       "essential": true,
       "logConfiguration": {
         "logDriver": "awslogs",

@@ -972,16 +972,34 @@ async def bulk_upload_predictions(
     request: Request,
     file: UploadFile = File(...),
     prediction_type: str = "annual",  # annual or quarterly
+    organization_id: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
-    """Bulk upload predictions from CSV file"""
+    """
+    Bulk upload predictions from CSV file with cross-organization support for tenant admins
+    
+    For tenant admins: Pass organization_id to create predictions in specific organization within their tenant
+    For other roles: organization_id parameter is ignored, uses standard access control
+    """
     try:
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
                 detail="Authentication required to upload predictions"
             )
+
+        # Validate organization_id parameter usage
+        if organization_id and current_user.role not in ["tenant_admin", "super_admin"]:
+            raise HTTPException(
+                status_code=403,
+                detail="Only tenant admins and super admins can create predictions in specific organizations"
+            )
+
+        # Determine access level and target organization
+        access_level, target_organization_id = determine_prediction_access(
+            current_user, organization_id, db
+        )
 
         if not file.filename.endswith('.csv'):
             raise HTTPException(
@@ -995,15 +1013,8 @@ async def bulk_upload_predictions(
         content = await file.read()
         df = pd.read_csv(io.StringIO(content.decode('utf-8')))
         
-        organization_context = get_organization_context(current_user)
-        access_level = get_user_access_level(current_user)
-        
-        if current_user.role == "super_admin":
-            final_org_id = None  # System-level predictions
-        elif current_user.organization_id:
-            final_org_id = current_user.organization_id  # Organization predictions
-        else:
-            final_org_id = None  # Personal predictions (no org)
+        # Use the determined access level and organization from above
+        final_org_id = target_organization_id
         
         results = {
             "success": True,
@@ -1015,30 +1026,33 @@ async def bulk_upload_predictions(
         
         for index, row in df.iterrows():
             try:
-                company = create_or_get_company(
+                company = create_or_get_company_with_org(
                     db=db,
                     company_symbol=row['company_symbol'],
                     company_name=row['company_name'],
                     market_cap=float(row['market_cap']),
                     sector=row['sector'],
-                    user=current_user
+                    user=current_user,
+                    access_level=access_level,
+                    target_organization_id=target_organization_id
                 )
                 
                 if prediction_type == "annual":
                     existing_query = db.query(AnnualPrediction).filter(
                         AnnualPrediction.company_id == company.id,
                         AnnualPrediction.reporting_year == row['reporting_year'],
-                        AnnualPrediction.organization_id == final_org_id
+                        AnnualPrediction.access_level == access_level
                     )
                     
-                    if final_org_id is None and current_user.role != "super_admin":
+                    if access_level == "organization":
+                        existing_query = existing_query.filter(AnnualPrediction.organization_id == target_organization_id)
+                    elif access_level == "personal":
                         existing_query = existing_query.filter(AnnualPrediction.created_by == str(current_user.id))
                     
                     existing = existing_query.first()
                     
                     if existing:
-                        scope_text = "global" if current_user.role == "super_admin" else ("organization" if final_org_id else "personal")
-                        results["errors"].append(f"Row {index + 1}: Annual prediction already exists for {row['company_symbol']} {row['reporting_year']} in your {scope_text} scope")
+                        results["errors"].append(f"Row {index + 1}: Annual prediction already exists for {row['company_symbol']} {row['reporting_year']} in your {access_level} scope")
                         results["failed"] += 1
                         continue
                     
@@ -1055,7 +1069,8 @@ async def bulk_upload_predictions(
                     prediction = AnnualPrediction(
                         id=uuid.uuid4(),
                         company_id=company.id,
-                        organization_id=final_org_id,
+                        organization_id=target_organization_id,
+                        access_level=access_level,
                         reporting_year=row['reporting_year'],
                         long_term_debt_to_total_capital=financial_data['long_term_debt_to_total_capital'],
                         total_debt_to_ebitda=financial_data['total_debt_to_ebitda'],
@@ -1074,17 +1089,18 @@ async def bulk_upload_predictions(
                         QuarterlyPrediction.company_id == company.id,
                         QuarterlyPrediction.reporting_year == row['reporting_year'],
                         QuarterlyPrediction.reporting_quarter == row['reporting_quarter'],
-                        QuarterlyPrediction.organization_id == final_org_id
+                        QuarterlyPrediction.access_level == access_level
                     )
                     
-                    if final_org_id is None and current_user.role != "super_admin":
+                    if access_level == "organization":
+                        existing_query = existing_query.filter(QuarterlyPrediction.organization_id == target_organization_id)
+                    elif access_level == "personal":
                         existing_query = existing_query.filter(QuarterlyPrediction.created_by == str(current_user.id))
                     
                     existing = existing_query.first()
                     
                     if existing:
-                        scope_text = "global" if current_user.role == "super_admin" else ("organization" if final_org_id else "personal")
-                        results["errors"].append(f"Row {index + 1}: Quarterly prediction already exists for {row['company_symbol']} {row['reporting_year']} {row['reporting_quarter']} in your {scope_text} scope")
+                        results["errors"].append(f"Row {index + 1}: Quarterly prediction already exists for {row['company_symbol']} {row['reporting_year']} {row['reporting_quarter']} in your {access_level} scope")
                         results["failed"] += 1
                         continue
                     
@@ -1100,7 +1116,8 @@ async def bulk_upload_predictions(
                     prediction = QuarterlyPrediction(
                         id=uuid.uuid4(),
                         company_id=company.id,
-                        organization_id=final_org_id,
+                        organization_id=target_organization_id,
+                        access_level=access_level,
                         reporting_year=row['reporting_year'],
                         reporting_quarter=row['reporting_quarter'],
                         total_debt_to_ebitda=financial_data['total_debt_to_ebitda'],
@@ -1144,16 +1161,34 @@ async def bulk_upload_predictions(
 async def bulk_upload_annual_async(
     request: Request, background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    organization_id: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
-    """Async bulk upload annual predictions with job tracking"""
+    """
+    Async bulk upload annual predictions with job tracking and cross-organization support
+    
+    For tenant admins: Pass organization_id to create predictions in specific organization within their tenant
+    For other roles: organization_id parameter is ignored, uses standard access control
+    """
     try:
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
                 detail="Authentication required to create predictions"
             )
+
+        # Validate organization_id parameter usage
+        if organization_id and current_user.role not in ["tenant_admin", "super_admin"]:
+            raise HTTPException(
+                status_code=403,
+                detail="Only tenant admins and super admins can create predictions in specific organizations"
+            )
+
+        # Determine access level and target organization
+        access_level, target_organization_id = determine_prediction_access(
+            current_user, organization_id, db
+        )
 
         if not file.filename.endswith(('.csv', '.xlsx')):
             raise HTTPException(
@@ -1206,7 +1241,7 @@ async def bulk_upload_annual_async(
         
         job_id = await celery_bulk_upload_service.create_bulk_upload_job(
             user_id=str(current_user.id),
-            organization_id=final_org_id,
+            organization_id=target_organization_id,
             job_type='annual',
             filename=file.filename,
             file_size=file_size,
@@ -1217,7 +1252,8 @@ async def bulk_upload_annual_async(
             job_id=job_id,
             data=data,
             user_id=str(current_user.id),
-            organization_id=final_org_id
+            organization_id=target_organization_id,
+            access_level=access_level
         )
         
         return {
@@ -1246,10 +1282,16 @@ async def bulk_upload_annual_async(
 async def bulk_upload_quarterly_async(
     request: Request, background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    organization_id: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(current_verified_user)
 ):
-    """Async bulk upload quarterly predictions with job tracking"""
+    """
+    Async bulk upload quarterly predictions with job tracking and cross-organization support
+    
+    For tenant admins: Pass organization_id to create predictions in specific organization within their tenant
+    For other roles: organization_id parameter is ignored, uses standard access control
+    """
     try:
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
@@ -1257,21 +1299,25 @@ async def bulk_upload_quarterly_async(
                 detail="Authentication required to create predictions"
             )
 
+        # Validate organization_id parameter usage
+        if organization_id and current_user.role not in ["tenant_admin", "super_admin"]:
+            raise HTTPException(
+                status_code=403,
+                detail="Only tenant admins and super admins can create predictions in specific organizations"
+            )
+
+        # Determine access level and target organization
+        access_level, target_organization_id = determine_prediction_access(
+            current_user, organization_id, db
+        )
+
         if not file.filename.endswith(('.csv', '.xlsx')):
             raise HTTPException(
                 status_code=400,
                 detail="Only CSV and Excel files are supported"
             )
 
-        organization_context = get_organization_context(current_user)
-        access_level = get_user_access_level(current_user)
-        
-        if current_user.role == "super_admin":
-            final_org_id = None  # System-level predictions
-        elif current_user.organization_id:
-            final_org_id = current_user.organization_id  # Organization predictions
-        else:
-            final_org_id = None  # Personal predictions (no org)
+        # Use the determined access level and organization from above
         
         contents = await file.read()
         file_size = len(contents)
@@ -1308,7 +1354,7 @@ async def bulk_upload_quarterly_async(
         
         job_id = await celery_bulk_upload_service.create_bulk_upload_job(
             user_id=str(current_user.id),
-            organization_id=final_org_id,
+            organization_id=target_organization_id,
             job_type='quarterly',
             filename=file.filename,
             file_size=file_size,
@@ -1319,7 +1365,8 @@ async def bulk_upload_quarterly_async(
             job_id=job_id,
             data=data,
             user_id=str(current_user.id),
-            organization_id=final_org_id
+            organization_id=target_organization_id,
+            access_level=access_level
         )
         
         return {
@@ -2092,6 +2139,11 @@ async def debug_job_predictions(
 ):
     """Debug endpoint to help analyze prediction count discrepancies"""
     try:
+        # PRODUCTION SECURITY: Disable debug endpoints in production
+        import os
+        if os.getenv("ENVIRONMENT", "development").lower() == "production":
+            raise HTTPException(status_code=404, detail="Not found")
+            
         if not check_user_permissions(current_user, "user"):
             raise HTTPException(
                 status_code=403,
@@ -2198,6 +2250,11 @@ async def debug_worker_health(
 ):
     """Debug endpoint to test worker health and parameter passing"""
     try:
+        # PRODUCTION SECURITY: Disable debug endpoints in production
+        import os
+        if os.getenv("ENVIRONMENT", "development").lower() == "production":
+            raise HTTPException(status_code=404, detail="Not found")
+            
         from app.workers.tasks import health_check_task
         import time
         
@@ -3592,6 +3649,11 @@ async def debug_prediction_ownership(
 ):
     """Debug endpoint to check prediction ownership details"""
     try:
+        # PRODUCTION SECURITY: Disable debug endpoints in production
+        import os
+        if os.getenv("ENVIRONMENT", "development").lower() == "production":
+            raise HTTPException(status_code=404, detail="Not found")
+            
         prediction = db.query(AnnualPrediction).filter(AnnualPrediction.id == prediction_id).first()
         
         if not prediction:

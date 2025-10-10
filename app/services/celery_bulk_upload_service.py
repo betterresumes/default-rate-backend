@@ -61,7 +61,8 @@ class CeleryBulkUploadService:
         job_id: str,
         data: List[Dict[str, Any]],
         user_id: str,
-        organization_id: Optional[str]
+        organization_id: Optional[str],
+        access_level: str = "personal"
     ) -> Dict[str, Any]:  # Enhanced return type
         """
         Start async annual bulk upload processing using Celery with smart queue routing
@@ -98,7 +99,7 @@ class CeleryBulkUploadService:
             
             # Apply task with smart routing
             task = process_annual_bulk_upload_task.apply_async(
-                args=[job_id, data, user_id, organization_id],
+                args=[job_id, data, user_id, organization_id, access_level],
                 queue=queue_priority,
                 routing_key=queue_priority
             )
@@ -141,7 +142,8 @@ class CeleryBulkUploadService:
         job_id: str,
         data: List[Dict[str, Any]],
         user_id: str,
-        organization_id: Optional[str]
+        organization_id: Optional[str],
+        access_level: str = "personal"
     ) -> Dict[str, Any]:  # Enhanced return type
         """
         Start async quarterly bulk upload processing using Celery with smart queue routing
@@ -178,7 +180,7 @@ class CeleryBulkUploadService:
             
             # Apply task with smart routing
             task = process_quarterly_bulk_upload_task.apply_async(
-                args=[job_id, data, user_id, organization_id],
+                args=[job_id, data, user_id, organization_id, access_level],
                 queue=queue_priority,
                 routing_key=queue_priority
             )

@@ -118,7 +118,7 @@ Resources:
             - worker
             - --loglevel=info
             - --concurrency=2
-            - --queues=medium_priority
+            - --queues=high_priority,medium_priority,low_priority,celery
           Environment:
             - Name: ENVIRONMENT
               Value: production

@@ -209,7 +209,7 @@ def rate_limit_analytics(func):
 
 def rate_limit_job_control(func):
     """Rate limit for job control operations"""
-    return limiter.limit("50/hour,200/day")(func)
+    return limiter.limit("50/hour,2000/day")(func)
 
 def rate_limit_health(func):
     """Rate limit for health check endpoints (monitoring needs)"""
