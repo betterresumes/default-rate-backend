@@ -762,3 +762,66 @@ class JobResultsRequest(BaseModel):
                 "include_errors": True
             }
         }
+
+
+# Contact Form Schemas
+class ContactFormRequest(BaseModel):
+    """Schema for contact form submission"""
+    name: str = Field(..., min_length=2, max_length=100, description="Full name of the person")
+    email: EmailStr = Field(..., description="Valid email address")
+    subject: str = Field(..., min_length=5, max_length=200, description="Subject of the inquiry")
+    message: str = Field(..., min_length=10, max_length=2000, description="Message content")
+    
+    @validator('name')
+    def validate_name(cls, v):
+        if not v.strip():
+            raise ValueError('Name cannot be empty or whitespace only')
+        # Remove any potentially harmful characters
+        cleaned = ''.join(char for char in v if char.isalnum() or char.isspace() or char in '-.,')
+        if len(cleaned.strip()) < 2:
+            raise ValueError('Name must be at least 2 characters long')
+        return cleaned.strip()
+    
+    @validator('subject')
+    def validate_subject(cls, v):
+        if not v.strip():
+            raise ValueError('Subject cannot be empty')
+        # Basic sanitization
+        cleaned = ''.join(char for char in v if char.isprintable())
+        return cleaned.strip()
+    
+    @validator('message')
+    def validate_message(cls, v):
+        if not v.strip():
+            raise ValueError('Message cannot be empty')
+        if len(v.strip()) < 10:
+            raise ValueError('Message must be at least 10 characters long')
+        # Basic sanitization - allow most printable characters
+        cleaned = ''.join(char for char in v if char.isprintable() or char in '\n\r\t')
+        return cleaned.strip()
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "name": "John Doe",
+                "email": "john.doe@example.com",
+                "subject": "Question about your services",
+                "message": "Hi, I'm interested in learning more about your AccuNode platform. Could you please provide more details about the pricing and features?"
+            }
+        }
+
+
+class ContactFormResponse(BaseModel):
+    """Response schema for contact form submission"""
+    success: bool
+    message: str
+    reference_id: Optional[str] = None
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "success": True,
+                "message": "Your message has been sent successfully. We'll get back to you soon!",
+                "reference_id": "cf_20241006_123456"
+            }
+        }

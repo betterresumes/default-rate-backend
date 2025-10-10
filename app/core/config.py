@@ -99,6 +99,20 @@ class Config:
     # AWS-compatible database URL with Parameter Store fallback
     DATABASE_URL: str = get_parameter_store_value("/accunode/database-url", os.getenv("DATABASE_URL", ""))
     
+    # Email Configuration
+    SMTP_HOST: str = get_parameter_store_value("/accunode/smtp-host", os.getenv("SMTP_HOST", "smtp.gmail.com"))
+    SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
+    SMTP_USERNAME: str = get_parameter_store_value("/accunode/smtp-username", os.getenv("SMTP_USERNAME", ""))
+    SMTP_PASSWORD: str = get_parameter_store_value("/accunode/smtp-password", os.getenv("SMTP_PASSWORD", ""))
+    SMTP_TLS: bool = os.getenv("SMTP_TLS", "true").lower() == "true"
+    SMTP_SSL: bool = os.getenv("SMTP_SSL", "false").lower() == "true"
+    
+    # Email settings
+    EMAIL_FROM: str = os.getenv("EMAIL_FROM", "noreply@accunode.ai")
+    EMAIL_FROM_NAME: str = os.getenv("EMAIL_FROM_NAME", "AccuNode Contact")
+    EMAIL_TO: str = os.getenv("EMAIL_TO", "contact@accunode.ai")  # Where contact form emails go
+    EMAIL_SUBJECT_PREFIX: str = os.getenv("EMAIL_SUBJECT_PREFIX", "[AccuNode Contact]")
+    
     # Redis Configuration
     REDIS_URL: str = get_parameter_store_value("/accunode/redis-url", os.getenv("REDIS_URL", "redis://localhost:6379"))
     
