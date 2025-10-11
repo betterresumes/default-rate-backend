@@ -7,7 +7,7 @@ This script sets up everything needed for local development:
 2. Sets up sample tenant with organizations via API
 
 Usage:
-    python scripts/local/complete_local_setup.py
+    python scripts/development/complete_local_setup.py
 """
 
 import os

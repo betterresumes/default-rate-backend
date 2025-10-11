@@ -2,7 +2,7 @@
 """
 Local Tenant Setup via API for Development Environment
 
-Usage: python scripts/local/setup_tenant_local.py
+Usage: python scripts/database/local/setup_tenant_local.py
 """
 
 import requests

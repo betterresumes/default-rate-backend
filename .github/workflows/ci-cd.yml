@@ -249,7 +249,63 @@ jobs:
             exit 1
           fi
 
+      - name: Check if services are running before deployment
+        id: scaling-check
+        run: |
+          echo "🔍 Checking if services are running before deployment..."
+          
+          # Check current desired counts
+          API_DESIRED=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_API_SERVICE }} \
+            --query 'services[0].desiredCount' --output text)
+          
+          WORKER_DESIRED=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_WORKER_SERVICE }} \
+            --query 'services[0].desiredCount' --output text)
+          
+          # Check current running counts
+          API_RUNNING=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_API_SERVICE }} \
+            --query 'services[0].runningCount' --output text)
+          
+          WORKER_RUNNING=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_WORKER_SERVICE }} \
+            --query 'services[0].runningCount' --output text)
+          
+          echo "📊 Current service status:"
+          echo "  API Service:    Desired=$API_DESIRED, Running=$API_RUNNING"
+          echo "  Worker Service: Desired=$WORKER_DESIRED, Running=$WORKER_RUNNING"
+          
+          # Check if services are scaled down (desired count = 0)
+          if [ "$API_DESIRED" = "0" ] || [ "$WORKER_DESIRED" = "0" ]; then
+            echo ""
+            echo "🛑 **DEPLOYMENT SKIPPED** - Services are currently scaled down"
+            echo "📋 Reasons for skipping deployment:"
+            echo "   • API Service desired count: $API_DESIRED"
+            echo "   • Worker Service desired count: $WORKER_DESIRED"
+            echo "   • Deploying to scaled-down services would update task definitions but not run new code"
+            echo ""
+            echo "🔄 **To deploy your code, first scale up the services:**"
+            echo "   ./scripts/scale-up.sh     # Scale up everything (recommended)"
+            echo "   ./scripts/quick-scale-up.sh     # Scale up ECS only (faster)"
+            echo ""
+            echo "⚠️  Then push your code again or manually trigger the deployment"
+            echo ""
+            echo "should-deploy=false" >> $GITHUB_OUTPUT
+            
+          else
+            echo ""
+            echo "✅ Services are running and ready for deployment!"
+            echo "🚀 Proceeding with deployment to running services"
+            echo "should-deploy=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: Create new task definitions with latest image
+        if: steps.scaling-check.outputs.should-deploy == 'true'
         run: |
           # Use local task definition files (which contain Parameter Store secrets)
           # instead of fetching from ECS to preserve secrets configuration
@@ -315,6 +371,7 @@ jobs:
           echo "✅ Task definitions updated successfully with Parameter Store secrets preserved"
 
       - name: Register new task definitions
+        if: steps.scaling-check.outputs.should-deploy == 'true'
         id: register-tasks
         run: |
           # Register API task definition
@@ -346,6 +403,7 @@ jobs:
           echo "worker-task-arn=$WORKER_TD_ARN" >> $GITHUB_OUTPUT
 
       - name: Deploy API Service
+        if: steps.scaling-check.outputs.should-deploy == 'true'
         run: |
           echo "🚀 Deploying API service with task definition: ${{ steps.register-tasks.outputs.api-task-arn }}"
           if aws ecs update-service \
@@ -360,6 +418,7 @@ jobs:
           fi
 
       - name: Deploy Worker Service  
+        if: steps.scaling-check.outputs.should-deploy == 'true'
         run: |
           echo "🚀 Deploying Worker service with task definition: ${{ steps.register-tasks.outputs.worker-task-arn }}"
           if aws ecs update-service \
@@ -374,6 +433,7 @@ jobs:
           fi
 
       - name: Wait for deployment completion
+        if: steps.scaling-check.outputs.should-deploy == 'true'
         run: |
           echo "⏳ Waiting for API service deployment to complete..."
           # Set custom wait configuration with longer timeout
@@ -404,6 +464,7 @@ jobs:
           }
 
       - name: Verify deployment health
+        if: steps.scaling-check.outputs.should-deploy == 'true'
         run: |
           echo "🔍 Verifying deployment health..."
           
@@ -457,8 +518,31 @@ jobs:
             echo "✅ Marking as successful - services will continue to stabilize"
           fi
 
+      - name: Deployment Skipped Summary
+        if: steps.scaling-check.outputs.should-deploy == 'false'
+        run: |
+          echo "🎯 **Deployment Summary for ${GITHUB_SHA:0:7}**"
+          echo "📦 Image Tag: prod-${GITHUB_SHA:0:7}"
+          echo "🎬 Triggered by: ${{ github.actor }}"
+          echo "🌐 Environment: Production"
+          echo "⏰ Completed: $(date)"
+          echo ""
+          echo "🛑 **Status: DEPLOYMENT SKIPPED**"
+          echo "📋 Reason: Services are currently scaled down (desired count = 0)"
+          echo ""
+          echo "🔄 **To deploy this code:**"
+          echo "1. Scale up your services:"
+          echo "   ./scripts/scale-up.sh     # Full scale up (recommended)"
+          echo "   ./scripts/quick-scale-up.sh     # ECS only (faster)"
+          echo ""
+          echo "2. Then either:"
+          echo "   • Push another commit to trigger automatic deployment"
+          echo "   • Manually trigger deployment via GitHub Actions"
+          echo ""
+          echo "✅ Your code image (prod-${GITHUB_SHA:0:7}) is built and ready in ECR!"
+
       - name: Deployment Summary
-        if: always()
+        if: steps.scaling-check.outputs.should-deploy == 'true'
         run: |
           echo "🎯 **Deployment Summary for ${GITHUB_SHA:0:7}**"
           echo "📦 Image Tag: prod-${GITHUB_SHA:0:7}"
@@ -473,6 +557,7 @@ jobs:
           echo "✅ **Production deployment completed successfully!**"
 
       - name: Create deployment summary
+        if: steps.scaling-check.outputs.should-deploy == 'true'
         run: |
           echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
@@ -480,6 +565,19 @@ jobs:
           echo "- **API Task Definition:** ${{ steps.register-tasks.outputs.api-task-arn }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Worker Task Definition:** ${{ steps.register-tasks.outputs.worker-task-arn }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Status:** ✅ Deployment Successful" >> $GITHUB_STEP_SUMMARY
+
+      - name: Create skipped deployment summary
+        if: steps.scaling-check.outputs.should-deploy == 'false'
+        run: |
+          echo "## 🛑 Deployment Skipped" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image Built:** ${{ env.NEW_IMAGE }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Reason:** Services are scaled down (desired count = 0)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ⚠️ Ready to deploy when services are scaled up" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔄 To Deploy This Code:" >> $GITHUB_STEP_SUMMARY
+          echo "1. **Scale up services:** \`./scripts/scale-up.sh\`" >> $GITHUB_STEP_SUMMARY
+          echo "2. **Push another commit** or **manually trigger deployment**" >> $GITHUB_STEP_SUMMARY
 
       - name: Cleanup temporary files
         if: always()

@@ -21,10 +21,10 @@ make start
 ### 2. Run Setup Scripts
 ```bash
 # Step 1: Create super admin
-python scripts/local/setup_super_admin_local.py
+python scripts/database/local/setup_super_admin_local.py
 
 # Step 2: Create tenant and organizations  
-python scripts/local/setup_tenant_local.py
+python scripts/database/local/setup_tenant_local.py
 ```
 
 Or use the complete setup (if starting fresh):
@@ -39,19 +39,19 @@ That's it! Your local development environment is ready.
 ### `complete_local_setup.py` (Recommended)
 **The easiest way** - runs everything in sequence:
 ```bash
-python scripts/local/complete_local_setup.py
+python scripts/development/complete_local_setup.py
 ```
 
 ### `setup_super_admin_local.py` 
 Creates database schema and super admin:
 ```bash
-python scripts/local/setup_super_admin_local.py
+python scripts/database/local/setup_super_admin_local.py
 ```
 
 ### `setup_tenant_local.py`
 Sets up sample tenant via API (requires super admin to exist):
 ```bash
-python scripts/local/setup_tenant_local.py
+python scripts/database/local/setup_tenant_local.py
 ```
 
 ## 🔑 Default Credentials
@@ -184,7 +184,7 @@ docker restart accunode-postgres-dev
 ### "Authentication failed"
 Make sure you run the database setup first:
 ```bash
-python scripts/local/setup_super_admin_local.py
+python scripts/database/local/setup_super_admin_local.py
 ```
 
 ## 🔄 Reset Everything
@@ -202,7 +202,7 @@ docker volume rm backend_postgres_data backend_redis_data
 make start
 
 # Run setup again
-python scripts/local/complete_local_setup.py
+python scripts/development/complete_local_setup.py
 ```
 
 ## 📈 Development Workflow
@@ -210,7 +210,7 @@ python scripts/local/complete_local_setup.py
 1. **Start Development:**
    ```bash
    make start
-   python scripts/local/complete_local_setup.py
+   python scripts/development/complete_local_setup.py
    ```
 
 2. **Make Code Changes:**

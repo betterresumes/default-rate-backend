@@ -3,7 +3,7 @@
 Local Super Admin Setup Script for Development Environment
 
 Usage:
-    python scripts/local/setup_super_admin_local.py
+    python scripts/database/local/setup_super_admin_local.py
 
 Features:
 - Create super admin for local development

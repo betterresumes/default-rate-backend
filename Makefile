@@ -18,7 +18,7 @@ help: ## Show this help message
 
 setup: ## 🛠️  Initial setup of development environment
 	@echo -e "$(BLUE)Setting up development environment...$(NC)"
-	./scripts/local/dev-setup.sh
+	./scripts/development/dev-setup.sh
 
 start: ## 🚀 Start all development services
 	@echo -e "$(BLUE)Starting development services...$(NC)"
@@ -69,14 +69,14 @@ logs-db: ## 📋 View database logs only
 	fi
 
 db: ## 🗄️  Connect to development database
-	./scripts/local/dev-db.sh
+	./scripts/database/local/dev-db.sh
 
 test: ## 🧪 Run all tests
-	./scripts/local/dev-test.sh
+	./scripts/development/dev-test.sh
 
 init-local: ## 🏠 Initialize local development with sample data
 	@echo -e "$(BLUE)Setting up local development environment...$(NC)"
-	python3 scripts/local/complete_local_setup.py
+	python3 scripts/development/complete_local_setup.py
 	@echo -e "$(GREEN)✅ Local environment ready! API: http://localhost:8000/docs$(NC)"
 
 test-watch: ## 🧪 Run tests in watch mode
@@ -135,7 +135,7 @@ docs: ## 📖 Open development documentation
 # Production deployment helpers
 deploy-check: ## ✅ Check if ready for production deployment
 	@echo -e "$(BLUE)Checking deployment readiness...$(NC)"
-	@./scripts/local/dev-test.sh
+	@./scripts/development/dev-test.sh
 	@echo -e "$(GREEN)✅ Tests passed - ready for production!$(NC)"
 	@echo -e "$(YELLOW)💡 Next steps:$(NC)"
 	@echo -e "  1. git checkout prod"

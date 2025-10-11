@@ -45,7 +45,7 @@
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐            │
 │  │    RDS      │  │ElastiCache  │  │ Parameter   │            │
 │  │ PostgreSQL  │  │   Redis     │  │   Store     │            │
-│  │db.r5.xlarge │  │cache.r6g.xl │  │(Encrypted)  │            │
+│  │db.r5.small │  │cache.r6g.xl │  │(Encrypted)  │            │
 │  │  Multi-AZ   │  │  Clustered  │  │  Secrets    │            │
 │  │Encrypted    │  │ Encrypted   │  │ Management  │            │
 │  └─────────────┘  └─────────────┘  └─────────────┘            │
