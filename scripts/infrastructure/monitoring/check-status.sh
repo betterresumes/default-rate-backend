@@ -97,7 +97,13 @@ fi
 MONTHLY_COST=$(echo "$DAILY_COST * 30" | bc -l)
 
 echo ""
-echo "💵 Current Daily Cost: ~\$${DAILY_COST}"
-echo "💵 Current Monthly Cost: ~\$${MONTHLY_COST}"
+echo "💵 Current AccuNode Daily Cost: ~\$${DAILY_COST}"
+echo "💵 Current AccuNode Monthly Cost: ~\$${MONTHLY_COST}"
+echo ""
+echo "✅ Budget Update: AccuNode-Total-Budget now excludes non-project resources"
+echo "📧 Notifications sent to: accunodeai@gmail.com"
+echo ""
+echo "⚠️  Non-AccuNode resources found in us-west-1 (costing ~\$4.09/day)"
+echo "💡 Run './scripts/infrastructure/maintenance/cleanup-non-accunode-resources.sh' to review cleanup options"
 echo ""
 echo "📊 Run this script anytime to check current status and IPs!"
